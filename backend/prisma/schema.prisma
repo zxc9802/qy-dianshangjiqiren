@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  phone         String   @unique
+  passwordHash  String   @map("password_hash")
+  nickname      String   @default("")
+  avatar        String   @default("")
+  pointsBalance Int      @default(0) @map("points_balance")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  conversations      Conversation[]
+  pointsTransactions PointsTransaction[]
+  workflows          Workflow[]
+  invitationsSent    Invitation[]        @relation("Inviter")
+  invitationsReceived Invitation[]       @relation("Invitee")
+
+  @@map("users")
+}
+
+model Bot {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  category     String
+  icon         String   @default("")
+  description  String   @default("")
+  systemPrompt String   @map("system_prompt") @db.Text
+  pointsPerUse Int      @default(5) @map("points_per_use")
+  sortOrder    Int      @default(0) @map("sort_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  conversations Conversation[]
+
+  @@map("bots")
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  botId       String   @map("bot_id")
+  title       String   @default("")
+  isFavorited Boolean  @default(false) @map("is_favorited")
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id])
+  bot      Bot       @relation(fields: [botId], references: [id])
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  role           String   // "user" | "assistant"
+  content        String   @db.Text
+  inputType      String   @default("text") @map("input_type") // "text" | "voice" | "file"
+  suggestions    String?  @db.Text // JSON string of suggestion buttons
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments  Attachment[]
+
+  @@map("messages")
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  messageId  String   @map("message_id")
+  fileType   String   @map("file_type")
+  fileUrl    String   @map("file_url")
+  fileName   String   @map("file_name")
+  fileSize   Int      @map("file_size")
+  parsedText String?  @map("parsed_text") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+model Workflow {
+  id          String   @id @default(uuid())
+  name        String
+  description String   @default("")
+  botChain    String   @map("bot_chain") @db.Text // JSON array of bot IDs
+  isPreset    Boolean  @default(false) @map("is_preset")
+  userId      String?  @map("user_id")
+  totalPoints Int      @default(0) @map("total_points")
+  usageCount  Int      @default(0) @map("usage_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("workflows")
+}
+
+model PointsTransaction {
+  id                    String   @id @default(uuid())
+  userId                String   @map("user_id")
+  type                  String   // "recharge" | "consume" | "reward" | "redeem"
+  amount                Int
+  balanceAfter          Int      @map("balance_after")
+  description           String   @default("")
+  relatedConversationId String?  @map("related_conversation_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("points_transactions")
+}
+
+model RedeemCode {
+  id           String    @id @default(uuid())
+  code         String    @unique
+  pointsAmount Int       @map("points_amount")
+  isUsed       Boolean   @default(false) @map("is_used")
+  usedBy       String?   @map("used_by")
+  usedAt       DateTime? @map("used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@map("redeem_codes")
+}
+
+model Invitation {
+  id           String   @id @default(uuid())
+  inviterId    String   @map("inviter_id")
+  inviteeId    String   @map("invitee_id")
+  rewardPoints Int      @default(30) @map("reward_points")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  inviter User @relation("Inviter", fields: [inviterId], references: [id])
+  invitee User @relation("Invitee", fields: [inviteeId], references: [id])
+
+  @@map("invitations")
+}
