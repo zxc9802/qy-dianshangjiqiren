@@ -118,6 +118,22 @@
     color: var(--color-danger);
 }
 
+
+.chatSidebarAction {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.chatSidebarAction:hover {
+    opacity: 1;
+    background: var(--color-accent);
+}
 /* Sidebar toggle in header */
 .sidebarToggleBtn {
     width: 36px;

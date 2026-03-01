@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import html2canvas from 'html2canvas';
 
 interface ReportData {
     title: string;
@@ -18,6 +19,10 @@ interface ReportData {
 
 export default function ReportPage() {
     const [report, setReport] = useState<ReportData | null>(null);
+    const [chatOpen, setChatOpen] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const pageRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const raw = localStorage.getItem('__report_data__');
@@ -26,7 +31,39 @@ export default function ReportPage() {
                 setReport(JSON.parse(raw));
             } catch { /* ignore */ }
         }
+        setLoading(false);
     }, []);
+
+    const saveAsImage = async () => {
+        if (!pageRef.current) return;
+        setSaving(true);
+        try {
+            const canvas = await html2canvas(pageRef.current, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#f8fafc',
+                windowWidth: 1200,
+            });
+            const link = document.createElement('a');
+            link.download = `${report?.title || '分析报告'}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        } catch {
+            alert('保存失败，请重试');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'system-ui', color: '#64748b', gap: 12 }}>
+                <div style={{ width: 32, height: 32, border: '3px solid #e2e8f0', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <p>报告加载中...</p>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+        );
+    }
 
     if (!report) {
         return (
@@ -84,18 +121,19 @@ export default function ReportPage() {
             background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f1f5f9 100%)',
             fontFamily: "'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
             color: '#1e293b',
-        }}>
-            {/* Print button fixed */}
+        }} ref={pageRef}>
+            {/* Save button fixed */}
             <div style={{
                 position: 'fixed', top: 20, right: 20, zIndex: 100,
                 display: 'flex', gap: 8,
             }} className="no-print">
-                <button onClick={() => window.print()} style={{
+                <button onClick={saveAsImage} disabled={saving} style={{
                     padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer',
                     background: '#3b82f6', color: '#fff', fontWeight: 600, fontSize: 14,
                     boxShadow: '0 4px 12px rgba(59,130,246,0.3)',
+                    opacity: saving ? 0.7 : 1,
                 }}>
-                    🖨️ 打印 / 下载PDF
+                    {saving ? '⏳ 保存中...' : '📸 保存长图'}
                 </button>
                 <button onClick={() => window.close()} style={{
                     padding: '10px 20px', borderRadius: 10, border: '1px solid #cbd5e1', cursor: 'pointer',
@@ -234,37 +272,54 @@ export default function ReportPage() {
                     }} dangerouslySetInnerHTML={{ __html: renderMarkdown(report.planSummary || '') }} />
                 </section>
 
-                {/* Chat History */}
                 <section style={{ marginBottom: 40 }}>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h2
+                        onClick={() => setChatOpen(!chatOpen)}
+                        style={{
+                            fontSize: 20, fontWeight: 700, marginBottom: 20,
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            cursor: 'pointer', userSelect: 'none',
+                        }}
+                    >
                         <span style={{ fontSize: 24 }}>💬</span> 原始对话记录
+                        <span style={{
+                            marginLeft: 'auto', fontSize: 14, color: '#94a3b8',
+                            transition: 'transform 0.3s ease',
+                            transform: chatOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        }}>▼</span>
                     </h2>
                     <div style={{
-                        background: '#fff', borderRadius: 14, padding: '24px',
-                        border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        maxHeight: chatOpen ? '100000px' : '0',
+                        overflow: 'hidden',
+                        transition: chatOpen ? 'max-height 0.5s ease-in' : 'max-height 0.3s ease-out',
                     }}>
-                        {report.chatHistory.filter(m => m.content?.trim()).map((msg, i) => (
-                            <div key={i} style={{
-                                display: 'flex', gap: 12, marginBottom: 16,
-                                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                            }}>
-                                <div style={{
-                                    width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: 14,
-                                    background: msg.role === 'user' ? '#dbeafe' : '#f1f5f9',
-                                    color: msg.role === 'user' ? '#2563eb' : '#64748b',
+                        <div style={{
+                            background: '#fff', borderRadius: 14, padding: '24px',
+                            border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                        }}>
+                            {report.chatHistory.filter(m => m.content?.trim()).map((msg, i) => (
+                                <div key={i} style={{
+                                    display: 'flex', gap: 12, marginBottom: 16,
+                                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
                                 }}>
-                                    {msg.role === 'user' ? '👤' : '🤖'}
+                                    <div style={{
+                                        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: 14,
+                                        background: msg.role === 'user' ? '#dbeafe' : '#f1f5f9',
+                                        color: msg.role === 'user' ? '#2563eb' : '#64748b',
+                                    }}>
+                                        {msg.role === 'user' ? '👤' : '🤖'}
+                                    </div>
+                                    <div style={{
+                                        maxWidth: '80%', padding: '10px 16px', borderRadius: 12,
+                                        fontSize: 13, lineHeight: 1.7, wordBreak: 'break-word',
+                                        background: msg.role === 'user' ? '#eff6ff' : '#f8fafc',
+                                        border: `1px solid ${msg.role === 'user' ? '#bfdbfe' : '#e2e8f0'}`,
+                                    }} dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                                 </div>
-                                <div style={{
-                                    maxWidth: '80%', padding: '10px 16px', borderRadius: 12,
-                                    fontSize: 13, lineHeight: 1.7, wordBreak: 'break-word',
-                                    background: msg.role === 'user' ? '#eff6ff' : '#f8fafc',
-                                    border: `1px solid ${msg.role === 'user' ? '#bfdbfe' : '#e2e8f0'}`,
-                                }} dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </section>
 

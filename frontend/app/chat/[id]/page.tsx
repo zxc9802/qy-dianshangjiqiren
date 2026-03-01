@@ -396,6 +396,38 @@ export default function ChatPage() {
     // All bot names for bot switcher
     const allBots = Object.entries(BOT_NAMES).map(([id, name]) => ({ id, name }));
 
+    // Report generation
+    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const generateReport = async () => {
+        if (messages.length < 3) {
+            alert('对话记录太少，至少需要一轮完整对话才能生成报告');
+            return;
+        }
+        setIsGeneratingReport(true);
+        try {
+            const res = await fetch('/api/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ botId, botName, messages }),
+            });
+            const data = await res.json();
+            if (data.error) {
+                alert('报告生成失败: ' + data.error);
+                return;
+            }
+            // Pass data + chat history to report page via localStorage
+            const reportPayload = { ...data, chatHistory: messages };
+            localStorage.setItem('__report_data__', JSON.stringify(reportPayload));
+            // Also save keyed by conversation ID for later access
+            localStorage.setItem(`report-${convIdRef.current}`, JSON.stringify(reportPayload));
+            window.open('/report', '_blank');
+        } catch {
+            alert('报告生成请求失败');
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
+
     return (
         <div className={styles.layout}>
             {/* Per-bot history sidebar */}
@@ -415,8 +447,22 @@ export default function ChatPage() {
                             <p className={styles.chatSidebarPreview}>
                                 {conv.messages[conv.messages.length - 1]?.content.slice(0, 30) || '新对话'}
                             </p>
-                            <span className={styles.chatSidebarTime}>{formatHistoryTime(conv.updatedAt)}</span>
-                            <button className={styles.chatSidebarDel} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}>🗑️</button>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                                <span className={styles.chatSidebarTime}>{formatHistoryTime(conv.updatedAt)}</span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    {typeof window !== 'undefined' && localStorage.getItem(`report-${conv.id}`) && (
+                                        <button className={styles.chatSidebarAction} style={{ color: '#3b82f6' }} onClick={(e) => {
+                                            e.stopPropagation();
+                                            const saved = localStorage.getItem(`report-${conv.id}`);
+                                            if (saved) {
+                                                localStorage.setItem('__report_data__', saved);
+                                                window.open('/report', '_blank');
+                                            }
+                                        }}>📊</button>
+                                    )}
+                                    <button className={styles.chatSidebarAction} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}>🗑️</button>
+                                </div>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -428,6 +474,9 @@ export default function ChatPage() {
                     <button onClick={startNewConversation} className={styles.newChatBtn}>+ 新对话</button>
                 </div>
                 <div className={styles.headerRight}>
+                    <button onClick={generateReport} className={styles.historyBtn} disabled={isGeneratingReport || isStreaming}>
+                        {isGeneratingReport ? '✨ 生成中...' : '📄 生成报告'}
+                    </button>
                     <button onClick={() => setSidebarOpen(!sidebarOpen)} className={styles.historyBtn}>📋 历史记录</button>
                     <div className={styles.botSwitcher}>
                         <h2 className={styles.botName} onClick={() => setBotSwitcherOpen(!botSwitcherOpen)}>
