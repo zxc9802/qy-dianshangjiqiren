@@ -605,40 +605,64 @@ function formatMessage(text: string): string {
     // Remove --- separators
     s = s.replace(/^---+$/gm, '');
 
-    // Parse tables
+    // Parse tables without injecting <br> inside table tags.
     const lines = s.split('\n');
+    const parts: string[] = [];
     let inTable = false;
-    const result: string[] = [];
+    let pendingBreaks = 0;
+
+    const flushBreaks = (maxBreaks = 2) => {
+        const count = Math.min(pendingBreaks, maxBreaks);
+        for (let i = 0; i < count; i++) {
+            parts.push('<br>');
+        }
+        pendingBreaks = 0;
+    };
 
     for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed.startsWith('|') && trimmed.includes('|')) {
+        const isTableLine = trimmed.startsWith('|') && trimmed.includes('|');
+
+        if (isTableLine) {
             const cells = trimmed.split('|').filter(c => c.trim()).map(c => c.trim());
             if (cells.every(c => /^[-:]+$/.test(c))) continue;
+
             if (!inTable) {
-                result.push('<table>');
+                // Keep table closer to preceding text.
+                pendingBreaks = Math.min(pendingBreaks, 1);
+                flushBreaks(1);
+                parts.push('<table>');
                 inTable = true;
             }
-            result.push('<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>');
-        } else {
-            if (inTable) {
-                result.push('</table>');
-                inTable = false;
-            }
-            result.push(line);
-        }
-    }
-    if (inTable) result.push('</table>');
 
-    // Join and clean up excessive blank lines
-    let html = result.join('<br>');
-    // Remove multiple consecutive <br>
-    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
-    // Remove <br> right before/after table
-    html = html.replace(/<br>\s*<table>/g, '<table>');
-    html = html.replace(/<\/table>\s*<br>/g, '</table>');
-    // Trim leading/trailing <br>
-    html = html.replace(/^(<br>\s*)+/, '').replace(/(<br>\s*)+$/, '');
+            parts.push('<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>');
+            continue;
+        }
+
+        if (inTable) {
+            parts.push('</table>');
+            inTable = false;
+            // Keep at least one break after table.
+            pendingBreaks = Math.max(pendingBreaks, 1);
+        }
+
+        if (!trimmed) {
+            pendingBreaks = Math.min(pendingBreaks + 1, 2);
+            continue;
+        }
+
+        flushBreaks(2);
+        parts.push(line);
+        pendingBreaks = 1;
+    }
+
+    if (inTable) {
+        parts.push('</table>');
+    }
+
+    const html = parts.join('')
+        .replace(/^(<br>\s*)+/, '')
+        .replace(/(<br>\s*)+$/, '');
 
     return html;
 }

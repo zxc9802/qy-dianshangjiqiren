@@ -322,11 +322,12 @@
 .msgContent table {
     border-collapse: collapse;
     width: 100%;
-    margin: 2px 0 20px 0;
+    margin: 4px 0 14px 0;
     font-size: 13px;
 }
 
-.msgContent table td {
+.msgContent td,
+.msgContent th {
     border: 1px solid var(--color-border);
     padding: 6px 10px;
     vertical-align: top;
@@ -339,19 +340,6 @@
 
 .msgContent strong {
     font-weight: 600;
-}
-
-.msgContent table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 8px 0;
-    font-size: 13px;
-}
-
-.msgContent td,
-.msgContent th {
-    border: 1px solid var(--color-border);
-    padding: 6px 10px;
 }
 
 /* Typing indicator */
