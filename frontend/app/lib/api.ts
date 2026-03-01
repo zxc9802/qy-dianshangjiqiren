@@ -1,5 +1,29 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
+function getApiOrigin(): string {
+    try {
+        const base = new URL(
+            API_BASE,
+            typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+        );
+        return base.origin;
+    } catch {
+        return '';
+    }
+}
+
+export function resolveImageAssetUrl(input: string): string {
+    if (!input) return input;
+    if (/^https?:\/\//i.test(input)) return input;
+
+    if (input.startsWith('/api/image-assets/')) {
+        const origin = getApiOrigin();
+        return origin ? `${origin}${input}` : input;
+    }
+
+    return input;
+}
+
 function getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('token');
@@ -7,33 +31,47 @@ function getToken(): string | null {
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     const token = getToken();
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
     const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
         ...((options.headers || {}) as Record<string, string>),
     };
+    if (!isFormData) headers['Content-Type'] = 'application/json';
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
-    const data = await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    const data = contentType.includes('application/json')
+        ? await res.json()
+        : await res.text();
 
     if (!res.ok) {
-        if (res.status === 401) {
+        if (res.status === 401 && typeof window !== 'undefined') {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             window.location.href = '/login';
         }
-        throw new Error(data.message || '请求失败');
+        const message = typeof data === 'string'
+            ? data
+            : data?.message || data?.error || 'Request failed';
+        throw new Error(message);
     }
 
-    return data;
+    return data as T;
 }
 
 export const api = {
     // Auth
-    register: (body: { phone: string; password: string; nickname?: string; inviteCode?: string }) =>
+    sendCode: (body: { email: string }) =>
+        request<{ success: boolean; message: string }>('/auth/send-code', { method: 'POST', body: JSON.stringify(body) }),
+
+    verifyCode: (body: { email: string; code: string }) =>
+        request<{ success: boolean; message: string }>('/auth/verify-code', { method: 'POST', body: JSON.stringify(body) }),
+
+    register: (body: { email: string; password: string; code: string; nickname?: string; inviteCode?: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
 
-    login: (body: { phone: string; password: string }) =>
+    login: (body: { email: string; password: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
 
     getMe: () => request<{ success: boolean; data: UserInfo }>('/auth/me'),
@@ -75,6 +113,37 @@ export const api = {
     recharge: (amount: number) =>
         request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points/recharge', { method: 'POST', body: JSON.stringify({ amount }) }),
 
+    // Image generations
+    generateImage: (formData: FormData) =>
+        request<{ success: boolean; data: ImageGenerationItem }>('/image-generations/generate', { method: 'POST', body: formData }),
+
+    getImageGenerations: (params?: { cursor?: string; limit?: number }) => {
+        const query: Record<string, string> = {};
+        if (params?.cursor) query.cursor = params.cursor;
+        if (typeof params?.limit === 'number') query.limit = String(params.limit);
+        const qs = new URLSearchParams(query).toString();
+        return request<{ success: boolean; data: ImageGenerationListResponse }>(`/image-generations${qs ? `?${qs}` : ''}`);
+    },
+
+    getImageGeneration: (id: string) =>
+        request<{ success: boolean; data: ImageGenerationItem }>(`/image-generations/${id}`),
+
+    deleteImageGeneration: (id: string) =>
+        request<{ success: boolean }>(`/image-generations/${id}`, { method: 'DELETE' }),
+
+    // Image prompt custom tags
+    getImagePromptTags: () =>
+        request<{ success: boolean; data: ImagePromptTagGroupResponse }>('/image-prompt-tags'),
+
+    createImagePromptTag: (body: CreateImagePromptTagRequest) =>
+        request<{ success: boolean; data: ImagePromptTagItem }>('/image-prompt-tags', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
+    deleteImagePromptTag: (id: string) =>
+        request<{ success: boolean; message?: string }>(`/image-prompt-tags/${id}`, { method: 'DELETE' }),
+
     // SSE streaming (returns EventSource URL)
     getMessageStreamUrl: (conversationId: string) => `${API_BASE}/conversations/${conversationId}/messages`,
 };
@@ -82,7 +151,7 @@ export const api = {
 // Types
 export interface UserInfo {
     id: string;
-    phone: string;
+    email: string;
     nickname: string;
     avatar: string;
     pointsBalance: number;
@@ -140,4 +209,57 @@ export interface PointsTransaction {
     balanceAfter: number;
     description: string;
     createdAt: string;
+}
+
+export interface ImageGenerationRequest {
+    prompt: string;
+    negativePrompt?: string;
+    aspectRatio?: string;
+    stylePreset?: string;
+    background?: string;
+    lighting?: string;
+    referenceStrength?: number;
+    count?: number;
+}
+
+export interface ImageGenerationItem {
+    id: string;
+    userId: string;
+    prompt: string;
+    negativePrompt: string | null;
+    aspectRatio: string;
+    imageSize: string;
+    stylePreset: string | null;
+    background: string | null;
+    lighting: string | null;
+    referenceStrength: number;
+    count: number;
+    referenceImagePath: string | null;
+    resultImagePaths: string[];
+    status: 'success' | 'partial' | 'failed' | string;
+    errorMessage: string | null;
+    createdAt: string;
+}
+
+export interface ImageGenerationListResponse {
+    items: ImageGenerationItem[];
+    nextCursor: string | null;
+}
+
+export interface ImagePromptTagItem {
+    id: string;
+    userId: string;
+    groupKey: string;
+    label: string;
+    createdAt: string;
+}
+
+export interface ImagePromptTagGroupResponse {
+    items: ImagePromptTagItem[];
+    grouped: Record<string, string[]>;
+}
+
+export interface CreateImagePromptTagRequest {
+    groupKey: string;
+    label: string;
 }

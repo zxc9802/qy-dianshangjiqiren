@@ -3,9 +3,21 @@ import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/error';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { z } from 'zod';
+import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../utils/systemPrompts';
 
 const router = Router();
 router.use(authMiddleware);
+
+function normalizeStreamUrl(rawUrl?: string): string {
+    let url = (rawUrl || 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent').trim();
+    url = url.replace(':generateContent', ':streamGenerateContent');
+
+    if (!/[?&]alt=sse(?:&|$)/.test(url)) {
+        url += url.includes('?') ? '&alt=sse' : '?alt=sse';
+    }
+
+    return url;
+}
 
 // 创建对话
 router.post('/', async (req: AuthRequest, res: Response) => {
@@ -103,7 +115,12 @@ router.post('/:id/messages', async (req: AuthRequest, res: Response) => {
     let fullResponse = '';
 
     try {
-        const apiUrl = `${process.env.AI_API_URL}?alt=sse`;
+        const apiUrl = normalizeStreamUrl(process.env.AI_API_URL);
+        const fallbackPrompt = `你是${conversation.bot.name}，请给出专业、结构化、可执行的建议。`;
+        const systemPrompt = isPlaceholderPrompt(conversation.bot.systemPrompt)
+            ? getSystemPromptBySortOrder(conversation.bot.sortOrder, fallbackPrompt)
+            : conversation.bot.systemPrompt;
+
         const apiResponse = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -112,7 +129,7 @@ router.post('/:id/messages', async (req: AuthRequest, res: Response) => {
             },
             body: JSON.stringify({
                 contents: apiMessages,
-                systemInstruction: { parts: [{ text: conversation.bot.systemPrompt }] },
+                systemInstruction: { parts: [{ text: systemPrompt }] },
                 generationConfig: { temperature: 0.8, topP: 0.95, maxOutputTokens: 8192 },
             }),
         });

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../stores/auth';
 import { useConversationsStore } from '../../stores/conversations';
+import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
 import styles from './chat.module.css';
 
 interface MessageItem {
@@ -334,50 +335,36 @@ export default function ChatPage() {
 
     // Voice input (ByteDance ASR via /api/voice)
     const [isRecording, setIsRecording] = useState(false);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mediaRecorderRef = useRef<any>(null);
-    const audioChunksRef = useRef<Blob[]>([]);
+    const pcmRecorderRef = useRef<Pcm16Recorder | null>(null);
 
     const toggleVoice = async () => {
         if (isRecording) {
-            // Stop recording
-            mediaRecorderRef.current?.stop();
             setIsRecording(false);
+            const recorder = pcmRecorderRef.current;
+            pcmRecorderRef.current = null;
+            if (!recorder) return;
+
+            try {
+                const audioBlob = await recorder.stop();
+                if (audioBlob.size < 1000) return;
+
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.wav');
+                const res = await fetch('/api/voice', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.text) {
+                    setInputText(prev => prev + data.text);
+                } else if (data.error) {
+                    alert('语音识别失败: ' + data.error);
+                }
+            } catch {
+                alert('语音识别请求失败');
+            }
             return;
         }
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            audioChunksRef.current = [];
-
-            mediaRecorder.ondataavailable = (e: BlobEvent) => {
-                if (e.data.size > 0) audioChunksRef.current.push(e.data);
-            };
-
-            mediaRecorder.onstop = async () => {
-                stream.getTracks().forEach(t => t.stop());
-                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-                if (audioBlob.size < 1000) return; // too short
-
-                try {
-                    const formData = new FormData();
-                    formData.append('audio', audioBlob, 'recording.webm');
-                    const res = await fetch('/api/voice', { method: 'POST', body: formData });
-                    const data = await res.json();
-                    if (data.text) {
-                        setInputText(prev => prev + data.text);
-                    } else if (data.error) {
-                        alert('语音识别失败: ' + data.error);
-                    }
-                } catch {
-                    alert('语音识别请求失败');
-                }
-            };
-
-            mediaRecorderRef.current = mediaRecorder;
-            mediaRecorder.start(250); // collect data every 250ms
+            pcmRecorderRef.current = await startPcm16kMonoRecorder();
             setIsRecording(true);
         } catch {
             alert('无法访问麦克风，请检查浏览器权限');
@@ -397,8 +384,13 @@ export default function ChatPage() {
     };
 
     const startNewConversation = () => {
-        router.push(`/chat/${botId}`);
-        window.location.reload();
+        convIdRef.current = `conv-${botId}-${Date.now()}`;
+        setMessages([{ id: 'welcome', role: 'assistant', content: welcomeMsg }]);
+        setInputText('');
+        setSuggestions([]);
+        setStreamingText('');
+        setIsStreaming(false);
+        setSidebarOpen(false);
     };
 
     // All bot names for bot switcher
@@ -411,7 +403,6 @@ export default function ChatPage() {
                 <div className={styles.chatSidebarHeader}>
                     <h3 className={styles.chatSidebarTitle}>💬 {botName} 对话记录</h3>
                 </div>
-                <button className={styles.newChatBtn} onClick={startNewConversation}>+ 新对话</button>
                 <div className={styles.chatSidebarList}>
                     {botConversations.length === 0 ? (
                         <div className={styles.chatSidebarEmpty}>暂无对话记录</div>
@@ -432,9 +423,12 @@ export default function ChatPage() {
             </aside>
 
             <header className={styles.header}>
-                <button onClick={() => setSidebarOpen(!sidebarOpen)} className={styles.sidebarToggleBtn}>☰</button>
-                <button onClick={() => router.push('/')} className={styles.backBtn}>← 返回</button>
-                <div className={styles.headerInfo}>
+                <div className={styles.headerLeft}>
+                    <button onClick={() => router.push('/')} className={styles.backBtn}>← 返回</button>
+                    <button onClick={startNewConversation} className={styles.newChatBtn}>+ 新对话</button>
+                </div>
+                <div className={styles.headerRight}>
+                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className={styles.historyBtn}>📋 历史记录</button>
                     <div className={styles.botSwitcher}>
                         <h2 className={styles.botName} onClick={() => setBotSwitcherOpen(!botSwitcherOpen)}>
                             {botName} <span className={styles.switchArrow}>▾</span>
@@ -455,8 +449,6 @@ export default function ChatPage() {
                             </div>
                         )}
                     </div>
-                </div>
-                <div className={styles.headerRight}>
                     <span className={styles.pointsBadge}>{user?.pointsBalance ?? 0} 积分</span>
                 </div>
             </header>
@@ -585,21 +577,44 @@ export default function ChatPage() {
 
 
 function formatMessage(text: string): string {
-    let html = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    let s = text;
 
-    // Simple table parsing
-    const lines = html.split('\n');
+    // Remove ```json suggestion blocks
+    s = s.replace(/```json[\s\S]*?\{"suggestions":[\s\S]*?\}[\s\S]*?```/g, '');
+
+    // Strip markdown headers (# ## ### etc) but keep the text
+    s = s.replace(/^#{1,6}\s*/gm, '');
+
+    // Collapse excessive blank lines (2+ empty lines → 1 empty line)
+    s = s.replace(/\n{3,}/g, '\n\n');
+    // Remove blank lines right before table rows
+    s = s.replace(/\n\n+(\|)/g, '\n$1');
+
+    // HTML-escape
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Bold
+    s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+    // Bullet lists: lines starting with * or - or •
+    s = s.replace(/^[\*\-\u2022]\s+/gm, '• ');
+
+    // Numbered lists: keep as-is but trim extra spaces
+    s = s.replace(/^(\d+[\.\)\u3001])\s+/gm, '$1 ');
+
+    // Remove --- separators
+    s = s.replace(/^---+$/gm, '');
+
+    // Parse tables
+    const lines = s.split('\n');
     let inTable = false;
     const result: string[] = [];
 
     for (const line of lines) {
-        if (line.includes('|') && line.trim().startsWith('|')) {
-            const cells = line.split('|').filter(c => c.trim()).map(c => c.trim());
-            if (cells.every(c => /^[-:]+$/.test(c))) continue; // separator row
+        const trimmed = line.trim();
+        if (trimmed.startsWith('|') && trimmed.includes('|')) {
+            const cells = trimmed.split('|').filter(c => c.trim()).map(c => c.trim());
+            if (cells.every(c => /^[-:]+$/.test(c))) continue;
             if (!inTable) {
                 result.push('<table>');
                 inTable = true;
@@ -615,5 +630,15 @@ function formatMessage(text: string): string {
     }
     if (inTable) result.push('</table>');
 
-    return result.join('<br>').replace(/<br><table>/g, '<table>').replace(/<\/table><br>/g, '</table>');
+    // Join and clean up excessive blank lines
+    let html = result.join('<br>');
+    // Remove multiple consecutive <br>
+    html = html.replace(/(<br>\s*){3,}/g, '<br><br>');
+    // Remove <br> right before/after table
+    html = html.replace(/<br>\s*<table>/g, '<table>');
+    html = html.replace(/<\/table>\s*<br>/g, '</table>');
+    // Trim leading/trailing <br>
+    html = html.replace(/^(<br>\s*)+/, '').replace(/(<br>\s*)+$/, '');
+
+    return html;
 }

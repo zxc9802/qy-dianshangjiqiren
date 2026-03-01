@@ -72,7 +72,7 @@ export default function ProfilePage() {
                         {user.nickname.slice(0, 1).toUpperCase()}
                     </div>
                     <h3 className={styles.sidebarName}>{user.nickname}</h3>
-                    <p className={styles.sidebarPhone}>{user.phone}</p>
+                    <p className={styles.sidebarPhone}>{user.email}</p>
                 </div>
 
                 <nav className={styles.sidebarNav}>
@@ -176,8 +176,8 @@ export default function ProfilePage() {
                                 )}
                             </div>
                             <div className={styles.settingRow}>
-                                <span className={styles.settingLabel}>手机号</span>
-                                <span className={styles.settingValue}>{user.phone}</span>
+                                <span className={styles.settingLabel}>邮箱</span>
+                                <span className={styles.settingValue}>{user.email}</span>
                             </div>
                         </div>
                     </>

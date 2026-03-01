@@ -1,12 +1,5 @@
 import { create } from 'zustand';
-
-interface UserInfo {
-    id: string;
-    phone: string;
-    nickname: string;
-    avatar: string;
-    pointsBalance: number;
-}
+import { api, UserInfo } from '../lib/api';
 
 interface AuthState {
     user: UserInfo | null;
@@ -14,8 +7,10 @@ interface AuthState {
     isLoading: boolean;
     isAuthenticated: boolean;
 
-    login: (phone: string, password: string) => Promise<void>;
-    register: (phone: string, password: string, nickname?: string) => Promise<void>;
+    login: (email: string, password: string) => Promise<void>;
+    register: (email: string, password: string, code: string, nickname?: string) => Promise<void>;
+    sendCode: (email: string) => Promise<void>;
+    verifyCode: (email: string, code: string) => Promise<void>;
     logout: () => void;
     loadUser: () => Promise<void>;
     updatePoints: (balance: number) => void;
@@ -27,34 +22,28 @@ export const useAuthStore = create<AuthState>((set) => ({
     isLoading: true,
     isAuthenticated: false,
 
-    login: async (phone, _password) => {
-        // Mock login - no backend needed
-        const user: UserInfo = {
-            id: 'mock-user-001',
-            phone,
-            nickname: `用户${phone.slice(-4)}`,
-            avatar: '',
-            pointsBalance: 500,
-        };
-        const token = 'mock-token-' + Date.now();
+    login: async (email, password) => {
+        const res = await api.login({ email, password });
+        const { token, user } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
         set({ user, token, isAuthenticated: true });
     },
 
-    register: async (phone, _password, nickname) => {
-        // Mock register
-        const user: UserInfo = {
-            id: 'mock-user-001',
-            phone,
-            nickname: nickname || `用户${phone.slice(-4)}`,
-            avatar: '',
-            pointsBalance: 500,
-        };
-        const token = 'mock-token-' + Date.now();
+    register: async (email, password, code, nickname) => {
+        const res = await api.register({ email, password, code, nickname });
+        const { token, user } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
         set({ user, token, isAuthenticated: true });
+    },
+
+    sendCode: async (email) => {
+        await api.sendCode({ email });
+    },
+
+    verifyCode: async (email, code) => {
+        await api.verifyCode({ email, code });
     },
 
     logout: () => {
@@ -66,15 +55,20 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     loadUser: async () => {
         const token = localStorage.getItem('token');
-        const userStr = localStorage.getItem('user');
-        if (token && userStr) {
-            try {
-                const user = JSON.parse(userStr);
-                set({ user, token, isAuthenticated: true, isLoading: false });
-                return;
-            } catch { /* ignore */ }
+        if (!token) {
+            set({ isLoading: false, isAuthenticated: false });
+            return;
         }
-        set({ isLoading: false, isAuthenticated: false });
+        try {
+            const res = await api.getMe();
+            const user = res.data;
+            localStorage.setItem('user', JSON.stringify(user));
+            set({ user, token, isAuthenticated: true, isLoading: false });
+        } catch {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            set({ isLoading: false, isAuthenticated: false });
+        }
     },
 
     updatePoints: (balance) => {

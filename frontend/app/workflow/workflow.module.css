@@ -1,6 +1,6 @@
 .container {
     min-height: 100vh;
-    background: var(--color-bg);
+    background: var(--color-background);
 }
 
 .header {
@@ -8,30 +8,32 @@
     align-items: center;
     gap: 16px;
     padding: 16px 24px;
-    background: var(--color-surface);
+    background: var(--color-card);
     border-bottom: 1px solid var(--color-border);
     position: sticky;
     top: 0;
     z-index: 10;
+    backdrop-filter: blur(12px) saturate(180%);
 }
 
 .backBtn {
     font-size: 14px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     padding: 6px 12px;
     border-radius: var(--radius-md);
-    transition: all var(--duration-fast);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .backBtn:hover {
-    background: var(--color-border-light);
-    color: var(--color-text);
+    background: var(--color-accent);
+    color: var(--color-foreground);
 }
 
 .title {
     font-size: 18px;
     font-weight: 600;
     flex: 1;
+    color: var(--color-foreground);
 }
 
 .headerRight {
@@ -46,7 +48,7 @@
 
 .subtitle {
     font-size: 15px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     margin-bottom: 24px;
 }
 
@@ -57,30 +59,47 @@
 }
 
 .templateCard {
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: 24px;
     cursor: pointer;
     transition: all var(--duration-normal) var(--ease-smooth);
     animation: fadeIn var(--duration-normal) var(--ease-smooth);
+    position: relative;
+}
+
+.templateCard::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0;
+    background: linear-gradient(135deg, hsla(var(--color-primary-raw), 0.04), transparent);
+    transition: opacity var(--duration-normal) var(--ease-smooth);
+    pointer-events: none;
 }
 
 .templateCard:hover {
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-md);
+    border-color: hsla(var(--color-primary-raw), 0.3);
+    box-shadow: var(--shadow-md), var(--shadow-glow);
     transform: translateY(-2px);
+}
+
+.templateCard:hover::after {
+    opacity: 1;
 }
 
 .templateName {
     font-size: 16px;
     font-weight: 600;
     margin-bottom: 8px;
+    color: var(--color-foreground);
 }
 
 .templateDesc {
     font-size: 13px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     margin-bottom: 16px;
     line-height: 1.5;
 }
@@ -104,7 +123,7 @@
 }
 
 .arrow {
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
     margin-left: 2px;
 }
 
@@ -119,28 +138,30 @@
 
 .backLink {
     font-size: 13px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
     margin-bottom: 12px;
     display: inline-block;
+    transition: color var(--duration-fast) var(--ease-smooth);
 }
 
 .backLink:hover {
-    color: var(--color-text);
+    color: var(--color-foreground);
 }
 
 .wfTitle {
     font-size: 20px;
     font-weight: 700;
     margin-bottom: 4px;
+    color: var(--color-foreground);
 }
 
 .wfDesc {
     font-size: 14px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
 }
 
 .inputSection {
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: 24px;
@@ -151,6 +172,7 @@
     font-weight: 500;
     display: block;
     margin-bottom: 10px;
+    color: var(--color-foreground);
 }
 
 .wfInput {
@@ -162,25 +184,35 @@
     resize: vertical;
     min-height: 80px;
     margin-bottom: 14px;
+    background: var(--color-card);
+    color: var(--color-foreground);
+}
+
+.wfInput:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px hsla(var(--color-primary-raw), 0.1);
 }
 
 .runBtn {
     padding: 12px 28px;
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-foreground);
     border-radius: var(--radius-md);
     font-weight: 600;
     font-size: 14px;
-    transition: all var(--duration-fast);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .runBtn:hover {
     background: var(--color-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
 }
 
 .runBtn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
 }
 
 .results {
@@ -190,7 +222,7 @@
 }
 
 .resultCard {
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
@@ -201,7 +233,7 @@
     align-items: center;
     gap: 12px;
     padding: 14px 20px;
-    background: var(--color-border-light);
+    background: var(--color-muted);
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -218,11 +250,12 @@
     font-size: 14px;
     font-weight: 500;
     flex: 1;
+    color: var(--color-foreground);
 }
 
 .statusBadge {
     font-size: 12px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
 }
 
 .done .statusBadge {
@@ -250,6 +283,7 @@
     font-size: 13px;
     line-height: 1.7;
     font-family: var(--font-sans);
+    color: var(--color-foreground);
 }
 
 @media (max-width: 768px) {

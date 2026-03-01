@@ -1,59 +1,113 @@
 import { NextRequest } from 'next/server';
+import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
+import { readServerEnv } from '../../lib/server-env';
 
-const API_URL = 'https://yunwu.ai/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse';
-const API_KEY = 'sk-JrZjjnwnrtkLV8i3v8K2TSV9CLTpmHqx0twPjDIjyGYfBuYO';
+const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse';
+const API_KEY = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY') || '';
 
-// Global rules appended to every bot's system prompt
 const GLOBAL_RULES = `
 # 全局交互规则
 
 ## 规则1：用户可随时提前结束对话
-- 用户在对话的任何阶段都可以选择跳过剩余提问，直接获取结果
-- 如果用户说"直接给我方案""够了""不用再问了"等类似表达，你应该立即基于已有信息输出最终结果
-- 信息不足的部分，你可以用行业常见做法或合理假设补充，并在输出中标注"[基于假设]"
+- 用户在对话任何阶段都可以跳过剩余提问，直接获取结果
+- 如果用户说“直接给我方案”“够了”“不用再问了”等表达，应立即基于已有信息输出最终结果
+- 信息不足时可用行业常见做法或合理假设补充，并在输出中标注 [基于假设]
 
 ## 规则2：每次回复末尾提供预设引导（前端按钮）
-- 每次回复后，在回复最末尾输出一个 JSON 块，前端会将其解析为可点击的按钮
-- 格式如下（必须严格遵守）：
+- 每次回复后，在最末尾输出一个 JSON 块，前端会解析成可点击按钮
+- 格式必须严格为：
 \`\`\`json
 {"suggestions": ["选项A的文字", "选项B的文字", "选项C的文字", "直接出方案"]}
 \`\`\`
-- 选项内容要贴合当前对话阶段，帮用户降低输入成本
-- 数量3-4个，始终保留一个"直接出方案"选项
+- 选项内容要贴合当前对话阶段，数量 3-4 个，并始终保留“直接出方案”
 
 ## 规则3：排版与格式
-- 回复要结构清晰，善用表格、加粗、分点列表来组织信息
-- 避免大段纯文字，每段不超过3-4行
-- 不要用emoji，保持专业干净的排版风格
-- 像一个合作伙伴一样和用户对话，不要说"我是XX"、"我会帮你分析"之类的话
-- 直接切入主题，根据用户的问题深入挖掘
+- 回复结构清晰，善用表格、加粗、分点列表
+- 避免大段纯文字，每段不超过 3-4 行
+- 除小红书相关机器人外，不使用 emoji
+- 像专业顾问一样直接切入问题，不要寒暄或自我介绍
 `;
 
-// Xiaohongshu bots can use emoji
 const XHS_GLOBAL_RULES = GLOBAL_RULES.replace(
-    '不要用emoji，保持专业干净的排版风格',
-    '可以适当使用emoji，符合小红书内容风格'
+    '除小红书相关机器人外，不使用 emoji',
+    '小红书相关机器人可以适当使用 emoji，符合平台内容风格'
 );
+
+function normalizeStreamUrl(rawUrl?: string): string {
+    let url = (rawUrl || DEFAULT_API_URL).trim();
+    url = url.replace(':generateContent', ':streamGenerateContent');
+
+    if (!/[?&]alt=sse(?:&|$)/.test(url)) {
+        url += url.includes('?') ? '&alt=sse' : '?alt=sse';
+    }
+
+    return url;
+}
+
+function parseSseLine(line: string): string[] {
+    if (!line.startsWith('data: ')) return [];
+
+    const jsonStr = line.slice(6).trim();
+    if (!jsonStr || jsonStr === '[DONE]') return [];
+
+    try {
+        const data = JSON.parse(jsonStr);
+        const parts = data?.candidates?.[0]?.content?.parts;
+        if (!Array.isArray(parts)) return [];
+
+        return parts
+            .filter((part: { text?: string; thought?: boolean }) => !part?.thought && typeof part?.text === 'string')
+            .map((part: { text: string }) => part.text);
+    } catch {
+        return [];
+    }
+}
 
 export async function POST(req: NextRequest) {
     try {
-        const { botId, systemPrompt, messages } = await req.json();
+        if (!API_KEY) {
+            return new Response(JSON.stringify({ error: 'Missing chat API key configuration' }), {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
 
-        // Determine if this is a Xiaohongshu bot (IDs 15-22)
-        const id = parseInt(botId);
-        const isXhs = id >= 15 && id <= 22;
-        const fullSystemPrompt = systemPrompt + (isXhs ? XHS_GLOBAL_RULES : GLOBAL_RULES);
+        const { botId, systemPrompt, messages, message, conversationHistory } = await req.json();
+        const botIdString = String(botId ?? '');
+        const fallbackPrompt = typeof systemPrompt === 'string' && systemPrompt.trim()
+            ? systemPrompt.trim()
+            : '你是一个AI助手。';
 
-        // Build Gemini contents from message history
-        const contents = messages.map((msg: { role: string; content: string }) => ({
-            role: msg.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: msg.content }],
-        }));
+        const id = Number(botIdString);
+        const isXhs = Number.isFinite(id) && id >= 15 && id <= 22;
+        const promptFromDocs = getSystemPromptByBotId(botIdString, fallbackPrompt);
+        const fullSystemPrompt = `${promptFromDocs}\n\n${isXhs ? XHS_GLOBAL_RULES : GLOBAL_RULES}`.trim();
 
-        const res = await fetch(API_URL, {
+        const normalizedMessages = Array.isArray(messages)
+            ? messages
+            : [
+                ...(Array.isArray(conversationHistory) ? conversationHistory : []),
+                ...(typeof message === 'string' && message.trim() ? [{ role: 'user', content: message }] : []),
+            ];
+        const contents = normalizedMessages
+            .filter((msg: { role?: string; content?: string }) => typeof msg?.content === 'string' && msg.content.trim().length > 0)
+            .map((msg: { role: string; content: string }) => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }],
+            }));
+
+        if (contents.length === 0) {
+            return new Response(JSON.stringify({ error: 'messages is required' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
+        const upstream = await fetch(apiUrl, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${API_KEY}`,
+                Authorization: `Bearer ${API_KEY}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -68,46 +122,42 @@ export async function POST(req: NextRequest) {
             }),
         });
 
-        if (!res.ok) {
-            const errText = await res.text();
+        if (!upstream.ok) {
+            const errText = await upstream.text();
             return new Response(JSON.stringify({ error: errText }), {
-                status: res.status,
+                status: upstream.status,
                 headers: { 'Content-Type': 'application/json' },
             });
         }
 
-        // Stream the response back to the client
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             async start(controller) {
-                const reader = res.body!.getReader();
+                const reader = upstream.body!.getReader();
                 const decoder = new TextDecoder();
+                let pending = '';
 
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
 
-                        const chunk = decoder.decode(value, { stream: true });
-                        for (const line of chunk.split('\n')) {
-                            if (!line.startsWith('data: ')) continue;
-                            const jsonStr = line.slice(6).trim();
-                            if (!jsonStr || jsonStr === '[DONE]') continue;
+                        pending += decoder.decode(value, { stream: true });
+                        const lines = pending.split('\n');
+                        pending = lines.pop() || '';
 
-                            try {
-                                const data = JSON.parse(jsonStr);
-                                const parts = data?.candidates?.[0]?.content?.parts;
-                                if (!parts) continue;
-
-                                for (const part of parts) {
-                                    if (part.thought) continue; // Skip thinking tokens
-                                    if (part.text) {
-                                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: part.text })}\n\n`));
-                                    }
-                                }
-                            } catch {
-                                // Skip unparseable chunks
+                        for (const line of lines) {
+                            const texts = parseSseLine(line.trim());
+                            for (const text of texts) {
+                                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
                             }
+                        }
+                    }
+
+                    if (pending.trim()) {
+                        const texts = parseSseLine(pending.trim());
+                        for (const text of texts) {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
                         }
                     }
 
@@ -125,7 +175,7 @@ export async function POST(req: NextRequest) {
             headers: {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
+                Connection: 'keep-alive',
             },
         });
     } catch (err) {

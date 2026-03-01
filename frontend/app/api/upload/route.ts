@@ -1,27 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readServerEnv } from '../../lib/server-env';
 
-const API_URL = 'https://yunwu.ai/v1beta/models/gemini-2.5-pro:generateContent';
-const API_KEY = 'sk-JrZjjnwnrtkLV8i3v8K2TSV9CLTpmHqx0twPjDIjyGYfBuYO';
+const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:generateContent';
+const API_KEY = readServerEnv('YUNWU_UPLOAD_API_KEY') || readServerEnv('AI_API_KEY') || '';
 
 const MIME_MAP: Record<string, string> = {
-    'pdf': 'application/pdf',
-    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'doc': 'application/msword',
-    'txt': 'text/plain',
-    'md': 'text/markdown',
-    'csv': 'text/csv',
-    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'gif': 'image/gif',
-    'webp': 'image/webp',
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    txt: 'text/plain',
+    md: 'text/markdown',
+    csv: 'text/csv',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
 };
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 
+function normalizeGenerateUrl(rawUrl?: string): string {
+    let url = (rawUrl || DEFAULT_API_URL).trim();
+    url = url.replace(':streamGenerateContent', ':generateContent');
+
+    try {
+        const parsed = new URL(url);
+        parsed.searchParams.delete('alt');
+        return parsed.toString();
+    } catch {
+        return url.replace('?alt=sse', '').replace('&alt=sse', '');
+    }
+}
+
 export async function POST(req: NextRequest) {
     try {
+        if (!API_KEY) {
+            return NextResponse.json({ error: 'Missing upload API key configuration' }, { status: 500 });
+        }
+
         const formData = await req.formData();
         const file = formData.get('file') as File;
 
@@ -43,15 +61,14 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Convert file to base64
         const buffer = Buffer.from(await file.arrayBuffer());
         const base64Data = buffer.toString('base64');
 
-        // Send to Gemini with inline data
-        const res = await fetch(API_URL, {
+        const apiUrl = normalizeGenerateUrl(readServerEnv('YUNWU_UPLOAD_API_URL') || readServerEnv('AI_API_URL'));
+        const upstream = await fetch(apiUrl, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${API_KEY}`,
+                Authorization: `Bearer ${API_KEY}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -67,7 +84,7 @@ export async function POST(req: NextRequest) {
                         {
                             text: IMAGE_EXTS.has(ext)
                                 ? '请详细描述这张图片的内容，包括画面中的文字、物体、布局、颜色等所有视觉信息。'
-                                : '请阅读这个文件，提取其中的全部文字内容，原样输出，不要添加任何额外的解释或总结。如果文件中有表格，请用markdown表格格式输出。',
+                                : '请阅读这个文件，提取其中的全部文字内容，原样输出，不要添加任何额外解释或总结。如有表格，请用 markdown 表格格式输出。',
                         },
                     ],
                 }],
@@ -78,19 +95,19 @@ export async function POST(req: NextRequest) {
             }),
         });
 
-        if (!res.ok) {
-            const errText = await res.text();
+        if (!upstream.ok) {
+            const errText = await upstream.text();
             console.error('Gemini file read error:', errText);
             return NextResponse.json({ error: '文件解析失败' }, { status: 500 });
         }
 
-        const data = await res.json();
+        const data = await upstream.json();
         const parts = data?.candidates?.[0]?.content?.parts;
         let extractedText = '';
 
-        if (parts) {
+        if (Array.isArray(parts)) {
             for (const part of parts) {
-                if (part.text) extractedText += part.text;
+                if (part?.text) extractedText += part.text;
             }
         }
 

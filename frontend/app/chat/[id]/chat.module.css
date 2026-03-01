@@ -2,7 +2,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: #f0f2f5;
+    background: var(--color-background);
 }
 
 /* Per-bot history sidebar */
@@ -12,29 +12,30 @@
     left: 0;
     bottom: 0;
     width: 260px;
-    background: var(--color-surface);
+    background: var(--color-card);
     border-right: 1px solid var(--color-border);
     display: flex;
     flex-direction: column;
     z-index: 300;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    transition: transform 0.25s var(--ease-smooth);
     box-shadow: none;
 }
 
 .chatSidebarOpen {
     transform: translateX(0);
-    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1);
 }
 
 .chatSidebarHeader {
     padding: 16px;
-    border-bottom: 1px solid var(--color-border-light);
+    border-bottom: 1px solid var(--color-border);
 }
 
 .chatSidebarTitle {
     font-size: 14px;
     font-weight: 600;
+    color: var(--color-foreground);
 }
 
 .newChatBtn {
@@ -45,7 +46,7 @@
     color: var(--color-primary);
     border: 1px dashed var(--color-primary);
     border-radius: var(--radius-md);
-    transition: all var(--duration-fast);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .newChatBtn:hover {
@@ -62,7 +63,7 @@
     padding: 40px 16px;
     text-align: center;
     font-size: 13px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
 }
 
 .chatSidebarItem {
@@ -71,11 +72,11 @@
     cursor: pointer;
     margin-bottom: 2px;
     position: relative;
-    transition: background var(--duration-fast);
+    transition: background var(--duration-fast) var(--ease-smooth);
 }
 
 .chatSidebarItem:hover {
-    background: var(--color-border-light);
+    background: var(--color-accent);
 }
 
 .chatSidebarItemActive {
@@ -85,7 +86,7 @@
 
 .chatSidebarPreview {
     font-size: 13px;
-    color: var(--color-text);
+    color: var(--color-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -94,7 +95,7 @@
 
 .chatSidebarTime {
     font-size: 11px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
     margin-top: 2px;
     display: block;
 }
@@ -105,8 +106,8 @@
     right: 8px;
     font-size: 12px;
     opacity: 0;
-    color: var(--color-text-muted);
-    transition: opacity var(--duration-fast);
+    color: var(--color-muted-foreground);
+    transition: opacity var(--duration-fast) var(--ease-smooth);
 }
 
 .chatSidebarItem:hover .chatSidebarDel {
@@ -126,13 +127,13 @@
     justify-content: center;
     border-radius: var(--radius-md);
     font-size: 18px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     margin-right: 4px;
-    transition: all var(--duration-fast);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .sidebarToggleBtn:hover {
-    background: var(--color-border-light);
+    background: var(--color-accent);
 }
 
 /* Bot switcher */
@@ -147,11 +148,12 @@
     display: flex;
     align-items: center;
     gap: 4px;
+    color: var(--color-foreground);
 }
 
 .switchArrow {
     font-size: 12px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
 }
 
 .switcherDropdown {
@@ -161,13 +163,13 @@
     transform: translateX(-50%);
     width: 240px;
     max-height: 360px;
-    background: var(--color-surface);
+    background: var(--color-popover);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     z-index: 400;
     overflow: hidden;
-    animation: fadeIn var(--duration-fast);
+    animation: scaleIn var(--duration-fast) var(--ease-spring);
 }
 
 .switcherList {
@@ -183,12 +185,12 @@
     padding: 8px 14px;
     font-size: 13px;
     border-radius: var(--radius-sm);
-    color: var(--color-text);
-    transition: background var(--duration-fast);
+    color: var(--color-foreground);
+    transition: background var(--duration-fast) var(--ease-smooth);
 }
 
 .switcherItem:hover {
-    background: var(--color-border-light);
+    background: var(--color-accent);
 }
 
 .switcherItemActive {
@@ -201,40 +203,55 @@
 .header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 0 var(--space-lg);
     height: var(--header-height);
-    background: var(--color-surface);
+    background: var(--color-card);
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
+}
+
+.headerLeft {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .backBtn {
     padding: 6px 14px;
     border-radius: var(--radius-full);
     font-size: 14px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     border: 1px solid var(--color-border);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .backBtn:hover {
-    background: var(--color-bg);
-    color: var(--color-text);
-}
-
-.headerInfo {
-    flex: 1;
-    text-align: center;
-}
-
-.botName {
-    font-size: 16px;
-    font-weight: 700;
+    background: var(--color-accent);
+    color: var(--color-foreground);
 }
 
 .headerRight {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+}
+
+.historyBtn {
+    padding: 6px 14px;
+    border-radius: var(--radius-full);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-muted-foreground);
+    border: 1px solid var(--color-border);
+    transition: all var(--duration-fast) var(--ease-smooth);
+    white-space: nowrap;
+}
+
+.historyBtn:hover {
+    background: var(--color-accent);
+    color: var(--color-foreground);
+    border-color: var(--color-primary);
 }
 
 .pointsBadge {
@@ -286,18 +303,38 @@
 
 .userMsg .msgBubble {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-foreground);
     border-bottom-right-radius: 6px;
 }
 
 .assistantMsg .msgBubble {
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-bottom-left-radius: 6px;
+    color: var(--color-foreground);
 }
 
 .msgContent {
     word-break: break-word;
+    white-space: normal;
+}
+
+.msgContent table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 2px 0 20px 0;
+    font-size: 13px;
+}
+
+.msgContent table td {
+    border: 1px solid var(--color-border);
+    padding: 6px 10px;
+    vertical-align: top;
+}
+
+.msgContent table tr:first-child td {
+    font-weight: 600;
+    background: var(--color-accent);
 }
 
 .msgContent strong {
@@ -337,7 +374,7 @@
 .thinking span {
     width: 8px;
     height: 8px;
-    background: var(--color-text-muted);
+    background: var(--color-muted-foreground);
     border-radius: 50%;
     animation: bounce 1.4s infinite ease-in-out;
 }
@@ -382,11 +419,11 @@
 
 .suggestionBtn {
     padding: 8px 16px;
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-full);
     font-size: 13px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     transition: all var(--duration-fast) var(--ease-smooth);
     cursor: pointer;
 }
@@ -397,7 +434,7 @@
     background: var(--color-primary-light);
 }
 
-/* Input Bar - dark style matching mockup */
+/* Input Bar — floating capsule */
 .inputBar {
     padding: var(--space-md) var(--space-lg) var(--space-lg);
     flex-shrink: 0;
@@ -409,10 +446,17 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    background: #f0f2f5;
+    background: var(--color-muted);
     border: 1px solid var(--color-border);
     border-radius: 28px;
     padding: 6px 6px 6px 14px;
+    transition: border-color var(--duration-fast) var(--ease-smooth),
+        box-shadow var(--duration-fast) var(--ease-smooth);
+}
+
+.inputWrapper:focus-within {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px hsla(var(--color-primary-raw), 0.1);
 }
 
 .textInput {
@@ -426,6 +470,11 @@
     max-height: 120px;
     line-height: 1.5;
     outline: none;
+    color: var(--color-foreground);
+}
+
+.textInput::placeholder {
+    color: var(--color-muted-foreground);
 }
 
 .textInput:focus {
@@ -437,13 +486,13 @@
     width: 40px;
     height: 40px;
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-foreground);
     border-radius: 50%;
     font-size: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--duration-fast) var(--ease-smooth);
+    transition: all var(--duration-fast) var(--ease-spring);
     flex-shrink: 0;
 }
 
@@ -467,14 +516,14 @@
     justify-content: center;
     border-radius: 50%;
     font-size: 17px;
-    color: var(--color-text-secondary);
+    color: var(--color-muted-foreground);
     transition: all var(--duration-fast) var(--ease-smooth);
     flex-shrink: 0;
 }
 
 .toolBtn:hover {
-    background: var(--color-border);
-    color: var(--color-text);
+    background: var(--color-accent);
+    color: var(--color-foreground);
 }
 
 .toolBtn:disabled {
@@ -485,7 +534,7 @@
 .recording {
     color: var(--color-danger);
     animation: pulse 1s infinite;
-    background: #fef2f2;
+    background: hsla(0, 72%, 51%, 0.08);
 }
 
 /* Attachment preview bar */
@@ -495,7 +544,7 @@
     gap: 10px;
     padding: 8px 16px;
     margin: 0 auto 8px;
-    background: var(--color-surface);
+    background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     max-width: 760px;
@@ -518,7 +567,7 @@
 .attachName {
     flex: 1;
     font-size: 13px;
-    color: var(--color-text);
+    color: var(--color-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -532,13 +581,13 @@
     justify-content: center;
     border-radius: 50%;
     font-size: 12px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
     flex-shrink: 0;
-    transition: all var(--duration-fast);
+    transition: all var(--duration-fast) var(--ease-smooth);
 }
 
 .attachRemove:hover {
-    background: var(--color-border);
+    background: var(--color-accent);
     color: var(--color-danger);
 }
 
@@ -546,7 +595,7 @@
 .pointsCost {
     text-align: right;
     font-size: 12px;
-    color: var(--color-text-muted);
+    color: var(--color-muted-foreground);
     max-width: 760px;
     margin: 0 auto 4px;
     padding-right: 8px;

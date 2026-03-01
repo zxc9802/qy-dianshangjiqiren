@@ -1,19 +1,43 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../stores/auth';
 import styles from './login.module.css';
 
 export default function LoginPage() {
     const [isLogin, setIsLogin] = useState(true);
-    const [phone, setPhone] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [nickname, setNickname] = useState('');
+    const [code, setCode] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [codeSent, setCodeSent] = useState(false);
+    const [countdown, setCountdown] = useState(0);
     const router = useRouter();
-    const { login, register } = useAuthStore();
+    const { login, register, sendCode } = useAuthStore();
+
+    useEffect(() => {
+        if (countdown <= 0) return;
+        const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+        return () => clearTimeout(timer);
+    }, [countdown]);
+
+    const handleSendCode = useCallback(async () => {
+        if (!email || countdown > 0) return;
+        setError('');
+        setLoading(true);
+        try {
+            await sendCode(email);
+            setCodeSent(true);
+            setCountdown(60);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '发送验证码失败');
+        } finally {
+            setLoading(false);
+        }
+    }, [email, countdown, sendCode]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -21,9 +45,9 @@ export default function LoginPage() {
         setLoading(true);
         try {
             if (isLogin) {
-                await login(phone, password);
+                await login(email, password);
             } else {
-                await register(phone, password, nickname || undefined);
+                await register(email, password, code, nickname || undefined);
             }
             router.push('/');
         } catch (err) {
@@ -69,28 +93,53 @@ export default function LoginPage() {
 
                     <form onSubmit={handleSubmit} className={styles.form}>
                         <div className={styles.field}>
-                            <label className={styles.label}>手机号</label>
+                            <label className={styles.label}>邮箱</label>
                             <input
-                                type="tel"
-                                value={phone}
-                                onChange={e => setPhone(e.target.value)}
-                                placeholder="请输入手机号"
+                                type="email"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                placeholder="请输入邮箱地址"
                                 required
                                 className={styles.input}
                             />
                         </div>
 
                         {!isLogin && (
-                            <div className={styles.field}>
-                                <label className={styles.label}>昵称</label>
-                                <input
-                                    type="text"
-                                    value={nickname}
-                                    onChange={e => setNickname(e.target.value)}
-                                    placeholder="给自己取个名字（选填）"
-                                    className={styles.input}
-                                />
-                            </div>
+                            <>
+                                <div className={styles.field}>
+                                    <label className={styles.label}>验证码</label>
+                                    <div className={styles.codeRow}>
+                                        <input
+                                            type="text"
+                                            value={code}
+                                            onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                            placeholder="6位验证码"
+                                            required
+                                            className={styles.codeInput}
+                                            maxLength={6}
+                                        />
+                                        <button
+                                            type="button"
+                                            className={styles.sendCodeBtn}
+                                            onClick={handleSendCode}
+                                            disabled={!email || countdown > 0 || loading}
+                                        >
+                                            {countdown > 0 ? `${countdown}s` : codeSent ? '重新发送' : '发送验证码'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className={styles.field}>
+                                    <label className={styles.label}>昵称</label>
+                                    <input
+                                        type="text"
+                                        value={nickname}
+                                        onChange={e => setNickname(e.target.value)}
+                                        placeholder="给自己取个名字（选填）"
+                                        className={styles.input}
+                                    />
+                                </div>
+                            </>
                         )}
 
                         <div className={styles.field}>

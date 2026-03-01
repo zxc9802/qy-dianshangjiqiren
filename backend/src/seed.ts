@@ -1,4 +1,5 @@
 import { prisma } from './utils/prisma';
+import { getSystemPromptBySortOrder } from './utils/systemPrompts';
 
 const BOTS = [
     // 管理工具
@@ -52,10 +53,11 @@ async function seed() {
     console.log('Seeding 34 bots...');
 
     for (const bot of BOTS) {
+        const systemPrompt = getSystemPromptBySortOrder(bot.sortOrder, `你是${bot.name}，请给出专业、结构化、可执行的建议。`);
         await prisma.bot.upsert({
             where: { slug: bot.slug },
-            update: { ...bot, systemPrompt: `[系统提示词见 system_prompts.md - ${bot.name}]` },
-            create: { ...bot, systemPrompt: `[系统提示词见 system_prompts.md - ${bot.name}]` },
+            update: { ...bot, systemPrompt },
+            create: { ...bot, systemPrompt },
         });
     }
 

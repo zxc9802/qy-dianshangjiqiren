@@ -8,8 +8,9 @@ datasource db {
 
 model User {
   id            String   @id @default(uuid())
-  phone         String   @unique
+  email         String   @unique
   passwordHash  String   @map("password_hash")
+  isVerified    Boolean  @default(false) @map("is_verified")
   nickname      String   @default("")
   avatar        String   @default("")
   pointsBalance Int      @default(0) @map("points_balance")
@@ -19,10 +20,61 @@ model User {
   conversations      Conversation[]
   pointsTransactions PointsTransaction[]
   workflows          Workflow[]
+  imageGenerations   ImageGeneration[]
+  imagePromptTags    ImagePromptTag[]
   invitationsSent    Invitation[]        @relation("Inviter")
   invitationsReceived Invitation[]       @relation("Invitee")
 
   @@map("users")
+}
+
+model ImagePromptTag {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  groupKey  String   @map("group_key")
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupKey, label])
+  @@index([userId, groupKey, createdAt(sort: Desc)])
+  @@map("image_prompt_tags")
+}
+
+model ImageGeneration {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  prompt            String   @db.Text
+  negativePrompt    String?  @map("negative_prompt") @db.Text
+  aspectRatio       String   @default("1:1") @map("aspect_ratio")
+  imageSize         String   @default("2K") @map("image_size")
+  stylePreset       String?  @map("style_preset")
+  background        String?
+  lighting          String?
+  referenceStrength Int      @default(50) @map("reference_strength")
+  count             Int      @default(1)
+  referenceImagePath String? @map("reference_image_path")
+  resultImagePaths  Json     @map("result_image_paths")
+  status            String   @default("success") // success | partial | failed
+  errorMessage      String?  @map("error_message") @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("image_generations")
+}
+
+model VerificationCode {
+  id        String   @id @default(uuid())
+  email     String
+  code      String
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("verification_codes")
 }
 
 model Bot {
@@ -91,19 +143,42 @@ model Attachment {
 }
 
 model Workflow {
-  id          String   @id @default(uuid())
-  name        String
-  description String   @default("")
-  botChain    String   @map("bot_chain") @db.Text // JSON array of bot IDs
-  isPreset    Boolean  @default(false) @map("is_preset")
-  userId      String?  @map("user_id")
-  totalPoints Int      @default(0) @map("total_points")
-  usageCount  Int      @default(0) @map("usage_count")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  name           String
+  description    String   @default("")
+  canvasData     String   @map("canvas_data") @db.Text
+  templateParams String?  @map("template_params") @db.Text
+  triggerType    String   @default("manual") @map("trigger_type")
+  cronExpr       String?  @map("cron_expr")
+  webhookKey     String?  @unique @map("webhook_key")
+  isPreset       Boolean  @default(false) @map("is_preset")
+  isPublished    Boolean  @default(false) @map("is_published")
+  usageCount     Int      @default(0) @map("usage_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user User? @relation(fields: [userId], references: [id])
+  user       User              @relation(fields: [userId], references: [id])
+  executions WorkflowExecution[]
 
   @@map("workflows")
+}
+
+model WorkflowExecution {
+  id         String    @id @default(uuid())
+  workflowId String    @map("workflow_id")
+  userId     String    @map("user_id")
+  status     String    @default("running")
+  input      String?   @db.Text
+  output     String?   @db.Text
+  stepLogs   String?   @map("step_logs") @db.Text
+  pointsUsed Int       @default(0) @map("points_used")
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@map("workflow_executions")
 }
 
 model PointsTransaction {
