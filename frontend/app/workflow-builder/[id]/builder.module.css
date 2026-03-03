@@ -70,6 +70,7 @@
 .runBtn:hover:not(:disabled) {
     background: #16a34a;
     transform: translateY(-1px);
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.3);
 }
 
 .runBtn:disabled {
@@ -146,6 +147,7 @@
 .paletteItem:hover {
     background: var(--color-accent);
     border-color: var(--color-border);
+    transform: translateY(-1px);
 }
 
 .paletteItem:active {
@@ -299,7 +301,7 @@
 
 .enterChatBtn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3), 0 0 12px rgba(59, 130, 246, 0.15);
 }
 
 /* Saved data badge on node */
@@ -573,6 +575,7 @@
     border-color: var(--color-primary);
     color: var(--color-primary);
     background: var(--color-card);
+    transform: translateY(-2px);
 }
 
 .suggestionDismiss {
@@ -606,7 +609,7 @@
     width: 90%;
     text-align: center;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-    animation: slideUp 0.3s ease;
+    animation: dialogIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slideUp {

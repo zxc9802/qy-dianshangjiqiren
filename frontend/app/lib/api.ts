@@ -1,27 +1,7 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-
-function getApiOrigin(): string {
-    try {
-        const base = new URL(
-            API_BASE,
-            typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-        );
-        return base.origin;
-    } catch {
-        return '';
-    }
-}
+const API_BASE = '/api';
 
 export function resolveImageAssetUrl(input: string): string {
-    if (!input) return input;
-    if (/^https?:\/\//i.test(input)) return input;
-
-    if (input.startsWith('/api/image-assets/')) {
-        const origin = getApiOrigin();
-        return origin ? `${origin}${input}` : input;
-    }
-
-    return input;
+    return input || '';
 }
 
 function getToken(): string | null {
@@ -63,16 +43,16 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 export const api = {
     // Auth
     sendCode: (body: { email: string }) =>
-        request<{ success: boolean; message: string }>('/auth/send-code', { method: 'POST', body: JSON.stringify(body) }),
+        request<{ success: boolean; message: string }>('/auth?action=send-code', { method: 'POST', body: JSON.stringify(body) }),
 
     verifyCode: (body: { email: string; code: string }) =>
-        request<{ success: boolean; message: string }>('/auth/verify-code', { method: 'POST', body: JSON.stringify(body) }),
+        request<{ success: boolean; message: string }>('/auth?action=verify-code', { method: 'POST', body: JSON.stringify(body) }),
 
     register: (body: { email: string; password: string; code: string; nickname?: string; inviteCode?: string }) =>
-        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
+        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=register', { method: 'POST', body: JSON.stringify(body) }),
 
     login: (body: { email: string; password: string }) =>
-        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=login', { method: 'POST', body: JSON.stringify(body) }),
 
     getMe: () => request<{ success: boolean; data: UserInfo }>('/auth/me'),
 
@@ -97,25 +77,25 @@ export const api = {
         request<{ success: boolean; data: ConversationDetail }>(`/conversations/${id}`),
 
     toggleFavorite: (id: string) =>
-        request<{ success: boolean; data: { isFavorited: boolean } }>(`/conversations/${id}/favorite`, { method: 'PATCH' }),
+        request<{ success: boolean; data: { isFavorited: boolean } }>(`/conversations/${id}`, { method: 'PATCH' }),
 
     deleteConversation: (id: string) =>
         request<{ success: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
 
     // Points
-    getBalance: () => request<{ success: boolean; data: { balance: number } }>('/points/balance'),
+    getBalance: () => request<{ success: boolean; data: { balance: number } }>('/points?action=balance'),
     getTransactions: (params?: { page?: number; type?: string }) => {
         const qs = new URLSearchParams(params as unknown as Record<string, string>).toString();
-        return request<{ success: boolean; data: { transactions: PointsTransaction[]; total: number } }>(`/points/transactions${qs ? `?${qs}` : ''}`);
+        return request<{ success: boolean; data: { transactions: PointsTransaction[]; total: number } }>(`/points${qs ? `?${qs}` : ''}`);
     },
     redeem: (code: string) =>
-        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points/redeem', { method: 'POST', body: JSON.stringify({ code }) }),
+        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points?action=redeem', { method: 'POST', body: JSON.stringify({ code }) }),
     recharge: (amount: number) =>
-        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points/recharge', { method: 'POST', body: JSON.stringify({ amount }) }),
+        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points?action=recharge', { method: 'POST', body: JSON.stringify({ amount }) }),
 
     // Image generations
-    generateImage: (formData: FormData) =>
-        request<{ success: boolean; data: ImageGenerationItem }>('/image-generations/generate', { method: 'POST', body: formData }),
+    generateImage: (body: Record<string, unknown>) =>
+        request<{ success: boolean; data: ImageGenerationItem }>('/image-generations', { method: 'POST', body: JSON.stringify(body) }),
 
     getImageGenerations: (params?: { cursor?: string; limit?: number }) => {
         const query: Record<string, string> = {};
@@ -145,7 +125,7 @@ export const api = {
         request<{ success: boolean; message?: string }>(`/image-prompt-tags/${id}`, { method: 'DELETE' }),
 
     // SSE streaming (returns EventSource URL)
-    getMessageStreamUrl: (conversationId: string) => `${API_BASE}/conversations/${conversationId}/messages`,
+    getMessageStreamUrl: (conversationId: string) => `/api/conversations/${conversationId}/messages`,
 };
 
 // Types

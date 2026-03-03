@@ -22,10 +22,46 @@ model User {
   workflows          Workflow[]
   imageGenerations   ImageGeneration[]
   imagePromptTags    ImagePromptTag[]
+  customBots         CustomBot[]
   invitationsSent    Invitation[]        @relation("Inviter")
   invitationsReceived Invitation[]       @relation("Invitee")
 
   @@map("users")
+}
+
+model CustomBot {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  name         String
+  description  String   @default("")
+  avatar       String   @default("")
+  icon         String   @default("bot")
+  systemPrompt String   @map("system_prompt") @db.Text
+  pointsPerUse Int      @default(3) @map("points_per_use")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents BotDocument[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("custom_bots")
+}
+
+model BotDocument {
+  id          String   @id @default(uuid())
+  customBotId String   @map("custom_bot_id")
+  fileName    String   @map("file_name")
+  fileType    String   @map("file_type")
+  fileSize    Int      @map("file_size")
+  parsedText  String   @map("parsed_text") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  customBot CustomBot @relation(fields: [customBotId], references: [id], onDelete: Cascade)
+
+  @@index([customBotId])
+  @@map("bot_documents")
 }
 
 model ImagePromptTag {

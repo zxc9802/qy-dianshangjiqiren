@@ -78,10 +78,45 @@ export async function POST(req: NextRequest) {
             ? systemPrompt.trim()
             : '你是一个AI助手。';
 
-        const id = Number(botIdString);
-        const isXhs = Number.isFinite(id) && id >= 15 && id <= 22;
-        const promptFromDocs = getSystemPromptByBotId(botIdString, fallbackPrompt);
-        const fullSystemPrompt = `${promptFromDocs}\n\n${isXhs ? XHS_GLOBAL_RULES : GLOBAL_RULES}`.trim();
+        let fullSystemPrompt: string;
+
+        if (botIdString.startsWith('custom-')) {
+            // Custom bot — fetch from backend API
+            const customId = botIdString.replace('custom-', '');
+            const token = req.headers.get('x-auth-token') || '';
+            try {
+                const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+                const botRes = await fetch(`${backendUrl}/api/custom-bots/${customId}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (botRes.ok) {
+                    const botData = await botRes.json();
+                    const bot = botData.data;
+                    let prompt = bot.systemPrompt || fallbackPrompt;
+
+                    // Inject knowledge base documents
+                    if (bot.documents && bot.documents.length > 0) {
+                        const knowledgeTexts = bot.documents
+                            .map((doc: { fileName: string; parsedText: string }) =>
+                                `### 文档: ${doc.fileName}\n${doc.parsedText}`
+                            )
+                            .join('\n\n---\n\n');
+                        prompt += `\n\n---\n# 知识库\n以下是用户上传的参考文档，请基于这些内容回答问题：\n\n${knowledgeTexts}`;
+                    }
+
+                    fullSystemPrompt = `${prompt}\n\n${GLOBAL_RULES}`.trim();
+                } else {
+                    fullSystemPrompt = `${fallbackPrompt}\n\n${GLOBAL_RULES}`.trim();
+                }
+            } catch {
+                fullSystemPrompt = `${fallbackPrompt}\n\n${GLOBAL_RULES}`.trim();
+            }
+        } else {
+            const id = Number(botIdString);
+            const isXhs = Number.isFinite(id) && id >= 15 && id <= 22;
+            const promptFromDocs = getSystemPromptByBotId(botIdString, fallbackPrompt);
+            fullSystemPrompt = `${promptFromDocs}\n\n${isXhs ? XHS_GLOBAL_RULES : GLOBAL_RULES}`.trim();
+        }
 
         const normalizedMessages = Array.isArray(messages)
             ? messages

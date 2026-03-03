@@ -2,6 +2,10 @@
 
 import { useEffect, useState, useRef } from 'react';
 import html2canvas from 'html2canvas';
+import {
+    Loader2, Camera, Calendar, Bot, MessageSquare,
+    Target, CheckCircle, ClipboardList, User,
+} from 'lucide-react';
 
 interface ReportData {
     title: string;
@@ -133,7 +137,7 @@ export default function ReportPage() {
                     boxShadow: '0 4px 12px rgba(59,130,246,0.3)',
                     opacity: saving ? 0.7 : 1,
                 }}>
-                    {saving ? '⏳ 保存中...' : '📸 保存长图'}
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : <><Camera size={14} /> 保存长图</>}
                 </button>
                 <button onClick={() => window.close()} style={{
                     padding: '10px 20px', borderRadius: 10, border: '1px solid #cbd5e1', cursor: 'pointer',
@@ -170,9 +174,9 @@ export default function ReportPage() {
                         {report.summary}
                     </p>
                     <div style={{ display: 'flex', gap: 24, marginTop: 28, fontSize: 13, opacity: 0.7 }}>
-                        <span>📅 {dateStr}</span>
-                        <span>🤖 {report.botName}</span>
-                        <span>💬 {report.messageCount} 条消息</span>
+                        <span><Calendar size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {dateStr}</span>
+                        <span><Bot size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {report.botName}</span>
+                        <span><MessageSquare size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {report.messageCount} 条消息</span>
                     </div>
                     {report.tags && report.tags.length > 0 && (
                         <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
@@ -196,7 +200,7 @@ export default function ReportPage() {
                 {/* Key Insights */}
                 <section style={{ marginBottom: 40 }}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 24 }}>🎯</span> 关键洞察
+                        <span style={{ fontSize: 24 }}><Target size={24} /></span> 关键洞察
                     </h2>
                     <div style={{ display: 'grid', gap: 12 }}>
                         {report.insights.map((item, i) => {
@@ -227,7 +231,7 @@ export default function ReportPage() {
                 {/* Action Items */}
                 <section style={{ marginBottom: 40 }}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 24 }}>✅</span> 行动建议
+                        <span style={{ fontSize: 24 }}><CheckCircle size={24} /></span> 行动建议
                     </h2>
                     <div style={{ display: 'grid', gap: 12 }}>
                         {report.actions.map((item, i) => {
@@ -263,7 +267,7 @@ export default function ReportPage() {
                 {/* Plan Summary */}
                 <section style={{ marginBottom: 40 }}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 24 }}>📋</span> 方案汇总
+                        <span style={{ fontSize: 24 }}><ClipboardList size={24} /></span> 方案汇总
                     </h2>
                     <div style={{
                         background: '#fff', borderRadius: 14, padding: '24px 28px',
@@ -281,7 +285,7 @@ export default function ReportPage() {
                             cursor: 'pointer', userSelect: 'none',
                         }}
                     >
-                        <span style={{ fontSize: 24 }}>💬</span> 原始对话记录
+                        <span style={{ fontSize: 24 }}><MessageSquare size={24} /></span> 原始对话记录
                         <span style={{
                             marginLeft: 'auto', fontSize: 14, color: '#94a3b8',
                             transition: 'transform 0.3s ease',
@@ -309,7 +313,7 @@ export default function ReportPage() {
                                         background: msg.role === 'user' ? '#dbeafe' : '#f1f5f9',
                                         color: msg.role === 'user' ? '#2563eb' : '#64748b',
                                     }}>
-                                        {msg.role === 'user' ? '👤' : '🤖'}
+                                        {msg.role === 'user' ? <User size={14} /> : <Bot size={14} />}
                                     </div>
                                     <div style={{
                                         maxWidth: '80%', padding: '10px 16px', borderRadius: 12,

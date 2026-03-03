@@ -160,7 +160,7 @@
 
 .aiBtn:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
+    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3), 0 0 16px rgba(37, 99, 235, 0.15);
 }
 
 .aiBtn:disabled {
@@ -189,7 +189,7 @@
     max-height: 80vh;
     overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-    animation: slideUp 0.3s ease;
+    animation: dialogIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slideUp {
@@ -294,8 +294,8 @@
 }
 
 .templateCard:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
 .templateIcon {
@@ -381,7 +381,7 @@
 
 .card:hover {
     border-color: var(--color-primary);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 0 12px hsla(var(--color-primary-raw), 0.08);
     transform: translateY(-2px);
 }
 

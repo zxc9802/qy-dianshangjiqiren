@@ -188,8 +188,20 @@ function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; deb
 
         ws.on('message', (raw: RawData) => {
             try {
-                const message = parseServerPayload(toBuffer(raw), true);
-                if (!message || typeof message !== 'object') return;
+                const buf = toBuffer(raw);
+                const headerHex = buf.subarray(0, Math.min(20, buf.length)).toString('hex');
+                const msgType = buf.length >= 2 ? (buf[1] >> 4) : -1;
+                const msgFlags = buf.length >= 2 ? (buf[1] & 0x0f) : -1;
+                const compression = buf.length >= 3 ? (buf[2] & 0x0f) : -1;
+                debugLogs.push(`RawFrame: len=${buf.length}, type=${msgType}, flags=${msgFlags}, comp=${compression}, hex=${headerHex}`);
+
+                const message = parseServerPayload(buf);
+                if (!message || typeof message !== 'object') {
+                    debugLogs.push(`Parsed null/non-object, skipping`);
+                    return;
+                }
+
+                debugLogs.push(`ParsedJSON: ${JSON.stringify(message).slice(0, 300)}`);
 
                 const text = extractText(message);
                 if (text) {
@@ -250,7 +262,7 @@ function buildHeader(
     serialization = JSON_SERIALIZATION,
     compression = NO_COMPRESSION,
 ): Buffer {
-    const header = Buffer.alloc(8);
+    const header = Buffer.alloc(4);
     header[0] = (PROTOCOL_VERSION << 4) | DEFAULT_HEADER_SIZE;
     header[1] = (messageType << 4) | messageTypeSpecificFlags;
     header[2] = (serialization << 4) | compression;
@@ -273,21 +285,38 @@ function encodeAudioOnlyRequest(audioChunk: Buffer, flags = NO_SEQUENCE): Buffer
     return Buffer.concat([header, length, audioChunk]);
 }
 
-function parseServerPayload(frame: Buffer, hasSequence: boolean): unknown {
+function parseServerPayload(frame: Buffer): unknown {
     if (frame.length < 8) {
         throw new Error('Frame too short.');
     }
 
     const headerSize = frame[0] & 0x0f;
     const messageType = frame[1] >> 4;
+    const messageTypeFlags = frame[1] & 0x0f;
     const compressionType = frame[2] & 0x0f;
 
+    // Detect sequence from flags: POS_SEQUENCE(1), NEG_SEQUENCE(2), NEG_WITH_SEQUENCE(3) all have sequence
+    const hasSequence = messageTypeFlags > 0;
     const messageDescriptionLength = messageType === SERVER_ERROR_RESPONSE ? 8 : 4;
     const sequenceLength = hasSequence ? 4 : 0;
     const payloadOffset = headerSize * 4 + messageDescriptionLength + sequenceLength;
 
     if (payloadOffset > frame.length) {
-        throw new Error('Invalid frame payload offset.');
+        // Try without sequence as fallback
+        const fallbackOffset = headerSize * 4 + messageDescriptionLength;
+        if (fallbackOffset <= frame.length) {
+            let payload = frame.subarray(fallbackOffset);
+            if (compressionType === GZIP_COMPRESSION && payload.length > 0) {
+                payload = gunzipSync(payload);
+            }
+            if (payload.length === 0) return null;
+            try {
+                return JSON.parse(payload.toString('utf-8'));
+            } catch {
+                return null;
+            }
+        }
+        return null;
     }
 
     let payload = frame.subarray(payloadOffset);
@@ -300,7 +329,12 @@ function parseServerPayload(frame: Buffer, hasSequence: boolean): unknown {
     }
 
     const text = payload.toString('utf-8');
-    return JSON.parse(text);
+    try {
+        return JSON.parse(text);
+    } catch {
+        // Not valid JSON - might be a binary ACK frame, skip it
+        return null;
+    }
 }
 
 function extractEventName(message: object): string {

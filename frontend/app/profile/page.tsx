@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../stores/auth';
 import styles from './profile.module.css';
+import { Coins, Settings, ArrowLeft } from 'lucide-react';
 
 interface Transaction {
     id: string;
@@ -65,7 +66,7 @@ export default function ProfilePage() {
         <div className={styles.layout}>
             {/* Sidebar */}
             <aside className={styles.sidebar}>
-                <button className={styles.backBtn} onClick={() => router.push('/')}>← 返回首页</button>
+                <button className={styles.backBtn} onClick={() => router.push('/')}><ArrowLeft size={16} /> 返回首页</button>
 
                 <div className={styles.avatarSection}>
                     <div className={styles.avatar}>
@@ -80,14 +81,14 @@ export default function ProfilePage() {
                         className={`${styles.navItem} ${activeTab === 'points' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('points')}
                     >
-                        💰 积分管理
+                        <Coins size={16} /> 积分管理
                     </button>
 
                     <button
                         className={`${styles.navItem} ${activeTab === 'settings' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('settings')}
                     >
-                        ⚙️ 账号设置
+                        <Settings size={16} /> 账号设置
                     </button>
                 </nav>
 
@@ -98,7 +99,7 @@ export default function ProfilePage() {
             <main className={styles.content}>
                 {activeTab === 'points' && (
                     <>
-                        <h2 className={styles.pageTitle}>💰 积分管理</h2>
+                        <h2 className={styles.pageTitle}><Coins size={20} /> 积分管理</h2>
 
                         <div className={styles.pointsCard}>
                             <div className={styles.pointsInfo}>
@@ -151,7 +152,7 @@ export default function ProfilePage() {
 
                 {activeTab === 'settings' && (
                     <>
-                        <h2 className={styles.pageTitle}>⚙️ 账号设置</h2>
+                        <h2 className={styles.pageTitle}><Settings size={20} /> 账号设置</h2>
 
                         <div className={styles.settingsCard}>
                             <div className={styles.settingRow}>

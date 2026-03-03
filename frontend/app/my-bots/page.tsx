@@ -1,0 +1,483 @@
+'use client';
+
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuthStore } from '../stores/auth';
+import styles from './my-bots.module.css';
+import {
+    Plus, Bot, Trash2, MessageSquare, Edit3, Upload, X,
+    FileText, Image, File, Loader2, ArrowLeft, Save, Sparkles,
+} from 'lucide-react';
+
+interface BotDocument {
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    createdAt: string;
+}
+
+interface CustomBot {
+    id: string;
+    name: string;
+    description: string;
+    avatar: string;
+    icon: string;
+    systemPrompt: string;
+    pointsPerUse: number;
+    documents: BotDocument[];
+    createdAt: string;
+}
+
+const API_BASE = 'http://localhost:3001/api';
+
+function getToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('token');
+}
+
+async function apiFetch(path: string, opts: RequestInit = {}) {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...opts,
+        headers: {
+            ...opts.headers,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        },
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: '请求失败' }));
+        throw new Error(err.message || '请求失败');
+    }
+    return res.json();
+}
+
+export default function MyBotsPage() {
+    const router = useRouter();
+    const { user } = useAuthStore();
+    const [bots, setBots] = useState<CustomBot[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showForm, setShowForm] = useState(false);
+    const [editingBot, setEditingBot] = useState<CustomBot | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+
+    // Form fields
+    const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
+    const [systemPrompt, setSystemPrompt] = useState('');
+
+    // Document upload
+    const [uploadingDoc, setUploadingDoc] = useState(false);
+    const [docs, setDocs] = useState<BotDocument[]>([]);
+    // Pending docs queued during creation (not yet saved to backend)
+    const [pendingDocs, setPendingDocs] = useState<Array<{ fileName: string; fileType: string; fileSize: number; parsedText: string }>>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Avatar upload
+    const [avatarPreview, setAvatarPreview] = useState('');
+    const [avatarFile, setAvatarFile] = useState<File | null>(null);
+    const avatarInputRef = useRef<HTMLInputElement>(null);
+
+    const loadBots = useCallback(async () => {
+        try {
+            setLoading(true);
+            const res = await apiFetch('/custom-bots');
+            setBots(res.data || []);
+        } catch (err) {
+            console.error('加载失败:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!user) {
+            const stored = localStorage.getItem('user');
+            if (!stored) { router.push('/login'); return; }
+        }
+        loadBots();
+    }, [user, router, loadBots]);
+
+    const resetForm = () => {
+        setName('');
+        setDescription('');
+        setSystemPrompt('');
+        setDocs([]);
+        setPendingDocs([]);
+        setAvatarPreview('');
+        setAvatarFile(null);
+        setEditingBot(null);
+        setError('');
+    };
+
+    const openCreateForm = () => {
+        resetForm();
+        setShowForm(true);
+    };
+
+    const openEditForm = (bot: CustomBot) => {
+        setEditingBot(bot);
+        setName(bot.name);
+        setDescription(bot.description);
+        setSystemPrompt(bot.systemPrompt);
+        setDocs(bot.documents || []);
+        setAvatarPreview(bot.avatar || '');
+        setAvatarFile(null);
+        setShowForm(true);
+        setError('');
+    };
+
+    const handleSave = async () => {
+        if (!name.trim()) { setError('请输入智能体名称'); return; }
+        if (!systemPrompt.trim()) { setError('请输入系统提示词'); return; }
+        setSaving(true);
+        setError('');
+
+        try {
+            let botId: string;
+
+            if (editingBot) {
+                const res = await apiFetch(`/custom-bots/${editingBot.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name, description, systemPrompt }),
+                });
+                botId = res.data.id;
+            } else {
+                const res = await apiFetch('/custom-bots', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, description, systemPrompt }),
+                });
+                botId = res.data.id;
+            }
+
+            // Upload avatar if changed
+            if (avatarFile) {
+                const formData = new FormData();
+                formData.append('avatar', avatarFile);
+                await apiFetch(`/custom-bots/${botId}/avatar`, {
+                    method: 'POST',
+                    body: formData,
+                });
+            }
+
+            // Upload pending docs (queued during creation)
+            for (const doc of pendingDocs) {
+                await apiFetch(`/custom-bots/${botId}/documents`, {
+                    method: 'POST',
+                    body: JSON.stringify(doc),
+                });
+            }
+
+            setShowForm(false);
+            resetForm();
+            await loadBots();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '保存失败');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('确定删除这个智能体？相关知识库文档也会被删除。')) return;
+        try {
+            await apiFetch(`/custom-bots/${id}`, { method: 'DELETE' });
+            await loadBots();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : '删除失败');
+        }
+    };
+
+    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setAvatarFile(file);
+        const url = URL.createObjectURL(file);
+        setAvatarPreview(url);
+    };
+
+    const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const totalDocs = docs.length + pendingDocs.length;
+        if (totalDocs >= 10) { setError('每个智能体最多上传 10 个文档'); return; }
+
+        setUploadingDoc(true);
+        setError('');
+
+        try {
+            // Parse the document using existing frontend upload API
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const parseRes = await fetch('/api/upload', { method: 'POST', body: formData });
+            if (!parseRes.ok) {
+                const errData = await parseRes.json().catch(() => ({}));
+                throw new Error(errData.error || '文件解析失败');
+            }
+            const parseData = await parseRes.json();
+
+            const ext = file.name.split('.').pop()?.toLowerCase() || '';
+            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+            const docData = {
+                fileName: file.name,
+                fileType: isImage ? 'image' : ext,
+                fileSize: file.size,
+                parsedText: parseData.content,
+            };
+
+            if (editingBot) {
+                // Editing: save to backend immediately
+                const res = await apiFetch(`/custom-bots/${editingBot.id}/documents`, {
+                    method: 'POST',
+                    body: JSON.stringify(docData),
+                });
+                setDocs(prev => [res.data, ...prev]);
+            } else {
+                // Creating: queue locally, upload after save
+                setPendingDocs(prev => [...prev, docData]);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '文档上传失败');
+        } finally {
+            setUploadingDoc(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleDeleteDoc = async (docId: string) => {
+        if (editingBot) {
+            // Saved doc—delete from backend
+            try {
+                await apiFetch(`/custom-bots/${editingBot.id}/documents/${docId}`, { method: 'DELETE' });
+                setDocs(prev => prev.filter(d => d.id !== docId));
+            } catch (err) {
+                alert(err instanceof Error ? err.message : '删除失败');
+            }
+        } else {
+            // Pending doc—remove from local queue
+            setPendingDocs(prev => prev.filter((_, i) => `pending-${i}` !== docId));
+        }
+    };
+
+    const startChat = (bot: CustomBot) => {
+        router.push(`/chat/custom-${bot.id}?name=${encodeURIComponent(bot.name)}`);
+    };
+
+    const formatFileSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes}B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+    };
+
+    const getDocIcon = (fileType: string) => {
+        if (fileType === 'image') return <Image size={16} />;
+        if (fileType === 'pdf') return <FileText size={16} />;
+        return <File size={16} />;
+    };
+
+    return (
+        <div className={styles.layout}>
+            <header className={styles.header}>
+                <button onClick={() => router.push('/')} className={styles.backBtn}>
+                    <ArrowLeft size={16} /> 返回首页
+                </button>
+                <h1 className={styles.title}><Sparkles size={20} /> 我的智能体</h1>
+                <button className={styles.createBtn} onClick={openCreateForm}>
+                    <Plus size={16} /> 创建智能体
+                </button>
+            </header>
+
+            <main className={styles.main}>
+                {loading ? (
+                    <div className={styles.loadingState}>
+                        <Loader2 size={24} className="animate-spin" />
+                        <span>加载中...</span>
+                    </div>
+                ) : bots.length === 0 && !showForm ? (
+                    <div className={styles.emptyState}>
+                        <Bot size={48} />
+                        <h3>还没有创建智能体</h3>
+                        <p>创建你的第一个自定义智能体，设置专属提示词和知识库</p>
+                        <button className={styles.createBtnLarge} onClick={openCreateForm}>
+                            <Plus size={18} /> 创建智能体
+                        </button>
+                    </div>
+                ) : (
+                    <>
+                        {/* Bot Cards Grid */}
+                        {!showForm && (
+                            <div className={styles.grid}>
+                                {bots.map(bot => (
+                                    <div key={bot.id} className={styles.card}>
+                                        <div className={styles.cardTop}>
+                                            <div className={styles.cardAvatar}>
+                                                {bot.avatar ? (
+                                                    <img src={bot.avatar} alt={bot.name} />
+                                                ) : (
+                                                    <Bot size={28} />
+                                                )}
+                                            </div>
+                                            <div className={styles.cardInfo}>
+                                                <h3 className={styles.cardName}>{bot.name}</h3>
+                                                <p className={styles.cardDesc}>{bot.description || '暂无描述'}</p>
+                                            </div>
+                                        </div>
+                                        <div className={styles.cardMeta}>
+                                            <span><FileText size={12} /> {bot.documents?.length || 0} 个文档</span>
+                                        </div>
+                                        <div className={styles.cardActions}>
+                                            <button onClick={() => startChat(bot)} className={styles.chatBtn}>
+                                                <MessageSquare size={14} /> 对话
+                                            </button>
+                                            <button onClick={() => openEditForm(bot)} className={styles.editBtn}>
+                                                <Edit3 size={14} /> 编辑
+                                            </button>
+                                            <button onClick={() => handleDelete(bot.id)} className={styles.deleteBtn}>
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Create/Edit Form */}
+                        {showForm && (
+                            <div className={styles.formCard}>
+                                <div className={styles.formHeader}>
+                                    <h2>{editingBot ? '编辑智能体' : '创建智能体'}</h2>
+                                    <button onClick={() => { setShowForm(false); resetForm(); }} className={styles.closeBtn}>
+                                        <X size={18} />
+                                    </button>
+                                </div>
+
+                                {error && <div className={styles.error}>{error}</div>}
+
+                                {/* Avatar */}
+                                <div className={styles.avatarSection}>
+                                    <div
+                                        className={styles.avatarUpload}
+                                        onClick={() => avatarInputRef.current?.click()}
+                                    >
+                                        {avatarPreview ? (
+                                            <img src={avatarPreview} alt="头像" />
+                                        ) : (
+                                            <div className={styles.avatarPlaceholder}>
+                                                <Upload size={20} />
+                                                <span>上传头像</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <input
+                                        ref={avatarInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        hidden
+                                        onChange={handleAvatarChange}
+                                    />
+                                </div>
+
+                                {/* Name */}
+                                <div className={styles.formGroup}>
+                                    <label>智能体名称 *</label>
+                                    <input
+                                        value={name}
+                                        onChange={e => setName(e.target.value)}
+                                        placeholder="给你的智能体起个名字"
+                                        maxLength={50}
+                                    />
+                                </div>
+
+                                {/* Description */}
+                                <div className={styles.formGroup}>
+                                    <label>简介</label>
+                                    <input
+                                        value={description}
+                                        onChange={e => setDescription(e.target.value)}
+                                        placeholder="简单描述智能体的用途"
+                                        maxLength={200}
+                                    />
+                                </div>
+
+                                {/* System Prompt */}
+                                <div className={styles.formGroup}>
+                                    <label>系统提示词 *</label>
+                                    <textarea
+                                        value={systemPrompt}
+                                        onChange={e => setSystemPrompt(e.target.value)}
+                                        placeholder="告诉 AI 它的角色和行为规范。例如：你是一位专业的产品经理，擅长需求分析和产品规划..."
+                                        rows={8}
+                                    />
+                                    <span className={styles.charCount}>{systemPrompt.length} 字</span>
+                                </div>
+
+                                {/* Knowledge Base Documents — always visible */}
+                                <div className={styles.formGroup}>
+                                    <label>知识库文档</label>
+                                    <p className={styles.hint}>上传 PDF、Word、TXT 或图片，AI 将基于这些内容回答问题</p>
+
+                                    <div className={styles.docList}>
+                                        {/* Saved docs (for editing) */}
+                                        {docs.map(doc => (
+                                            <div key={doc.id} className={styles.docItem}>
+                                                {getDocIcon(doc.fileType)}
+                                                <span className={styles.docName}>{doc.fileName}</span>
+                                                <span className={styles.docSize}>{formatFileSize(doc.fileSize)}</span>
+                                                <button onClick={() => handleDeleteDoc(doc.id)} className={styles.docDeleteBtn}>
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {/* Pending docs (for creating) */}
+                                        {pendingDocs.map((doc, i) => (
+                                            <div key={`pending-${i}`} className={styles.docItem}>
+                                                {getDocIcon(doc.fileType)}
+                                                <span className={styles.docName}>{doc.fileName}</span>
+                                                <span className={styles.docSize}>{formatFileSize(doc.fileSize)}</span>
+                                                <button onClick={() => handleDeleteDoc(`pending-${i}`)} className={styles.docDeleteBtn}>
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        className={styles.uploadDocBtn}
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploadingDoc || (docs.length + pendingDocs.length) >= 10}
+                                    >
+                                        {uploadingDoc ? (
+                                            <><Loader2 size={14} className="animate-spin" /> 解析中...</>
+                                        ) : (
+                                            <><Upload size={14} /> 上传文档 ({docs.length + pendingDocs.length}/10)</>
+                                        )}
+                                    </button>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".pdf,.docx,.txt,.md,.csv,.jpg,.jpeg,.png,.webp"
+                                        hidden
+                                        onChange={handleDocUpload}
+                                    />
+                                </div>
+
+                                <div className={styles.formActions}>
+                                    <button onClick={() => { setShowForm(false); resetForm(); }} className={styles.cancelBtn}>
+                                        取消
+                                    </button>
+                                    <button onClick={handleSave} className={styles.saveBtn} disabled={saving}>
+                                        {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : <><Save size={14} /> {editingBot ? '保存修改' : '创建智能体'}</>}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </main>
+        </div>
+    );
+}

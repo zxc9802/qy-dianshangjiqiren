@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readServerEnv } from '../../lib/server-env';
 
-const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:generateContent';
 const API_KEY = readServerEnv('YUNWU_UPLOAD_API_KEY') || readServerEnv('AI_API_KEY') || '';
 
 const MIME_MAP: Record<string, string> = {
@@ -20,26 +19,138 @@ const MIME_MAP: Record<string, string> = {
 };
 
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
+const TEXT_EXTS = new Set(['txt', 'md', 'csv']);
 
-function normalizeGenerateUrl(rawUrl?: string): string {
-    let url = (rawUrl || DEFAULT_API_URL).trim();
-    url = url.replace(':streamGenerateContent', ':generateContent');
+function normalizeStreamUrl(rawUrl?: string): string {
+    const DEFAULT = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse';
+    let url = (rawUrl || DEFAULT).trim();
+    url = url.replace(':generateContent', ':streamGenerateContent');
 
-    try {
-        const parsed = new URL(url);
-        parsed.searchParams.delete('alt');
-        return parsed.toString();
-    } catch {
-        return url.replace('?alt=sse', '').replace('&alt=sse', '');
+    if (!/[?&]alt=sse(?:&|$)/.test(url)) {
+        url += url.includes('?') ? '&alt=sse' : '?alt=sse';
     }
+
+    return url;
+}
+
+function parseSseText(sseBody: string): string {
+    let result = '';
+
+    for (const line of sseBody.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        try {
+            const data = JSON.parse(jsonStr);
+            const parts = data?.candidates?.[0]?.content?.parts;
+            if (!Array.isArray(parts)) continue;
+
+            for (const part of parts) {
+                if (part?.text && !part?.thought) {
+                    result += part.text;
+                }
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    return result;
+}
+
+// Local document parsing — no AI API needed
+async function parseDocumentLocally(buffer: Buffer, ext: string, fileName: string): Promise<string> {
+    if (TEXT_EXTS.has(ext)) {
+        const text = buffer.toString('utf-8');
+        if (!text.trim()) throw new Error('文件内容为空');
+        return text;
+    }
+
+    if (ext === 'docx') {
+        const mammoth = await import('mammoth');
+        const result = await mammoth.extractRawText({ buffer });
+        if (!result.value.trim()) throw new Error('Word 文档内容为空');
+        console.log(`[Upload] DOCX parsed: ${result.value.length} chars, ${result.messages.length} warnings`);
+        return result.value;
+    }
+
+    if (ext === 'pdf') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mod: any = await import('pdf-parse');
+        const pdfParse = mod.default || mod;
+        const result = await pdfParse(buffer);
+        if (!result.text.trim()) throw new Error('PDF 文档内容为空');
+        console.log(`[Upload] PDF parsed: ${result.text.length} chars, ${result.numpages} pages`);
+        return result.text;
+    }
+
+    if (ext === 'doc') {
+        throw new Error('不支持 .doc 格式，请将文件另存为 .docx 后重试');
+    }
+
+    if (ext === 'pptx') {
+        throw new Error('PPT 本地解析暂不支持，请将内容复制到 Word 或 TXT 后上传');
+    }
+
+    throw new Error(`不支持的文档格式: .${ext}`);
+}
+
+// Image parsing — uses Gemini API via inlineData
+async function parseImageWithAI(base64Data: string, mimeType: string, fileName: string): Promise<string> {
+    const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_UPLOAD_API_URL') || readServerEnv('AI_API_URL'));
+    console.log(`[Upload] Sending image ${fileName} to Gemini API...`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+
+    const upstream = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+            contents: [{
+                role: 'user',
+                parts: [
+                    {
+                        inlineData: { mimeType, data: base64Data },
+                    },
+                    {
+                        text: '请详细描述这张图片的内容，包括画面中的文字、物体、布局、颜色等所有视觉信息。',
+                    },
+                ],
+            }],
+            generationConfig: {
+                temperature: 0.1,
+                topP: 1,
+            },
+        }),
+    });
+
+    clearTimeout(timeout);
+
+    if (!upstream.ok) {
+        const errText = await upstream.text();
+        console.error(`[Upload] Gemini error for ${fileName}: status=${upstream.status}`, errText.slice(0, 300));
+        throw new Error(`图片解析失败 (API ${upstream.status})`);
+    }
+
+    const sseBody = await upstream.text();
+    const extractedText = parseSseText(sseBody);
+    console.log(`[Upload] Image parsed: ${extractedText.length} chars`);
+
+    if (!extractedText.trim()) {
+        throw new Error('无法从图片中提取内容');
+    }
+
+    return extractedText;
 }
 
 export async function POST(req: NextRequest) {
     try {
-        if (!API_KEY) {
-            return NextResponse.json({ error: 'Missing upload API key configuration' }, { status: 500 });
-        }
-
         const formData = await req.formData();
         const file = formData.get('file') as File;
 
@@ -56,63 +167,25 @@ export async function POST(req: NextRequest) {
         const mimeType = MIME_MAP[ext];
         if (!mimeType) {
             return NextResponse.json(
-                { error: '不支持的文件格式，请上传 PDF、Word、PPT、TXT、MD、CSV 或图片文件' },
+                { error: '不支持的文件格式，请上传 PDF、Word、TXT、MD、CSV 或图片文件' },
                 { status: 400 }
             );
         }
 
         const buffer = Buffer.from(await file.arrayBuffer());
-        const base64Data = buffer.toString('base64');
+        let extractedText: string;
 
-        const apiUrl = normalizeGenerateUrl(readServerEnv('YUNWU_UPLOAD_API_URL') || readServerEnv('AI_API_URL'));
-        const upstream = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                contents: [{
-                    role: 'user',
-                    parts: [
-                        {
-                            inlineData: {
-                                mimeType,
-                                data: base64Data,
-                            },
-                        },
-                        {
-                            text: IMAGE_EXTS.has(ext)
-                                ? '请详细描述这张图片的内容，包括画面中的文字、物体、布局、颜色等所有视觉信息。'
-                                : '请阅读这个文件，提取其中的全部文字内容，原样输出，不要添加任何额外解释或总结。如有表格，请用 markdown 表格格式输出。',
-                        },
-                    ],
-                }],
-                generationConfig: {
-                    temperature: 0.1,
-                    topP: 1,
-                },
-            }),
-        });
-
-        if (!upstream.ok) {
-            const errText = await upstream.text();
-            console.error('Gemini file read error:', errText);
-            return NextResponse.json({ error: '文件解析失败' }, { status: 500 });
-        }
-
-        const data = await upstream.json();
-        const parts = data?.candidates?.[0]?.content?.parts;
-        let extractedText = '';
-
-        if (Array.isArray(parts)) {
-            for (const part of parts) {
-                if (part?.text) extractedText += part.text;
+        if (IMAGE_EXTS.has(ext)) {
+            // Images → Gemini API (inlineData works for images)
+            if (!API_KEY) {
+                return NextResponse.json({ error: 'Missing API key' }, { status: 500 });
             }
-        }
-
-        if (!extractedText.trim()) {
-            return NextResponse.json({ error: '无法从文件中提取内容' }, { status: 400 });
+            const base64Data = buffer.toString('base64');
+            extractedText = await parseImageWithAI(base64Data, mimeType, file.name);
+        } else {
+            // Documents → local parsing (no API needed)
+            console.log(`[Upload] Parsing ${file.name} locally (${(file.size / 1024).toFixed(1)}KB)...`);
+            extractedText = await parseDocumentLocally(buffer, ext, file.name);
         }
 
         return NextResponse.json({
@@ -121,7 +194,11 @@ export async function POST(req: NextRequest) {
             content: extractedText.trim(),
         });
     } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+            return NextResponse.json({ error: '图片解析超时（60秒）' }, { status: 504 });
+        }
         const msg = err instanceof Error ? err.message : '文件解析失败';
+        console.error('[Upload] Error:', msg);
         return NextResponse.json({ error: msg }, { status: 500 });
     }
 }

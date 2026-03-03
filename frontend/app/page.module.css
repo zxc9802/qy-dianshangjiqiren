@@ -41,8 +41,18 @@
   background: hsla(var(--color-primary-raw), 0.02);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: none;
   transition: background var(--duration-slow) var(--ease-smooth);
+}
+
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-border) 20%, var(--color-border) 80%, transparent);
 }
 
 .headerLeft {
@@ -100,6 +110,7 @@
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px hsla(var(--color-primary-raw), 0.1);
   background: var(--color-card);
+  transform: scale(1.01);
 }
 
 .searchIcon {
@@ -221,6 +232,7 @@
 .sidebarOpen {
   transform: translateX(0);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.08);
+  animation: sidebarSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebarTabs {
@@ -370,7 +382,10 @@
 .welcome h2 {
   font-size: 24px;
   font-weight: 700;
-  color: var(--color-foreground);
+  background: linear-gradient(135deg, var(--color-foreground) 0%, var(--color-primary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .welcomeSub {
@@ -408,8 +423,30 @@
 }
 
 .wfCard:hover {
-  transform: translateY(-3px) scale(1.01);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+
+.wfCard::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  transition: none;
+  pointer-events: none;
+}
+
+.wfCard:hover::after {
+  animation: shimmerSlide 0.8s ease forwards;
+}
+
+@keyframes shimmerSlide {
+  to {
+    left: 120%;
+  }
 }
 
 .wfCardTitle {
@@ -489,9 +526,9 @@
 }
 
 .botCard:hover {
-  border-color: hsla(var(--color-primary-raw), 0.3);
-  box-shadow: var(--shadow-md), var(--shadow-glow);
-  transform: translateY(-2px);
+  border-color: hsla(var(--color-primary-raw), 0.4);
+  box-shadow: var(--shadow-md), 0 0 20px hsla(var(--color-primary-raw), 0.1);
+  transform: translateY(-3px);
 }
 
 .botCard:hover::after {
@@ -512,6 +549,7 @@
 
 .botCard:hover .botIcon {
   transform: scale(1.1);
+  filter: drop-shadow(0 0 6px currentColor);
 }
 
 .botInfo {

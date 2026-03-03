@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState, useEffect, DragEvent } from 'react';
+import { useCallback, useRef, useState, useEffect, DragEvent, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
     ReactFlow,
@@ -24,12 +24,18 @@ import '@xyflow/react/dist/style.css';
 import { useAuthStore } from '../../stores/auth';
 import StepRunner from './StepRunner';
 import styles from './builder.module.css';
+import {
+    Bot, Download, Upload, GitBranch, Repeat, Plug, Settings,
+    Target, ClipboardList, Lightbulb, MessageSquare, Trash2,
+    TrendingUp, Rocket, Zap, PenTool, Play, Save, CheckCircle,
+    ArrowLeft,
+} from 'lucide-react';
 
 // -------- Custom Node Component --------
 function CustomNode({ data, type }: { data: Record<string, unknown>; type?: string }) {
-    const icons: Record<string, string> = {
-        ai_agent: '🤖', input: '📥', output: '📤',
-        condition: '🔀', loop: '🔁', api_component: '🔌',
+    const icons: Record<string, ReactNode> = {
+        ai_agent: <Bot size={16} />, input: <Download size={16} />, output: <Upload size={16} />,
+        condition: <GitBranch size={16} />, loop: <Repeat size={16} />, api_component: <Plug size={16} />,
     };
     const colors: Record<string, string> = {
         ai_agent: '#3b82f6', input: '#22c55e', output: '#f59e0b',
@@ -51,13 +57,13 @@ function CustomNode({ data, type }: { data: Record<string, unknown>; type?: stri
             {!isOutput && <Handle id="s-bottom" type="source" position={Position.Bottom} className={styles.handleSource} />}
 
             <div className={styles.nodeHeader} style={{ background: colors[t] || '#666' }}>
-                <span>{icons[t] || '⚙️'}</span>
+                <span>{icons[t] || <Settings size={16} />}</span>
                 <span className={styles.nodeLabel}>{(data.label as string) || t}</span>
-                {hasSaved && <span className={styles.savedBadge}>✅</span>}
+                {hasSaved && <span className={styles.savedBadge}><CheckCircle size={12} /></span>}
             </div>
             <div className={styles.nodeBody}>
                 <p className={styles.nodeDesc}>
-                    {hasSaved ? '✅ 已填写数据' : (data.botName as string) || (data.description as string) || ''}
+                    {hasSaved ? <><CheckCircle size={12} /> 已填写数据</> : (data.botName as string) || (data.description as string) || ''}
                 </p>
             </div>
         </div>
@@ -74,13 +80,13 @@ const nodeTypes = {
 };
 
 // -------- Draggable palette items --------
-const PALETTE_ITEMS = [
-    { type: 'input', label: '用户输入', icon: '📥', desc: '工作流起点' },
-    { type: 'ai_agent', label: 'AI 智能体', icon: '🤖', desc: '调用AI分析' },
-    { type: 'api_component', label: 'API 组件', icon: '🔌', desc: '外部数据' },
-    { type: 'condition', label: '条件判断', icon: '🔀', desc: 'if/else 分流' },
-    { type: 'loop', label: '循环', icon: '🔁', desc: '遍历列表' },
-    { type: 'output', label: '输出结果', icon: '📤', desc: '工作流终点' },
+const PALETTE_ITEMS: Array<{ type: string; label: string; icon: ReactNode; desc: string }> = [
+    { type: 'input', label: '用户输入', icon: <Download size={18} />, desc: '工作流起点' },
+    { type: 'ai_agent', label: 'AI 智能体', icon: <Bot size={18} />, desc: '调用AI分析' },
+    { type: 'api_component', label: 'API 组件', icon: <Plug size={18} />, desc: '外部数据' },
+    { type: 'condition', label: '条件判断', icon: <GitBranch size={18} />, desc: 'if/else 分流' },
+    { type: 'loop', label: '循环', icon: <Repeat size={18} />, desc: '遍历列表' },
+    { type: 'output', label: '输出结果', icon: <Upload size={18} />, desc: '工作流终点' },
 ];
 
 // 34 bot options for AI agent config
@@ -103,26 +109,26 @@ const BOT_OPTIONS = [
 ];
 
 // Smart suggestion rules: after dropping a node, suggest next
-const NEXT_SUGGESTIONS: Record<string, Array<{ type: string; label: string; icon: string; botId?: string; botName?: string }>> = {
+const NEXT_SUGGESTIONS: Record<string, Array<{ type: string; label: string; icon: ReactNode; botId?: string; botName?: string }>> = {
     input: [
-        { type: 'ai_agent', label: 'AI通用助手', icon: '🤖', botId: '6', botName: 'AI通用助手' },
-        { type: 'ai_agent', label: '天猫爆款趋势拆解', icon: '📈', botId: '8', botName: '天猫爆款趋势拆解' },
-        { type: 'ai_agent', label: '小红书起号话题', icon: '🚀', botId: '19', botName: '小红书起号话题' },
+        { type: 'ai_agent', label: 'AI通用助手', icon: <Bot size={14} />, botId: '6', botName: 'AI通用助手' },
+        { type: 'ai_agent', label: '天猫爆款趋势拆解', icon: <TrendingUp size={14} />, botId: '8', botName: '天猫爆款趋势拆解' },
+        { type: 'ai_agent', label: '小红书起号话题', icon: <Rocket size={14} />, botId: '19', botName: '小红书起号话题' },
     ],
     ai_agent: [
-        { type: 'ai_agent', label: '卖点教练', icon: '⚡', botId: '9', botName: '卖点教练' },
-        { type: 'ai_agent', label: '小红书爆款标题', icon: '✍️', botId: '18', botName: '小红书爆款标题' },
-        { type: 'output', label: '输出结果', icon: '📤' },
+        { type: 'ai_agent', label: '卖点教练', icon: <Zap size={14} />, botId: '9', botName: '卖点教练' },
+        { type: 'ai_agent', label: '小红书爆款标题', icon: <PenTool size={14} />, botId: '18', botName: '小红书爆款标题' },
+        { type: 'output', label: '输出结果', icon: <Upload size={14} /> },
     ],
     condition: [
-        { type: 'ai_agent', label: 'AI通用助手', icon: '🤖', botId: '6', botName: 'AI通用助手' },
-        { type: 'output', label: '输出结果', icon: '📤' },
+        { type: 'ai_agent', label: 'AI通用助手', icon: <Bot size={14} />, botId: '6', botName: 'AI通用助手' },
+        { type: 'output', label: '输出结果', icon: <Upload size={14} /> },
     ],
 };
 
 const ONBOARDING_KEY = 'workflow_onboarding_done';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_BASE = '/api';
 
 function getToken(): string | null {
     return typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -349,7 +355,7 @@ function WorkflowBuilderInner() {
     return (
         <div className={styles.layout}>
             <header className={styles.header}>
-                <button onClick={() => router.push('/')} className={styles.backBtn}>← 返回</button>
+                <button onClick={() => router.push('/')} className={styles.backBtn}><ArrowLeft size={16} /> 返回</button>
                 <input
                     className={styles.nameInput}
                     value={workflowName}
@@ -362,10 +368,10 @@ function WorkflowBuilderInner() {
                         onClick={handleRun}
                         disabled={showRunner || nodes.length === 0}
                     >
-                        {showRunner ? '⚙️ 执行中...' : '▶ 开始执行'}
+                        {showRunner ? <><Settings size={14} /> 执行中...</> : <><Play size={14} /> 开始执行</>}
                     </button>
                     <button className={styles.saveBtn} onClick={handleSave} disabled={saving}>
-                        {saving ? '保存中...' : '💾 保存'}
+                        {saving ? '保存中...' : <><Save size={14} /> 保存</>}
                     </button>
                     <span className={styles.pointsBadge}>{user?.pointsBalance ?? 0} 积分</span>
                 </div>
@@ -424,11 +430,11 @@ function WorkflowBuilderInner() {
                     {/* Empty Canvas Hint */}
                     {nodes.length === 0 && (
                         <div className={styles.emptyHint}>
-                            <div className={styles.emptyHintIcon}>🎯</div>
+                            <div className={styles.emptyHintIcon}><Target size={32} /></div>
                             <h3>开始搭建工作流</h3>
                             <p>从左侧拖拽节点到画布，或使用快捷操作</p>
                             <div className={styles.emptyHintActions}>
-                                <button onClick={() => router.push('/workflow-builder')}>📋 使用模板</button>
+                                <button onClick={() => router.push('/workflow-builder')}><ClipboardList size={14} /> 使用模板</button>
                                 <button onClick={() => {
                                     const inputNode: Node = {
                                         id: 'node_input', type: 'input',
@@ -437,7 +443,7 @@ function WorkflowBuilderInner() {
                                     };
                                     setNodes([inputNode]);
                                     setLastDroppedNode(inputNode);
-                                }}>📥 快速添加输入节点</button>
+                                }}><Download size={14} /> 快速添加输入节点</button>
                             </div>
                         </div>
                     )}
@@ -445,7 +451,7 @@ function WorkflowBuilderInner() {
                     {/* Smart Suggestions Popup */}
                     {lastDroppedNode && NEXT_SUGGESTIONS[lastDroppedNode.type!] && (
                         <div className={styles.suggestionsBar}>
-                            <span className={styles.suggestionsLabel}>💡 推荐下一步：</span>
+                            <span className={styles.suggestionsLabel}><Lightbulb size={14} /> 推荐下一步：</span>
                             {NEXT_SUGGESTIONS[lastDroppedNode.type!].map((sug, i) => (
                                 <button
                                     key={i}
@@ -526,7 +532,7 @@ function WorkflowBuilderInner() {
                                 className={styles.enterChatBtn}
                                 onClick={() => setChatNodeId(selectedNode.id)}
                             >
-                                💬 进入对话
+                                <MessageSquare size={14} /> 进入对话
                             </button>
                         )}
 
@@ -542,7 +548,7 @@ function WorkflowBuilderInner() {
                         )}
 
                         <button className={styles.deleteNodeBtn} onClick={deleteSelectedNode}>
-                            🗑️ 删除节点
+                            <Trash2 size={14} /> 删除节点
                         </button>
                     </aside>
                 )}
@@ -620,23 +626,23 @@ function WorkflowBuilderInner() {
                     <div className={styles.onboardingCard}>
                         {onboardingStep === 0 && (
                             <>
-                                <div className={styles.onboardingIcon}>📥</div>
+                                <div className={styles.onboardingIcon}><Download size={32} /></div>
                                 <h3>第 1 步：添加节点</h3>
-                                <p>从左侧面板拖一个 <strong>📥 用户输入</strong> 节点到画布上</p>
+                                <p>从左侧面板拖一个 用户输入 节点到画布上</p>
                             </>
                         )}
                         {onboardingStep === 1 && (
                             <>
-                                <div className={styles.onboardingIcon}>🤖</div>
+                                <div className={styles.onboardingIcon}><Bot size={32} /></div>
                                 <h3>第 2 步：连接智能体</h3>
-                                <p>再拖一个 <strong>🤖 AI 智能体</strong> 节点，从输入拖线连接到它</p>
+                                <p>再拖一个 AI 智能体 节点，从输入拖线连接到它</p>
                             </>
                         )}
                         {onboardingStep === 2 && (
                             <>
-                                <div className={styles.onboardingIcon}>▶️</div>
+                                <div className={styles.onboardingIcon}><Play size={32} /></div>
                                 <h3>第 3 步：运行</h3>
-                                <p>点击右上角 <strong>▶ 运行</strong> 按钮查看AI输出结果</p>
+                                <p>点击右上角 运行 按钮查看AI输出结果</p>
                             </>
                         )}
                         <div className={styles.onboardingActions}>

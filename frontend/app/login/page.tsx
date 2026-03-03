@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../stores/auth';
 import styles from './login.module.css';
+import { Bot } from 'lucide-react';
 
 export default function LoginPage() {
     const [isLogin, setIsLogin] = useState(true);
@@ -62,7 +63,7 @@ export default function LoginPage() {
             {/* Left branding panel */}
             <div className={styles.brandPanel}>
                 <div className={styles.brandContent}>
-                    <div className={styles.brandLogo}>🤖</div>
+                    <div className={styles.brandLogo}><Bot size={40} /></div>
                     <h1 className={styles.brandTitle}>电商AI智能平台</h1>
                     <p className={styles.brandSub}>你的一站式电商AI顾问团</p>
                     <div className={styles.features}>

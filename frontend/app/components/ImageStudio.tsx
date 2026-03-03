@@ -335,18 +335,33 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
         setError(null);
 
         try {
-            const formData = new FormData();
-            formData.set('prompt', composedPrompt);
-            if (state.negativePrompt.trim()) formData.set('negativePrompt', state.negativePrompt.trim());
-            formData.set('aspectRatio', state.aspectRatio);
-            if (state.stylePreset.trim()) formData.set('stylePreset', state.stylePreset.trim());
-            if (state.background.trim()) formData.set('background', state.background.trim());
-            if (state.lighting.trim()) formData.set('lighting', state.lighting.trim());
-            formData.set('referenceStrength', String(state.referenceStrength));
-            formData.set('count', String(state.count));
-            if (referenceFile) formData.set('referenceImage', referenceFile);
+            // Build JSON body (base64 for reference image)
+            const body: Record<string, unknown> = {
+                prompt: composedPrompt,
+                aspectRatio: state.aspectRatio,
+                referenceStrength: state.referenceStrength,
+                count: state.count,
+            };
+            if (state.negativePrompt.trim()) body.negativePrompt = state.negativePrompt.trim();
+            if (state.stylePreset.trim()) body.stylePreset = state.stylePreset.trim();
+            if (state.background.trim()) body.background = state.background.trim();
+            if (state.lighting.trim()) body.lighting = state.lighting.trim();
 
-            const response = await api.generateImage(formData);
+            if (referenceFile) {
+                const base64 = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const result = reader.result as string;
+                        resolve(result.split(',')[1]); // strip data:...;base64, prefix
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(referenceFile);
+                });
+                body.referenceImage = base64;
+                body.referenceImageMime = referenceFile.type;
+            }
+
+            const response = await api.generateImage(body);
             setLatestResult(response.data);
             await loadRecent();
         } catch (err) {

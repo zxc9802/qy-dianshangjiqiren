@@ -1,17 +1,26 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useAuthStore } from './stores/auth';
 import { useConversationsStore } from './stores/conversations';
 import styles from './page.module.css';
+import {
+  Bot, Search, Sun, Moon, Gem, Home, Zap, ImageIcon, User, Trash2,
+  Target, Compass, MapPin, Briefcase, Users, Sparkles, TrendingUp,
+  Zap as ZapIcon, FrameIcon, Star, Swords, Coins, Camera, Link,
+  FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
+  Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
+  Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
+  Package, BookOpen, Landmark, Menu,
+} from 'lucide-react';
 
 interface BotInfo {
   id: string;
   name: string;
   category: string;
-  icon: string;
+  icon: ReactNode;
   iconColor: string;
   description: string;
   pointsPerUse: number;
@@ -27,60 +36,60 @@ const IMAGE_TOOL = {
   name: '电商图片生成机器人',
   category: '绘图机器人',
   description: '上传参考图，按参数一键生成 2K 电商图，支持历史复用与二次编辑。',
-  icon: '🖼️',
+  icon: <ImageIcon size={22} />,
   iconColor: '#7c3aed',
   route: '/bot/image-generator',
 };
 
 const MOCK_BOTS: BotInfo[] = [
-  { id: '1', name: 'KPI教练', category: '管理工具', icon: '🎯', iconColor: '#2563eb', description: '设计可量化 KPI 体系，让团队目标清晰可追踪。', pointsPerUse: 5 },
-  { id: '2', name: 'SOP梳理AI教练', category: '管理工具', icon: '🧭', iconColor: '#7c3aed', description: '把经验沉淀成标准流程，提升组织复制效率。', pointsPerUse: 5 },
-  { id: '3', name: 'OKR教练', category: '管理工具', icon: '📍', iconColor: '#059669', description: '聚焦战略目标，建立上下对齐的目标管理机制。', pointsPerUse: 5 },
-  { id: '4', name: '电商商业顾问', category: '管理工具', icon: '💼', iconColor: '#dc2626', description: '多维度分析业务问题，给出可执行的增长建议。', pointsPerUse: 8 },
-  { id: '5', name: '招聘教练', category: '管理工具', icon: '👥', iconColor: '#ea580c', description: '从岗位画像到面试评估，优化招聘全流程。', pointsPerUse: 5 },
-  { id: '6', name: 'AI通用助手', category: '管理工具', icon: '🤖', iconColor: '#0ea5e9', description: '写作、改写、分析、总结等通用任务处理。', pointsPerUse: 3 },
+  { id: '1', name: 'KPI教练', category: '管理工具', icon: <Target size={22} />, iconColor: '#2563eb', description: '设计可量化 KPI 体系，让团队目标清晰可追踪。', pointsPerUse: 5 },
+  { id: '2', name: 'SOP梳理AI教练', category: '管理工具', icon: <Compass size={22} />, iconColor: '#7c3aed', description: '把经验沉淀成标准流程，提升组织复制效率。', pointsPerUse: 5 },
+  { id: '3', name: 'OKR教练', category: '管理工具', icon: <MapPin size={22} />, iconColor: '#059669', description: '聚焦战略目标，建立上下对齐的目标管理机制。', pointsPerUse: 5 },
+  { id: '4', name: '电商商业顾问', category: '管理工具', icon: <Briefcase size={22} />, iconColor: '#dc2626', description: '多维度分析业务问题，给出可执行的增长建议。', pointsPerUse: 8 },
+  { id: '5', name: '招聘教练', category: '管理工具', icon: <Users size={22} />, iconColor: '#ea580c', description: '从岗位画像到面试评估，优化招聘全流程。', pointsPerUse: 5 },
+  { id: '6', name: 'AI通用助手', category: '管理工具', icon: <Bot size={22} />, iconColor: '#0ea5e9', description: '写作、改写、分析、总结等通用任务处理。', pointsPerUse: 3 },
 
-  { id: '7', name: '一键出10图提示词', category: '电商工具', icon: '✨', iconColor: '#7c3aed', description: '快速生成多套电商出图提示词，覆盖不同场景。', pointsPerUse: 8 },
-  { id: '8', name: '天猫爆款趋势拆解', category: '电商工具', icon: '📈', iconColor: '#2563eb', description: '拆解类目趋势逻辑，发现潜在爆款机会。', pointsPerUse: 8 },
-  { id: '9', name: '卖点教练', category: '电商工具', icon: '⚡', iconColor: '#ea580c', description: '提炼核心卖点，形成更强购买转化表达。', pointsPerUse: 5 },
-  { id: '10', name: '天猫主图策划教练', category: '电商工具', icon: '🖼️', iconColor: '#059669', description: '输出主图结构、视觉层级与点击优化策略。', pointsPerUse: 5 },
-  { id: '11', name: '爆款裂变分析AI教练', category: '电商工具', icon: '🔀', iconColor: '#dc2626', description: '拆解爆款可复制元素，扩展到更多人群与场景。', pointsPerUse: 8 },
-  { id: '12', name: '天猫评价教练', category: '电商工具', icon: '⭐', iconColor: '#f59e0b', description: '优化评价内容结构，提升信任与转化。', pointsPerUse: 5 },
-  { id: '13', name: '天猫竞争策略教练', category: '电商工具', icon: '⚔️', iconColor: '#7c3aed', description: '分析竞品优劣势，制定差异化竞争方案。', pointsPerUse: 8 },
-  { id: '14', name: '天猫客单价提升教练', category: '电商工具', icon: '💰', iconColor: '#059669', description: '通过组合策略与定价设计提高客单价。', pointsPerUse: 5 },
+  { id: '7', name: '一键出10图提示词', category: '电商工具', icon: <Sparkles size={22} />, iconColor: '#7c3aed', description: '快速生成多套电商出图提示词，覆盖不同场景。', pointsPerUse: 8 },
+  { id: '8', name: '天猫爆款趋势拆解', category: '电商工具', icon: <TrendingUp size={22} />, iconColor: '#2563eb', description: '拆解类目趋势逻辑，发现潜在爆款机会。', pointsPerUse: 8 },
+  { id: '9', name: '卖点教练', category: '电商工具', icon: <Zap size={22} />, iconColor: '#ea580c', description: '提炼核心卖点，形成更强购买转化表达。', pointsPerUse: 5 },
+  { id: '10', name: '天猫主图策划教练', category: '电商工具', icon: <FrameIcon size={22} />, iconColor: '#059669', description: '输出主图结构、视觉层级与点击优化策略。', pointsPerUse: 5 },
+  { id: '11', name: '爆款裂变分析AI教练', category: '电商工具', icon: <GitBranch size={22} />, iconColor: '#dc2626', description: '拆解爆款可复制元素，扩展到更多人群与场景。', pointsPerUse: 8 },
+  { id: '12', name: '天猫评价教练', category: '电商工具', icon: <Star size={22} />, iconColor: '#f59e0b', description: '优化评价内容结构，提升信任与转化。', pointsPerUse: 5 },
+  { id: '13', name: '天猫竞争策略教练', category: '电商工具', icon: <Swords size={22} />, iconColor: '#7c3aed', description: '分析竞品优劣势，制定差异化竞争方案。', pointsPerUse: 8 },
+  { id: '14', name: '天猫客单价提升教练', category: '电商工具', icon: <Coins size={22} />, iconColor: '#059669', description: '通过组合策略与定价设计提高客单价。', pointsPerUse: 5 },
 
-  { id: '15', name: '小红书爆文封面拆解', category: '小红书', icon: '📷', iconColor: '#dc2626', description: '拆解封面构图、配色与文案排版，提炼爆点模板。', pointsPerUse: 5 },
-  { id: '16', name: '小红书私域搭建SOP', category: '小红书', icon: '🔗', iconColor: '#2563eb', description: '设计合规引流路径，打通公域到私域转化。', pointsPerUse: 8 },
-  { id: '17', name: '小红书爆文拆解复制', category: '小红书', icon: '📑', iconColor: '#7c3aed', description: '逆向拆解爆文，沉淀可复用创作方法。', pointsPerUse: 5 },
-  { id: '18', name: '小红书爆款标题', category: '小红书', icon: '✍️', iconColor: '#ea580c', description: '生成多套高点击标题并给出使用建议。', pointsPerUse: 3 },
-  { id: '19', name: '小红书起号话题', category: '小红书', icon: '🚀', iconColor: '#059669', description: '为新账号制定起号阶段话题与内容方向。', pointsPerUse: 5 },
-  { id: '20', name: '小红书达人SOP流程', category: '小红书', icon: '📋', iconColor: '#f59e0b', description: '规范达人合作流程，从筛选到复盘闭环。', pointsPerUse: 8 },
-  { id: '21', name: '小红书正文拆解SOP', category: '小红书', icon: '🧩', iconColor: '#2563eb', description: '优化正文结构，提高阅读完成率与互动率。', pointsPerUse: 5 },
-  { id: '22', name: '小红书笔记评论生成', category: '小红书', icon: '💬', iconColor: '#dc2626', description: '批量生成高互动评论，提高内容活跃度。', pointsPerUse: 3 },
+  { id: '15', name: '小红书爆文封面拆解', category: '小红书', icon: <Camera size={22} />, iconColor: '#dc2626', description: '拆解封面构图、配色与文案排版，提炼爆点模板。', pointsPerUse: 5 },
+  { id: '16', name: '小红书私域搭建SOP', category: '小红书', icon: <Link size={22} />, iconColor: '#2563eb', description: '设计合规引流路径，打通公域到私域转化。', pointsPerUse: 8 },
+  { id: '17', name: '小红书爆文拆解复制', category: '小红书', icon: <FileText size={22} />, iconColor: '#7c3aed', description: '逆向拆解爆文，沉淀可复用创作方法。', pointsPerUse: 5 },
+  { id: '18', name: '小红书爆款标题', category: '小红书', icon: <PenTool size={22} />, iconColor: '#ea580c', description: '生成多套高点击标题并给出使用建议。', pointsPerUse: 3 },
+  { id: '19', name: '小红书起号话题', category: '小红书', icon: <Rocket size={22} />, iconColor: '#059669', description: '为新账号制定起号阶段话题与内容方向。', pointsPerUse: 5 },
+  { id: '20', name: '小红书达人SOP流程', category: '小红书', icon: <ClipboardList size={22} />, iconColor: '#f59e0b', description: '规范达人合作流程，从筛选到复盘闭环。', pointsPerUse: 8 },
+  { id: '21', name: '小红书正文拆解SOP', category: '小红书', icon: <Puzzle size={22} />, iconColor: '#2563eb', description: '优化正文结构，提高阅读完成率与互动率。', pointsPerUse: 5 },
+  { id: '22', name: '小红书笔记评论生成', category: '小红书', icon: <MessageSquare size={22} />, iconColor: '#dc2626', description: '批量生成高互动评论，提高内容活跃度。', pointsPerUse: 3 },
 
-  { id: '23', name: '毛泽东战略智能体', category: '企业教练', icon: '🚩', iconColor: '#dc2626', description: '以战略视角分析复杂问题，拆解关键矛盾。', pointsPerUse: 10 },
-  { id: '24', name: '乔布斯产品教练', category: '企业教练', icon: '📱', iconColor: '#1e293b', description: '围绕用户体验与产品本质优化方案。', pointsPerUse: 10 },
-  { id: '25', name: '张一鸣商业教练', category: '企业教练', icon: '📊', iconColor: '#2563eb', description: '数据驱动决策，建立可验证增长机制。', pointsPerUse: 10 },
+  { id: '23', name: '毛泽东战略智能体', category: '企业教练', icon: <Flag size={22} />, iconColor: '#dc2626', description: '以战略视角分析复杂问题，拆解关键矛盾。', pointsPerUse: 10 },
+  { id: '24', name: '乔布斯产品教练', category: '企业教练', icon: <Smartphone size={22} />, iconColor: '#1e293b', description: '围绕用户体验与产品本质优化方案。', pointsPerUse: 10 },
+  { id: '25', name: '张一鸣商业教练', category: '企业教练', icon: <BarChart3 size={22} />, iconColor: '#2563eb', description: '数据驱动决策，建立可验证增长机制。', pointsPerUse: 10 },
 
-  { id: '26', name: '降税模型测算', category: '财税', icon: '🧮', iconColor: '#059669', description: '评估不同方案的税负影响，支持合规优化。', pointsPerUse: 8 },
-  { id: '27', name: '股权架构设计', category: '财税', icon: '🔀', iconColor: '#7c3aed', description: '设计更稳健的股权结构与控制权安排。', pointsPerUse: 10 },
-  { id: '28', name: '电商平台专项合规', category: '财税', icon: '🛡️', iconColor: '#2563eb', description: '梳理平台规则与税务合规重点，规避风险。', pointsPerUse: 8 },
-  { id: '29', name: '薪酬与个税规划', category: '财税', icon: '👛', iconColor: '#ea580c', description: '优化薪酬结构，兼顾员工激励与税务合规。', pointsPerUse: 8 },
-  { id: '30', name: '预警诊断&稽查', category: '财税', icon: '⚠️', iconColor: '#f59e0b', description: '提前识别税务风险，完善应对与稽查准备。', pointsPerUse: 10 },
+  { id: '26', name: '降税模型测算', category: '财税', icon: <Calculator size={22} />, iconColor: '#059669', description: '评估不同方案的税负影响，支持合规优化。', pointsPerUse: 8 },
+  { id: '27', name: '股权架构设计', category: '财税', icon: <GitBranch size={22} />, iconColor: '#7c3aed', description: '设计更稳健的股权结构与控制权安排。', pointsPerUse: 10 },
+  { id: '28', name: '电商平台专项合规', category: '财税', icon: <Shield size={22} />, iconColor: '#2563eb', description: '梳理平台规则与税务合规重点，规避风险。', pointsPerUse: 8 },
+  { id: '29', name: '薪酬与个税规划', category: '财税', icon: <Wallet size={22} />, iconColor: '#ea580c', description: '优化薪酬结构，兼顾员工激励与税务合规。', pointsPerUse: 8 },
+  { id: '30', name: '预警诊断&稽查', category: '财税', icon: <AlertTriangle size={22} />, iconColor: '#f59e0b', description: '提前识别税务风险，完善应对与稽查准备。', pointsPerUse: 10 },
 
-  { id: '31', name: 'AI工作流开发需求细化', category: 'AI陪跑教练', icon: '⚙️', iconColor: '#64748b', description: '将模糊想法细化为可执行需求文档。', pointsPerUse: 5 },
-  { id: '32', name: '调研访谈-高价值场景', category: 'AI陪跑教练', icon: '🔍', iconColor: '#2563eb', description: '通过调研定位 AI 应用高价值场景。', pointsPerUse: 8 },
-  { id: '33', name: '火火提示词调试', category: 'AI陪跑教练', icon: '🧪', iconColor: '#059669', description: '快速调试提示词，提升模型输出稳定性。', pointsPerUse: 3 },
-  { id: '34', name: 'AI工作流访谈教练', category: 'AI陪跑教练', icon: '🧠', iconColor: '#7c3aed', description: '梳理流程痛点，设计可落地的 AI 改造路径。', pointsPerUse: 5 },
+  { id: '31', name: 'AI工作流开发需求细化', category: 'AI陪跑教练', icon: <Settings size={22} />, iconColor: '#64748b', description: '将模糊想法细化为可执行需求文档。', pointsPerUse: 5 },
+  { id: '32', name: '调研访谈-高价值场景', category: 'AI陪跑教练', icon: <SearchIcon size={22} />, iconColor: '#2563eb', description: '通过调研定位 AI 应用高价值场景。', pointsPerUse: 8 },
+  { id: '33', name: '火火提示词调试', category: 'AI陪跑教练', icon: <FlaskConical size={22} />, iconColor: '#059669', description: '快速调试提示词，提升模型输出稳定性。', pointsPerUse: 3 },
+  { id: '34', name: 'AI工作流访谈教练', category: 'AI陪跑教练', icon: <Brain size={22} />, iconColor: '#7c3aed', description: '梳理流程痛点，设计可落地的 AI 改造路径。', pointsPerUse: 5 },
 ];
 
-const CATEGORY_ICONS: Record<string, string> = {
-  '管理工具': '🧭',
-  '电商工具': '📦',
-  '小红书': '📕',
-  '企业教练': '🏛️',
-  '财税': '💼',
-  'AI陪跑教练': '🤖',
+const CATEGORY_ICONS: Record<string, ReactNode> = {
+  '管理工具': <Compass size={18} />,
+  '电商工具': <Package size={18} />,
+  '小红书': <BookOpen size={18} />,
+  '企业教练': <Landmark size={18} />,
+  '财税': <Briefcase size={18} />,
+  'AI陪跑教练': <Bot size={18} />,
 };
 
 export default function HomePage() {
@@ -114,7 +123,7 @@ export default function HomePage() {
 
   const botsByCategory = categories.map((cat) => ({
     category: cat,
-    icon: CATEGORY_ICONS[cat] || '🧠',
+    icon: CATEGORY_ICONS[cat] || <Brain size={18} />,
     bots: filteredBots.filter((b) => b.category === cat),
   })).filter((g) => g.bots.length > 0);
 
@@ -145,13 +154,13 @@ export default function HomePage() {
     <div className={styles.layout}>
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <button className={styles.sidebarToggle} onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
-          <span className={styles.logoIcon}>🤖</span>
+          <button className={styles.sidebarToggle} onClick={() => setSidebarOpen(!sidebarOpen)}><Menu size={20} /></button>
+          <span className={styles.logoIcon}><Bot size={22} /></span>
           <h1 className={styles.logo}>电商 AI 智能平台</h1>
         </div>
         <div className={styles.headerCenter}>
           <div className={styles.searchBox}>
-            <span className={styles.searchIcon}>🔍</span>
+            <span className={styles.searchIcon}><Search size={16} /></span>
             <input
               type="text"
               placeholder="搜索工具或机器人..."
@@ -163,6 +172,7 @@ export default function HomePage() {
           </div>
         </div>
         <div className={styles.headerRight}>
+          <button onClick={() => requireAuth('/my-bots')} className={styles.navBtn}>我的智能体</button>
           <button onClick={() => requireAuth('/workflow-builder')} className={styles.navBtn}>工作流</button>
           {mounted && (
             <button
@@ -170,12 +180,12 @@ export default function HomePage() {
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
             >
-              {theme === 'dark' ? '☀️' : '🌙'}
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           )}
           {isAuthenticated ? (
             <>
-              <div className={styles.pointsBadge}>💎 {user?.pointsBalance ?? 0} 积分</div>
+              <div className={styles.pointsBadge}><Gem size={14} /> {user?.pointsBalance ?? 0} 积分</div>
               <button onClick={() => router.push('/profile')} className={styles.avatarBtn}>{user?.nickname?.slice(0, 1) || '我'}</button>
             </>
           ) : (
@@ -202,7 +212,7 @@ export default function HomePage() {
                 <p className={styles.sidebarPreview}>{getLastMsg(conv)}</p>
                 <div className={styles.sidebarActions}>
                   <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); toggleFavorite(conv.id); }}>{conv.isFavorite ? '★' : '☆'}</button>
-                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); sidebarTab === 'favorites' ? removeFavorite(conv.id) : deleteConversation(conv.id); }}>🗑️</button>
+                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); sidebarTab === 'favorites' ? removeFavorite(conv.id) : deleteConversation(conv.id); }}><Trash2 size={14} /></button>
                 </div>
               </div>
             ))}
@@ -218,7 +228,7 @@ export default function HomePage() {
           <div className={styles.workflowCards}>
             {WORKFLOW_CARDS.map((wf) => (
               <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => requireAuth('/workflow-builder')}>
-                <h3 className={styles.wfCardTitle}>⚡ {wf.title}</h3>
+                <h3 className={styles.wfCardTitle}><Zap size={16} /> {wf.title}</h3>
                 <div className={styles.wfSteps}>
                   {wf.steps.map((s, i) => <span key={i}>{s}{i < wf.steps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
                 </div>
@@ -229,7 +239,7 @@ export default function HomePage() {
 
           {imageToolMatched && (
             <div className={styles.categorySection}>
-              <h3 className={styles.categoryTitle}>🧩 {IMAGE_TOOL.category}</h3>
+              <h3 className={styles.categoryTitle}><Puzzle size={18} /> {IMAGE_TOOL.category}</h3>
               <div className={styles.botGrid}>
                 <div className={styles.botCard} onClick={() => router.push(IMAGE_TOOL.route)}>
                   <div className={styles.botIcon} style={{ background: IMAGE_TOOL.iconColor + '15', color: IMAGE_TOOL.iconColor }}>{IMAGE_TOOL.icon}</div>
@@ -266,10 +276,10 @@ export default function HomePage() {
       </div>
 
       <div className={styles.mobileNav}>
-        <button className={styles.mobileNavBtn} onClick={() => router.push('/')}><span>🏠</span>首页</button>
-        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/workflow-builder')}><span>⚡</span>工作流</button>
-        <button className={styles.mobileNavBtn} onClick={() => router.push('/bot/image-generator')}><span>🖼️</span>绘图</button>
-        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/profile')}><span>👤</span>我的</button>
+        <button className={styles.mobileNavBtn} onClick={() => router.push('/')}><span><Home size={20} /></span>首页</button>
+        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/workflow-builder')}><span><Zap size={20} /></span>工作流</button>
+        <button className={styles.mobileNavBtn} onClick={() => router.push('/bot/image-generator')}><span><ImageIcon size={20} /></span>绘图</button>
+        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/profile')}><span><User size={20} /></span>我的</button>
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import imageGenerationRoutes from './routes/imageGenerations';
 import imagePromptTagRoutes from './routes/imagePromptTags';
 import workflowRoutes from './routes/workflow';
 import workflowAiRoutes from './routes/workflow-ai';
+import customBotRoutes from './routes/custom-bots';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -24,6 +25,7 @@ app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', cred
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/image-assets', express.static(path.join(process.cwd(), 'storage')));
+app.use('/api/bot-avatars', express.static(path.join(process.cwd(), 'uploads', 'bot-avatars')));
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -39,6 +41,7 @@ app.use('/api/image-generations', imageGenerationRoutes);
 app.use('/api/image-prompt-tags', imagePromptTagRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/workflow-ai', workflowAiRoutes);
+app.use('/api/custom-bots', customBotRoutes);
 
 app.use(errorHandler);
 

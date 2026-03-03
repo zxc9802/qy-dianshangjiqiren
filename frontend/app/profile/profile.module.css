@@ -80,12 +80,14 @@
 .navItem:hover {
     background: var(--color-accent);
     color: var(--color-foreground);
+    border-left: 3px solid transparent;
 }
 
 .navActive {
     background: var(--color-primary-light);
     color: var(--color-primary);
     font-weight: 500;
+    border-left: 3px solid var(--color-primary);
 }
 
 .logoutBtn {
@@ -195,7 +197,8 @@
 
 .rechargeItem:hover {
     border-color: hsla(var(--color-primary-raw), 0.3);
-    box-shadow: var(--shadow-md), var(--shadow-glow);
+    box-shadow: var(--shadow-md), 0 0 16px hsla(var(--color-primary-raw), 0.08);
+    transform: translateY(-2px);
 }
 
 .rechargeTag {

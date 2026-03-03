@@ -1,14 +1,19 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../stores/auth';
 import styles from './fullplan.module.css';
+import {
+    Search, Swords, Zap, Palette, FileText, Star, BookOpen,
+    Coins, Target, Rocket, CheckCircle, Loader2, XCircle,
+    ArrowLeft, Square,
+} from 'lucide-react';
 
 interface PlanStep {
     id: string;
     title: string;
-    icon: string;
+    icon: ReactNode;
     description: string;
     prompt: string;
     status: 'waiting' | 'running' | 'done' | 'error';
@@ -16,14 +21,14 @@ interface PlanStep {
 }
 
 const PLAN_STEPS: Omit<PlanStep, 'status' | 'result'>[] = [
-    { id: 'market', title: '市场分析', icon: '🔍', description: '分析市场趋势、价格带、人群画像', prompt: '你是电商市场分析专家。请对以下产品做详细市场分析：\n\n{input}\n\n请从以下维度分析：\n1. 市场规模和增长趋势\n2. 价格带分布（低/中/高端占比）\n3. 目标人群画像（年龄、性别、消费习惯）\n4. 市场机会和风险\n5. 季节性趋势\n\n用数据化、结构化的方式输出，包含具体数字估算。' },
-    { id: 'competitor', title: '竞品扫描', icon: '⚔️', description: '分析TOP竞品的产品、定价、流量策略', prompt: '你是电商竞争策略专家。基于以下产品信息和前面的市场分析，做竞品分析：\n\n产品：{input}\n市场分析：{prev}\n\n请输出：\n1. TOP5竞品对比表（产品名、价格、月销、评分、核心卖点）\n2. 各竞品的差异化策略\n3. 竞品的流量来源分析\n4. 可切入的竞争空白点\n5. 建议的差异化定位\n\n用表格和要点形式输出。' },
-    { id: 'selling', title: '超级卖点', icon: '⚡', description: '提炼3个核心卖点 + FAB分析', prompt: '你是卖点提炼专家。基于以下产品信息和之前的市场竞品分析，提炼超级卖点：\n\n产品：{input}\n前序分析：{prev}\n\n请输出：\n1. 3个超级卖点（每个包含FAB分析：Feature特点、Advantage优势、Benefit利益点）\n2. 30字以内的核心广告语\n3. 每个卖点对应的使用场景\n4. 与竞品的差异化话术\n5. 适合放在主图上的3句话\n\n要求：口语化、有画面感、能打动消费者。' },
-    { id: 'mainimg', title: '主图策划', icon: '🎨', description: '策划天猫5张主图方案', prompt: '你是天猫主图策划专家。基于以下产品和卖点，策划5张主图：\n\n产品：{input}\n卖点：{prev}\n\n请输出每张主图的详细方案：\n- 第1张（首图/点击图）：构图、文案、视觉重点\n- 第2张（核心卖点图）：展示方式、排版建议\n- 第3张（场景/情感图）：使用场景、氛围\n- 第4张（对比/数据图）：对比维度、呈现方式\n- 第5张（促销/行动图）：促销信息、CTA\n\n每张图包含：构图描述、主标题（8字内）、副标题、配色建议、AI出图提示词（英文）。' },
-    { id: 'detail', title: '详情页框架', icon: '📝', description: '生成完整的详情页文案结构', prompt: '你是电商详情页文案专家。基于以下产品和之前的分析，生成完整详情页：\n\n产品：{input}\n参考：{prev}\n\n请输出详情页结构（从上到下）：\n1. 开屏大图文案（一句话戳中痛点）\n2. 核心卖点展示区（3个卖点各配标题+说明+场景图建议）\n3. 产品参数表\n4. 使用场景展示（4个场景）\n5. 对比优势图（vs竞品对比表）\n6. 用户好评展示区（6条模拟好评）\n7. 品牌故事段\n8. 售后保障区\n\n每个模块都包含：标题、正文、视觉建议。' },
-    { id: 'review', title: '评价模板', icon: '⭐', description: '生成20条种子评价', prompt: '你是天猫评价内容策划专家。基于以下产品和卖点，生成种子评价：\n\n产品：{input}\n卖点：{prev}\n\n请生成20条不同视角的买家好评（分类输出）：\n- 5条"首次使用"视角\n- 5条"对比竞品"视角\n- 5条"送礼/推荐"视角\n- 5条"回购/长期使用"视角\n\n要求：口语化、有细节、有情感、长度100-200字、包含具体使用场景。每条标注建议星级和晒图建议。' },
-    { id: 'xiaohongshu', title: '小红书种草', icon: '📕', description: '生成5篇小红书笔记初稿', prompt: '你是小红书爆文写手。基于以下产品信息，生成5篇种草笔记：\n\n产品：{input}\n卖点：{prev}\n\n5篇笔记类型：\n1. 开箱测评文（详细测评体验）\n2. 合集种草文（XX元好物合集）\n3. 场景安利文（特定场景推荐）\n4. 对比测评文（vs竞品真实对比）\n5. 干货攻略文（选购指南类）\n\n每篇包含：\n- 标题（3个备选，含emoji）\n- 正文（800字左右，口语化，多emoji）\n- 标签（10个#话题标签）\n- 封面拍摄建议\n\n风格：真实、种草感强、像真人分享。' },
-    { id: 'pricing', title: '定价策略', icon: '💰', description: '输出阶梯定价 + 促销方案', prompt: '你是电商定价策略专家。基于以下产品和市场竞品分析，制定定价策略：\n\n产品：{input}\n参考：{prev}\n\n请输出：\n1. 建议零售价（含定价逻辑推导过程）\n2. SKU价格体系（基础款/标准款/豪华款）\n3. 上市前90天促销节奏表\n4. 优惠券设计方案（面额、门槛、投放渠道）\n5. 满减活动方案\n6. 利润率测算表\n7. 价格锚定策略\n\n用表格和具体数字输出。' },
+    { id: 'market', title: '市场分析', icon: <Search size={18} />, description: '分析市场趋势、价格带、人群画像', prompt: '你是电商市场分析专家。请对以下产品做详细市场分析：\n\n{input}\n\n请从以下维度分析：\n1. 市场规模和增长趋势\n2. 价格带分布（低/中/高端占比）\n3. 目标人群画像（年龄、性别、消费习惯）\n4. 市场机会和风险\n5. 季节性趋势\n\n用数据化、结构化的方式输出，包含具体数字估算。' },
+    { id: 'competitor', title: '竞品扫描', icon: <Swords size={18} />, description: '分析TOP竞品的产品、定价、流量策略', prompt: '你是电商竞争策略专家。基于以下产品信息和前面的市场分析，做竞品分析：\n\n产品：{input}\n市场分析：{prev}\n\n请输出：\n1. TOP5竞品对比表（产品名、价格、月销、评分、核心卖点）\n2. 各竞品的差异化策略\n3. 竞品的流量来源分析\n4. 可切入的竞争空白点\n5. 建议的差异化定位\n\n用表格和要点形式输出。' },
+    { id: 'selling', title: '超级卖点', icon: <Zap size={18} />, description: '提炼3个核心卖点 + FAB分析', prompt: '你是卖点提炼专家。基于以下产品信息和之前的市场竞品分析，提炼超级卖点：\n\n产品：{input}\n前序分析：{prev}\n\n请输出：\n1. 3个超级卖点（每个包含FAB分析：Feature特点、Advantage优势、Benefit利益点）\n2. 30字以内的核心广告语\n3. 每个卖点对应的使用场景\n4. 与竞品的差异化话术\n5. 适合放在主图上的3句话\n\n要求：口语化、有画面感、能打动消费者。' },
+    { id: 'mainimg', title: '主图策划', icon: <Palette size={18} />, description: '策划天猫5张主图方案', prompt: '你是天猫主图策划专家。基于以下产品和卖点，策划5张主图：\n\n产品：{input}\n卖点：{prev}\n\n请输出每张主图的详细方案：\n- 第1张（首图/点击图）：构图、文案、视觉重点\n- 第2张（核心卖点图）：展示方式、排版建议\n- 第3张（场景/情感图）：使用场景、氛围\n- 第4张（对比/数据图）：对比维度、呈现方式\n- 第5张（促销/行动图）：促销信息、CTA\n\n每张图包含：构图描述、主标题（8字内）、副标题、配色建议、AI出图提示词（英文）。' },
+    { id: 'detail', title: '详情页框架', icon: <FileText size={18} />, description: '生成完整的详情页文案结构', prompt: '你是电商详情页文案专家。基于以下产品和之前的分析，生成完整详情页：\n\n产品：{input}\n参考：{prev}\n\n请输出详情页结构（从上到下）：\n1. 开屏大图文案（一句话戛中痛点）\n2. 核心卖点展示区（3个卖点各配标题+说明+场景图建议）\n3. 产品参数表\n4. 使用场景展示（4个场景）\n5. 对比优势图（vs竞品对比表）\n6. 用户好评展示区（6条模拟好评）\n7. 品牌故事段\n8. 售后保障区\n\n每个模块都包含：标题、正文、视觉建议。' },
+    { id: 'review', title: '评价模板', icon: <Star size={18} />, description: '生成20条种子评价', prompt: '你是天猫评价内容策划专家。基于以下产品和卖点，生成种子评价：\n\n产品：{input}\n卖点：{prev}\n\n请生成20条不同视角的买家好评（分类输出）：\n- 5条"首次使用"视角\n- 5条"对比竞品"视角\n- 5条"送礼/推荐"视角\n- 5条"回购/长期使用"视角\n\n要求：口语化、有细节、有情感、长度100-200字、包含具体使用场景。每条标注建议星级和晒图建议。' },
+    { id: 'xiaohongshu', title: '小红书种草', icon: <BookOpen size={18} />, description: '生成5篇小红书笔记初稿', prompt: '你是小红书爆文写手。基于以下产品信息，生成5篇种草笔记：\n\n产品：{input}\n卖点：{prev}\n\n5篇笔记类型：\n1. 开箱测评文（详细测评体验）\n2. 合集种草文（XX元好物合集）\n3. 场景安利文（特定场景推荐）\n4. 对比测评文（vs竞品真实对比）\n5. 干货攻略文（选购指南类）\n\n每篇包含：\n- 标题（3个备选，含emoji）\n- 正文（800字左右，口语化，多emoji）\n- 标签（10个#话题标签）\n- 封面拍摄建议\n\n风格：真实、种草感强、像真人分享。' },
+    { id: 'pricing', title: '定价策略', icon: <Coins size={18} />, description: '输出阶梯定价 + 促销方案', prompt: '你是电商定价策略专家。基于以下产品和市场竞品分析，制定定价策略：\n\n产品：{input}\n参考：{prev}\n\n请输出：\n1. 建议零售价（含定价逻辑推导过程）\n2. SKU价格体系（基础款/标准款/豪华款）\n3. 上市前90天促销节奏表\n4. 优惠券设计方案（面额、门槛、投放渠道）\n5. 满减活动方案\n6. 利润率测算表\n7. 价格锚定策略\n\n用表格和具体数字输出。' },
 ];
 
 export default function FullPlanPage() {
@@ -130,8 +135,8 @@ export default function FullPlanPage() {
     return (
         <div className={styles.layout}>
             <header className={styles.header}>
-                <button onClick={() => router.push('/')} className={styles.backBtn}>← 返回</button>
-                <h1 className={styles.title}>🎯 一键全案生成器</h1>
+                <button onClick={() => router.push('/')} className={styles.backBtn}><ArrowLeft size={16} /> 返回</button>
+                <h1 className={styles.title}><Target size={20} /> 一键全案生成器</h1>
                 <span className={styles.badge}>AI自动化</span>
             </header>
 
@@ -151,10 +156,10 @@ export default function FullPlanPage() {
                     <div className={styles.inputActions}>
                         {!isRunning ? (
                             <button className={styles.startBtn} onClick={runPlan} disabled={!productInput.trim()}>
-                                🚀 开始生成全案
+                                <Rocket size={16} /> 开始生成全案
                             </button>
                         ) : (
-                            <button className={styles.stopBtn} onClick={stopPlan}>⏹ 停止</button>
+                            <button className={styles.stopBtn} onClick={stopPlan}><Square size={14} /> 停止</button>
                         )}
                         <span className={styles.costHint}>预计消耗 40 积分 · 约10分钟</span>
                     </div>
@@ -174,9 +179,9 @@ export default function FullPlanPage() {
                             {steps.map((step, i) => (
                                 <div key={step.id} className={`${styles.timelineItem} ${styles[step.status]}`}>
                                     <span className={styles.timelineIcon}>
-                                        {step.status === 'done' ? '✅' :
-                                            step.status === 'running' ? '⏳' :
-                                                step.status === 'error' ? '❌' : '○'}
+                                        {step.status === 'done' ? <CheckCircle size={14} /> :
+                                            step.status === 'running' ? <Loader2 size={14} className="animate-spin" /> :
+                                                step.status === 'error' ? <XCircle size={14} /> : '○'}
                                     </span>
                                     <span className={styles.timelineLabel}>{step.icon} {step.title}</span>
                                 </div>
@@ -194,8 +199,8 @@ export default function FullPlanPage() {
                                 <h3 className={styles.resultTitle}>Step {i + 1}: {step.title}</h3>
                                 <span className={styles.resultStatus}>
                                     {step.status === 'running' && <span className={styles.spinner2} />}
-                                    {step.status === 'done' && '✅ 完成'}
-                                    {step.status === 'error' && '❌ 出错'}
+                                    {step.status === 'done' && <><CheckCircle size={14} /> 完成</>}
+                                    {step.status === 'error' && <><XCircle size={14} /> 出错</>}
                                     {step.status === 'waiting' && '等待中'}
                                 </span>
                             </div>

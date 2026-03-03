@@ -6,6 +6,11 @@ import { useAuthStore } from '../../stores/auth';
 import { useConversationsStore } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
 import styles from './chat.module.css';
+import {
+    MessageSquare, BarChart3, Trash2, Sparkles, FileText,
+    ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
+    Plus, ChevronDown,
+} from 'lucide-react';
 
 interface MessageItem {
     id: string;
@@ -115,7 +120,8 @@ export default function ChatPage() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [botSwitcherOpen, setBotSwitcherOpen] = useState(false);
 
-    const botName = BOT_NAMES[botId] || 'AI助手';
+    const urlName = searchParams.get('name');
+    const botName = BOT_NAMES[botId] || urlName || 'AI助手';
     const welcomeMsg = BOT_WELCOMES[botId] || '你好，说说你的需求。';
 
     // Load existing conversation or start new
@@ -174,18 +180,29 @@ export default function ChatPage() {
         const hasFile = !!attachedFile;
         if ((!text.trim() && !hasFile) || isStreaming) return;
 
-        // Combine file content with user text
-        let finalText = text.trim();
+        // Separate display text (shown to user) from AI text (sent to model)
+        let displayText = text.trim();
+        let aiText = text.trim();
+
         if (attachedFile) {
-            const filePrefix = `[文件: ${attachedFile.name}]\n\n${attachedFile.content}`;
-            finalText = finalText ? `${filePrefix}\n\n用户追问: ${finalText}` : filePrefix;
+            const fileLabel = attachedFile.isImage
+                ? `[图片: ${attachedFile.name}]`
+                : `[文件: ${attachedFile.name}]`;
+
+            // User sees clean label only
+            displayText = displayText ? `${fileLabel}\n${displayText}` : fileLabel;
+
+            // AI receives full extracted content as context
+            const aiPrefix = `${fileLabel}\n\n${attachedFile.content}`;
+            aiText = aiText ? `${aiPrefix}\n\n用户追问: ${aiText}` : aiPrefix;
+
             removeAttachment();
         }
 
         const userMsg: MessageItem = {
             id: `user-${Date.now()}`,
             role: 'user',
-            content: finalText,
+            content: displayText,
         };
 
         const newMessages = [...messages, userMsg];
@@ -196,17 +213,25 @@ export default function ChatPage() {
         setStreamingText('');
 
         try {
-            // Build conversation history (skip welcome message ID)
-            const history = newMessages.map(m => ({
+            // Build conversation history - use AI text for the latest message
+            const history = newMessages.map((m, i) => ({
                 role: m.role,
-                content: m.content,
+                content: i === newMessages.length - 1 && m.role === 'user' ? aiText : m.content,
             }));
 
             const systemPrompt = BOT_PROMPTS[botId] || '你是一个AI助手。';
 
+            // Pass auth token for custom bots
+            const token = typeof window !== 'undefined' ? (() => {
+                try { return JSON.parse(localStorage.getItem('user') || '{}').token || ''; } catch { return ''; }
+            })() : '';
+
             const res = await fetch('/api/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'x-auth-token': token } : {}),
+                },
                 body: JSON.stringify({ botId, systemPrompt, messages: history }),
             });
 
@@ -286,6 +311,7 @@ export default function ChatPage() {
         previewUrl: string | null;
         isImage: boolean;
     } | null>(null);
+    const [uploadFileName, setUploadFileName] = useState('');
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -302,11 +328,14 @@ export default function ChatPage() {
         }
 
         setIsUploading(true);
+        setUploadFileName(file.name);
+        console.log(`[Upload] Starting upload: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
         try {
             const formData = new FormData();
             formData.append('file', file);
             const res = await fetch('/api/upload', { method: 'POST', body: formData });
             const data = await res.json();
+            console.log(`[Upload] Response for ${file.name}:`, data.error || 'OK');
 
             if (data.error) {
                 alert(data.error);
@@ -320,11 +349,13 @@ export default function ChatPage() {
                 previewUrl,
                 isImage,
             });
-        } catch {
+        } catch (err) {
+            console.error('[Upload] Error:', err);
             alert('文件上传失败，请重试');
             if (previewUrl) URL.revokeObjectURL(previewUrl);
         } finally {
             setIsUploading(false);
+            setUploadFileName('');
         }
     };
 
@@ -335,39 +366,68 @@ export default function ChatPage() {
 
     // Voice input (ByteDance ASR via /api/voice)
     const [isRecording, setIsRecording] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const pcmRecorderRef = useRef<Pcm16Recorder | null>(null);
 
     const toggleVoice = async () => {
+        console.log('[Voice] toggleVoice called, isRecording:', isRecording);
         if (isRecording) {
             setIsRecording(false);
             const recorder = pcmRecorderRef.current;
             pcmRecorderRef.current = null;
-            if (!recorder) return;
+            if (!recorder) {
+                console.warn('[Voice] No recorder ref found');
+                return;
+            }
 
             try {
+                console.log('[Voice] Stopping recorder...');
                 const audioBlob = await recorder.stop();
-                if (audioBlob.size < 1000) return;
-
-                const formData = new FormData();
-                formData.append('audio', audioBlob, 'recording.wav');
-                const res = await fetch('/api/voice', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.text) {
-                    setInputText(prev => prev + data.text);
-                } else if (data.error) {
-                    alert('语音识别失败: ' + data.error);
+                console.log('[Voice] Audio blob size:', audioBlob.size, 'bytes, type:', audioBlob.type);
+                if (audioBlob.size < 1000) {
+                    console.warn('[Voice] Blob too small, skipping. Size:', audioBlob.size);
+                    alert('录音时间太短，请长按说话后再松开');
+                    return;
                 }
-            } catch {
-                alert('语音识别请求失败');
+
+                console.log('[Voice] Sending to /api/voice...');
+                setIsTranscribing(true);
+                try {
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob, 'recording.wav');
+                    const res = await fetch('/api/voice', { method: 'POST', body: formData });
+                    console.log('[Voice] API response status:', res.status);
+                    const data = await res.json();
+                    console.log('[Voice] API response data:', JSON.stringify(data));
+                    if (data.text) {
+                        console.log('[Voice] ✅ Got text:', data.text);
+                        setInputText(prev => prev + data.text);
+                    } else if (data.error) {
+                        console.error('[Voice] ❌ API error:', data.error);
+                        alert('语音识别失败: ' + data.error);
+                    } else {
+                        console.warn('[Voice] ⚠️ No text and no error in response:', data);
+                        alert('语音识别返回为空，请重试。调试信息: ' + JSON.stringify(data.debug || data));
+                    }
+                } finally {
+                    setIsTranscribing(false);
+                }
+            } catch (err) {
+                console.error('[Voice] ❌ Fetch error:', err);
+                setIsTranscribing(false);
+                alert('语音识别请求失败: ' + (err instanceof Error ? err.message : String(err)));
             }
             return;
         }
 
         try {
+            console.log('[Voice] Starting recorder...');
             pcmRecorderRef.current = await startPcm16kMonoRecorder();
+            console.log('[Voice] ✅ Recorder started successfully');
             setIsRecording(true);
-        } catch {
-            alert('无法访问麦克风，请检查浏览器权限');
+        } catch (err) {
+            console.error('[Voice] ❌ Microphone error:', err);
+            alert('无法访问麦克风: ' + (err instanceof Error ? err.message : String(err)));
         }
     };
 
@@ -433,7 +493,7 @@ export default function ChatPage() {
             {/* Per-bot history sidebar */}
             <aside className={`${styles.chatSidebar} ${sidebarOpen ? styles.chatSidebarOpen : ''}`}>
                 <div className={styles.chatSidebarHeader}>
-                    <h3 className={styles.chatSidebarTitle}>💬 {botName} 对话记录</h3>
+                    <h3 className={styles.chatSidebarTitle}><MessageSquare size={16} /> {botName} 对话记录</h3>
                 </div>
                 <div className={styles.chatSidebarList}>
                     {botConversations.length === 0 ? (
@@ -458,9 +518,9 @@ export default function ChatPage() {
                                                 localStorage.setItem('__report_data__', saved);
                                                 window.open('/report', '_blank');
                                             }
-                                        }}>📊</button>
+                                        }}><BarChart3 size={14} /></button>
                                     )}
-                                    <button className={styles.chatSidebarAction} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}>🗑️</button>
+                                    <button className={styles.chatSidebarAction} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}><Trash2 size={14} /></button>
                                 </div>
                             </div>
                         </div>
@@ -470,17 +530,17 @@ export default function ChatPage() {
 
             <header className={styles.header}>
                 <div className={styles.headerLeft}>
-                    <button onClick={() => router.push('/')} className={styles.backBtn}>← 返回</button>
-                    <button onClick={startNewConversation} className={styles.newChatBtn}>+ 新对话</button>
+                    <button onClick={() => router.push('/')} className={styles.backBtn}><ArrowLeft size={16} /> 返回</button>
+                    <button onClick={startNewConversation} className={styles.newChatBtn}><Plus size={16} /> 新对话</button>
                 </div>
                 <div className={styles.headerRight}>
                     <button onClick={generateReport} className={styles.historyBtn} disabled={isGeneratingReport || isStreaming}>
-                        {isGeneratingReport ? '✨ 生成中...' : '📄 生成报告'}
+                        {isGeneratingReport ? <><Sparkles size={14} /> 生成中...</> : <><FileText size={14} /> 生成报告</>}
                     </button>
-                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className={styles.historyBtn}>📋 历史记录</button>
+                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className={styles.historyBtn}><ClipboardList size={14} /> 历史记录</button>
                     <div className={styles.botSwitcher}>
                         <h2 className={styles.botName} onClick={() => setBotSwitcherOpen(!botSwitcherOpen)}>
-                            {botName} <span className={styles.switchArrow}>▾</span>
+                            {botName} <span className={styles.switchArrow}><ChevronDown size={14} /></span>
                         </h2>
                         {botSwitcherOpen && (
                             <div className={styles.switcherDropdown}>
@@ -564,7 +624,7 @@ export default function ChatPage() {
                         {attachedFile.isImage && attachedFile.previewUrl ? (
                             <img src={attachedFile.previewUrl} alt={attachedFile.name} className={styles.attachThumb} />
                         ) : (
-                            <span className={styles.attachIcon}>📄</span>
+                            <span className={styles.attachIcon}><FileText size={18} /></span>
                         )}
                         <span className={styles.attachName}>{attachedFile.name}</span>
                         <button className={styles.attachRemove} onClick={removeAttachment}>✕</button>
@@ -572,8 +632,8 @@ export default function ChatPage() {
                 )}
                 {isUploading && (
                     <div className={styles.attachmentBar}>
-                        <span className={styles.attachIcon}>⏳</span>
-                        <span className={styles.attachName}>文件上传中...</span>
+                        <span className={styles.attachIcon}><Loader2 size={18} className="animate-spin" /></span>
+                        <span className={styles.attachName}>{uploadFileName || '文件'} 解析中...</span>
                     </div>
                 )}
                 <div className={styles.inputWrapper}>
@@ -590,21 +650,21 @@ export default function ChatPage() {
                         disabled={isStreaming || isUploading}
                         title="上传文件"
                     >
-                        {isUploading ? '...' : '📎'}
+                        {isUploading ? '...' : <Paperclip size={18} />}
                     </button>
                     <button
-                        className={`${styles.toolBtn} ${isRecording ? styles.recording : ''}`}
+                        className={`${styles.toolBtn} ${isRecording ? styles.recording : ''} ${isTranscribing ? styles.recording : ''}`}
                         onClick={toggleVoice}
-                        disabled={isStreaming}
-                        title={isRecording ? '停止录音' : '语音输入'}
+                        disabled={isStreaming || isTranscribing}
+                        title={isTranscribing ? '转录中...' : isRecording ? '停止录音' : '语音输入'}
                     >
-                        🎤
+                        {isTranscribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
                     </button>
                     <textarea
                         value={inputText}
                         onChange={e => setInputText(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder="输入消息..."
+                        placeholder={isTranscribing ? '语音转录中，请稍候...' : '输入消息...'}
                         className={styles.textInput}
                         rows={1}
                         disabled={isStreaming}
@@ -612,9 +672,9 @@ export default function ChatPage() {
                     <button
                         onClick={() => sendMessage(inputText)}
                         className={styles.sendBtn}
-                        disabled={(!inputText.trim() && !attachedFile) || isStreaming}
+                        disabled={(!inputText.trim() && !attachedFile) || isStreaming || isTranscribing}
                     >
-                        ➤
+                        <Send size={18} />
                     </button>
                 </div>
             </div>
