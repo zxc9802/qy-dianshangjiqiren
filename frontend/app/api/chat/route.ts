@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        const { botId, systemPrompt, messages, message, conversationHistory } = await req.json();
+        const { botId, systemPrompt, messages, message, conversationHistory, wfContext } = await req.json();
         const botIdString = String(botId ?? '');
         const fallbackPrompt = typeof systemPrompt === 'string' && systemPrompt.trim()
             ? systemPrompt.trim()
@@ -116,6 +116,11 @@ export async function POST(req: NextRequest) {
             const isXhs = Number.isFinite(id) && id >= 15 && id <= 22;
             const promptFromDocs = getSystemPromptByBotId(botIdString, fallbackPrompt);
             fullSystemPrompt = `${promptFromDocs}\n\n${isXhs ? XHS_GLOBAL_RULES : GLOBAL_RULES}`.trim();
+        }
+
+        // Inject workflow context from previous step
+        if (typeof wfContext === 'string' && wfContext.trim()) {
+            fullSystemPrompt += `\n\n---\n# 上一步工作流传递的内容（作为参考背景）\n以下是用户在之前步骤中与其他AI的对话成果，请基于这些内容继续提供帮助：\n\n${wfContext.trim()}`;
         }
 
         const normalizedMessages = Array.isArray(messages)

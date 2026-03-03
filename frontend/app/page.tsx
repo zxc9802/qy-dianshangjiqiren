@@ -7,13 +7,13 @@ import { useAuthStore } from './stores/auth';
 import { useConversationsStore } from './stores/conversations';
 import styles from './page.module.css';
 import {
-  Bot, Search, Sun, Moon, Gem, Home, Zap, ImageIcon, User, Trash2,
+  Bot, Search, Sun, Moon, Home, Zap, ImageIcon, User, Trash2,
   Target, Compass, MapPin, Briefcase, Users, Sparkles, TrendingUp,
   Zap as ZapIcon, FrameIcon, Star, Swords, Coins, Camera, Link,
   FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
-  Package, BookOpen, Landmark, Menu,
+  Package, BookOpen, Landmark, Menu, Plus,
 } from 'lucide-react';
 
 interface BotInfo {
@@ -26,10 +26,44 @@ interface BotInfo {
   pointsPerUse: number;
 }
 
-const WORKFLOW_CARDS = [
-  { id: 'wf-1', title: '爆款打造流水线', steps: ['趋势', '卖点', '主图', '评价'], gradient: 'linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)' },
-  { id: 'wf-2', title: '小红书内容矩阵', steps: ['选题', '脚本', '拍摄', '发布'], gradient: 'linear-gradient(135deg, #16a34a 0%, #4ade80 100%)' },
-  { id: 'wf-3', title: '新品上市全案', steps: ['预热', '首发', '种草', '转化'], gradient: 'linear-gradient(135deg, #ea580c 0%, #fb923c 100%)' },
+const WF_TEMPLATES = [
+  {
+    id: 'wf-1',
+    name: '新品上架全流程',
+    title: '爆款打造流水线',
+    steps: [
+      { botId: '9', botName: '卖点教练', instruction: '请帮我提炼这个产品的核心卖点' },
+      { botId: '10', botName: '天猫主图策划教练', instruction: '基于卖点，帮我策划5张天猫主图方案' },
+      { botId: '12', botName: '天猫评价教练', instruction: '基于产品卖点和主图，设计真实自然的评价模板' },
+    ],
+    displaySteps: ['卖点', '主图', '评价'],
+    gradient: 'linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)',
+  },
+  {
+    id: 'wf-3',
+    name: '小红书内容矩阵',
+    title: '小红书内容矩阵',
+    steps: [
+      { botId: '17', botName: '小红书爆文拆解复制', instruction: '拆解这个方向的爆文公式，提炼可复用元素' },
+      { botId: '18', botName: '小红书爆款标题', instruction: '基于爆文分析，给出10个高点击率标题' },
+      { botId: '21', botName: '小红书正文拆解SOP', instruction: '基于以上标题，按爆文公式写完整正文' },
+      { botId: '22', botName: '小红书笔记评论生成', instruction: '基于内容，生成10条自然引导互动的评论' },
+    ],
+    displaySteps: ['爆文', '标题', '正文', '评论'],
+    gradient: 'linear-gradient(135deg, #16a34a 0%, #4ade80 100%)',
+  },
+  {
+    id: 'wf-2',
+    name: '竞品全面分析',
+    title: '竞品全面分析',
+    steps: [
+      { botId: '13', botName: '天猫竞争策略教练', instruction: '分析以下产品/类目的竞品优劣势' },
+      { botId: '8', botName: '天猫爆款趋势拆解', instruction: '基于竞品分析，深入分析该品类趋势和机会' },
+      { botId: '14', botName: '天猫客单价提升教练', instruction: '基于竞品和趋势分析，制定定价和客单价提升策略' },
+    ],
+    displaySteps: ['竞品', '趋势', '定价'],
+    gradient: 'linear-gradient(135deg, #ea580c 0%, #fb923c 100%)',
+  },
 ];
 
 const IMAGE_TOOL = {
@@ -114,6 +148,20 @@ export default function HomePage() {
     router.push(path);
   };
 
+  const launchWorkflow = (tpl: typeof WF_TEMPLATES[0]) => {
+    if (!isAuthenticated) { router.push('/login'); return; }
+    const state = {
+      workflowId: tpl.id,
+      workflowName: tpl.name,
+      steps: tpl.steps.map(s => ({ botId: s.botId, botName: s.botName })),
+      currentStep: 0,
+      stepOutputs: [] as string[],
+      selectedMessages: {} as Record<number, string[]>,
+    };
+    sessionStorage.setItem('wf_state', JSON.stringify(state));
+    router.push(`/chat/${tpl.steps[0].botId}?wf=1`);
+  };
+
   const categories = useMemo(() => [...new Set(MOCK_BOTS.map((b) => b.category))], []);
   const filteredBots = MOCK_BOTS.filter((bot) => {
     if (!searchQuery) return true;
@@ -173,7 +221,7 @@ export default function HomePage() {
         </div>
         <div className={styles.headerRight}>
           <button onClick={() => requireAuth('/my-bots')} className={styles.navBtn}>我的智能体</button>
-          <button onClick={() => requireAuth('/workflow-builder')} className={styles.navBtn}>工作流</button>
+          <button onClick={() => requireAuth('/my-workflows')} className={styles.navBtn}>我的工作流</button>
           {mounted && (
             <button
               className={styles.themeToggle}
@@ -185,7 +233,6 @@ export default function HomePage() {
           )}
           {isAuthenticated ? (
             <>
-              <div className={styles.pointsBadge}><Gem size={14} /> {user?.pointsBalance ?? 0} 积分</div>
               <button onClick={() => router.push('/profile')} className={styles.avatarBtn}>{user?.nickname?.slice(0, 1) || '我'}</button>
             </>
           ) : (
@@ -197,12 +244,24 @@ export default function HomePage() {
       <div className={styles.body}>
         <aside className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
           <div className={styles.sidebarTabs}>
-            <button className={`${styles.sidebarTabBtn} ${sidebarTab === 'history' ? styles.sidebarTabActive : ''}`} onClick={() => setSidebarTab('history')}>对话历史</button>
-            <button className={`${styles.sidebarTabBtn} ${sidebarTab === 'favorites' ? styles.sidebarTabActive : ''}`} onClick={() => setSidebarTab('favorites')}>收藏</button>
+            <button
+              className={`${styles.sidebarTabBtn} ${sidebarTab === 'history' ? styles.sidebarTabActive : ''}`}
+              onClick={() => setSidebarTab('history')}
+              style={{ borderBottomColor: sidebarTab === 'history' ? '#2563eb' : 'transparent', color: sidebarTab === 'history' ? 'var(--text-primary, #0f172a)' : undefined }}
+            >
+              <MessageSquare size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 聊天记录
+            </button>
+            <button
+              className={`${styles.sidebarTabBtn} ${sidebarTab === 'favorites' ? styles.sidebarTabActive : ''}`}
+              onClick={() => setSidebarTab('favorites')}
+              style={{ borderBottomColor: sidebarTab === 'favorites' ? '#eab308' : 'transparent', color: sidebarTab === 'favorites' ? '#eab308' : undefined }}
+            >
+              <Star size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 收藏
+            </button>
           </div>
           <div className={styles.sidebarList}>
             {sidebarConvs.length === 0 ? (
-              <div className={styles.sidebarEmpty}>{sidebarTab === 'favorites' ? '暂无收藏对话' : '暂无对话记录'}</div>
+              <div className={styles.sidebarEmpty}>{sidebarTab === 'favorites' ? '暂无收藏' : '暂无对话记录'}</div>
             ) : sidebarConvs.map((conv) => (
               <div key={conv.id} className={styles.sidebarItem} onClick={() => router.push(`/chat/${conv.botId}?cid=${conv.id}`)}>
                 <div className={styles.sidebarItemTop}>
@@ -211,7 +270,15 @@ export default function HomePage() {
                 </div>
                 <p className={styles.sidebarPreview}>{getLastMsg(conv)}</p>
                 <div className={styles.sidebarActions}>
-                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); toggleFavorite(conv.id); }}>{conv.isFavorite ? '★' : '☆'}</button>
+                  {sidebarTab === 'history' && (
+                    <button
+                      className={styles.sidebarActionBtn}
+                      style={{ color: conv.isFavorite ? '#eab308' : undefined }}
+                      onClick={(e) => { e.stopPropagation(); toggleFavorite(conv.id); }}
+                    >
+                      <Star size={14} fill={conv.isFavorite ? '#eab308' : 'none'} />
+                    </button>
+                  )}
                   <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); sidebarTab === 'favorites' ? removeFavorite(conv.id) : deleteConversation(conv.id); }}><Trash2 size={14} /></button>
                 </div>
               </div>
@@ -226,15 +293,26 @@ export default function HomePage() {
           </div>
 
           <div className={styles.workflowCards}>
-            {WORKFLOW_CARDS.map((wf) => (
-              <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => requireAuth('/workflow-builder')}>
+            {WF_TEMPLATES.map((wf) => (
+              <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => launchWorkflow(wf)}>
                 <h3 className={styles.wfCardTitle}><Zap size={16} /> {wf.title}</h3>
                 <div className={styles.wfSteps}>
-                  {wf.steps.map((s, i) => <span key={i}>{s}{i < wf.steps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
+                  {wf.displaySteps.map((s, i) => <span key={i}>{s}{i < wf.displaySteps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
                 </div>
                 <button className={styles.wfLaunchBtn}>立即启动</button>
               </div>
             ))}
+            <div
+              className={styles.wfCard}
+              style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)' }}
+              onClick={() => requireAuth('/my-workflows')}
+            >
+              <h3 className={styles.wfCardTitle}><Plus size={16} /> 自定义工作流</h3>
+              <div className={styles.wfSteps}>
+                <span>从空白画布创建专属工作流</span>
+              </div>
+              <button className={styles.wfLaunchBtn}>开始创建</button>
+            </div>
           </div>
 
           {imageToolMatched && (
@@ -277,7 +355,7 @@ export default function HomePage() {
 
       <div className={styles.mobileNav}>
         <button className={styles.mobileNavBtn} onClick={() => router.push('/')}><span><Home size={20} /></span>首页</button>
-        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/workflow-builder')}><span><Zap size={20} /></span>工作流</button>
+        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/my-workflows')}><span><Zap size={20} /></span>工作流</button>
         <button className={styles.mobileNavBtn} onClick={() => router.push('/bot/image-generator')}><span><ImageIcon size={20} /></span>绘图</button>
         <button className={styles.mobileNavBtn} onClick={() => requireAuth('/profile')}><span><User size={20} /></span>我的</button>
       </div>

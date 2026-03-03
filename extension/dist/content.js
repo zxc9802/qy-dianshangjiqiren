@@ -1,0 +1,3 @@
+function i(){const t=document.title||"",c=location.href,e=["article","main",'[role="main"]',".content","#content","#main"];let o=null;for(const r of e)if(o=document.querySelector(r),o)break;const n=(o??document.body).cloneNode(!0);n.querySelectorAll('script,style,nav,footer,header,[role="navigation"],[role="banner"]').forEach(r=>r.remove());const a=(n.innerText??n.textContent??"").replace(/\s{3,}/g,`
+
+`).trim().slice(0,6e3);return{title:t,url:c,text:a}}function l(){try{const t=localStorage.getItem("token");t&&chrome.storage.local.set({token:t})}catch{}}l();chrome.runtime.onMessage.addListener((t,c,e)=>{if(t.type==="GET_PAGE_INFO")return e(i()),!0;if(t.type==="GET_TOKEN"){l();try{const o=localStorage.getItem("token");e({token:o})}catch{e({token:null})}return!0}});

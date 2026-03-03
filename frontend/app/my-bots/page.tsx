@@ -7,7 +7,35 @@ import styles from './my-bots.module.css';
 import {
     Plus, Bot, Trash2, MessageSquare, Edit3, Upload, X,
     FileText, Image, File, Loader2, ArrowLeft, Save, Sparkles,
+    Brain, Briefcase, GraduationCap, HeartPulse, Lightbulb,
+    Megaphone, PenTool, Rocket, Shield, Target, Users, Zap,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
+
+const PRESET_ICONS: { key: string; icon: ReactNode; color: string; bg: string }[] = [
+    { key: 'bot', icon: <Bot size={24} />, color: '#2563eb', bg: '#eff6ff' },
+    { key: 'brain', icon: <Brain size={24} />, color: '#7c3aed', bg: '#f5f3ff' },
+    { key: 'rocket', icon: <Rocket size={24} />, color: '#ea580c', bg: '#fff7ed' },
+    { key: 'lightbulb', icon: <Lightbulb size={24} />, color: '#eab308', bg: '#fefce8' },
+    { key: 'target', icon: <Target size={24} />, color: '#dc2626', bg: '#fef2f2' },
+    { key: 'briefcase', icon: <Briefcase size={24} />, color: '#0891b2', bg: '#ecfeff' },
+    { key: 'users', icon: <Users size={24} />, color: '#059669', bg: '#ecfdf5' },
+    { key: 'shield', icon: <Shield size={24} />, color: '#4f46e5', bg: '#eef2ff' },
+    { key: 'zap', icon: <Zap size={24} />, color: '#d97706', bg: '#fffbeb' },
+    { key: 'megaphone', icon: <Megaphone size={24} />, color: '#e11d48', bg: '#fff1f2' },
+    { key: 'pen', icon: <PenTool size={24} />, color: '#0d9488', bg: '#f0fdfa' },
+    { key: 'grad', icon: <GraduationCap size={24} />, color: '#6d28d9', bg: '#faf5ff' },
+];
+
+function getPresetIcon(key: string | undefined, size = 24): { icon: ReactNode; color: string; bg: string } {
+    const found = PRESET_ICONS.find(p => p.key === key);
+    if (found) {
+        // Re-create icon at requested size
+        const sizedIcon = PRESET_ICONS.find(p => p.key === key)!;
+        return { ...sizedIcon, icon: <>{sizedIcon.icon}</> };
+    }
+    return { icon: <Bot size={size} />, color: '#2563eb', bg: '#eff6ff' };
+}
 
 interface BotDocument {
     id: string;
@@ -57,7 +85,7 @@ export default function MyBotsPage() {
     const router = useRouter();
     const { user } = useAuthStore();
     const [bots, setBots] = useState<CustomBot[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [editingBot, setEditingBot] = useState<CustomBot | null>(null);
     const [saving, setSaving] = useState(false);
@@ -75,10 +103,8 @@ export default function MyBotsPage() {
     const [pendingDocs, setPendingDocs] = useState<Array<{ fileName: string; fileType: string; fileSize: number; parsedText: string }>>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Avatar upload
-    const [avatarPreview, setAvatarPreview] = useState('');
-    const [avatarFile, setAvatarFile] = useState<File | null>(null);
-    const avatarInputRef = useRef<HTMLInputElement>(null);
+    // Selected icon key
+    const [selectedIcon, setSelectedIcon] = useState('bot');
 
     const loadBots = useCallback(async () => {
         try {
@@ -106,8 +132,7 @@ export default function MyBotsPage() {
         setSystemPrompt('');
         setDocs([]);
         setPendingDocs([]);
-        setAvatarPreview('');
-        setAvatarFile(null);
+        setSelectedIcon('bot');
         setEditingBot(null);
         setError('');
     };
@@ -123,8 +148,7 @@ export default function MyBotsPage() {
         setDescription(bot.description);
         setSystemPrompt(bot.systemPrompt);
         setDocs(bot.documents || []);
-        setAvatarPreview(bot.avatar || '');
-        setAvatarFile(null);
+        setSelectedIcon(bot.icon || 'bot');
         setShowForm(true);
         setError('');
     };
@@ -141,25 +165,15 @@ export default function MyBotsPage() {
             if (editingBot) {
                 const res = await apiFetch(`/custom-bots/${editingBot.id}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ name, description, systemPrompt }),
+                    body: JSON.stringify({ name, description, systemPrompt, icon: selectedIcon }),
                 });
                 botId = res.data.id;
             } else {
                 const res = await apiFetch('/custom-bots', {
                     method: 'POST',
-                    body: JSON.stringify({ name, description, systemPrompt }),
+                    body: JSON.stringify({ name, description, systemPrompt, icon: selectedIcon }),
                 });
                 botId = res.data.id;
-            }
-
-            // Upload avatar if changed
-            if (avatarFile) {
-                const formData = new FormData();
-                formData.append('avatar', avatarFile);
-                await apiFetch(`/custom-bots/${botId}/avatar`, {
-                    method: 'POST',
-                    body: formData,
-                });
             }
 
             // Upload pending docs (queued during creation)
@@ -188,14 +202,6 @@ export default function MyBotsPage() {
         } catch (err) {
             alert(err instanceof Error ? err.message : '删除失败');
         }
-    };
-
-    const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setAvatarFile(file);
-        const url = URL.createObjectURL(file);
-        setAvatarPreview(url);
     };
 
     const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -291,16 +297,12 @@ export default function MyBotsPage() {
                 </button>
             </header>
 
+
             <main className={styles.main}>
-                {loading ? (
-                    <div className={styles.loadingState}>
-                        <Loader2 size={24} className="animate-spin" />
-                        <span>加载中...</span>
-                    </div>
-                ) : bots.length === 0 && !showForm ? (
+                {bots.length === 0 && !showForm ? (
                     <div className={styles.emptyState}>
                         <Bot size={48} />
-                        <h3>还没有创建智能体</h3>
+                        <h3>{loading ? '加载中...' : '还没有创建智能体'}</h3>
                         <p>创建你的第一个自定义智能体，设置专属提示词和知识库</p>
                         <button className={styles.createBtnLarge} onClick={openCreateForm}>
                             <Plus size={18} /> 创建智能体
@@ -314,12 +316,8 @@ export default function MyBotsPage() {
                                 {bots.map(bot => (
                                     <div key={bot.id} className={styles.card}>
                                         <div className={styles.cardTop}>
-                                            <div className={styles.cardAvatar}>
-                                                {bot.avatar ? (
-                                                    <img src={bot.avatar} alt={bot.name} />
-                                                ) : (
-                                                    <Bot size={28} />
-                                                )}
+                                            <div className={styles.cardAvatar} style={{ background: getPresetIcon(bot.icon).bg, color: getPresetIcon(bot.icon).color }}>
+                                                {getPresetIcon(bot.icon).icon}
                                             </div>
                                             <div className={styles.cardInfo}>
                                                 <h3 className={styles.cardName}>{bot.name}</h3>
@@ -357,28 +355,22 @@ export default function MyBotsPage() {
 
                                 {error && <div className={styles.error}>{error}</div>}
 
-                                {/* Avatar */}
-                                <div className={styles.avatarSection}>
-                                    <div
-                                        className={styles.avatarUpload}
-                                        onClick={() => avatarInputRef.current?.click()}
-                                    >
-                                        {avatarPreview ? (
-                                            <img src={avatarPreview} alt="头像" />
-                                        ) : (
-                                            <div className={styles.avatarPlaceholder}>
-                                                <Upload size={20} />
-                                                <span>上传头像</span>
-                                            </div>
-                                        )}
+                                {/* Icon Picker */}
+                                <div className={styles.formGroup}>
+                                    <label>选择图标</label>
+                                    <div className={styles.iconGrid}>
+                                        {PRESET_ICONS.map(p => (
+                                            <button
+                                                key={p.key}
+                                                type="button"
+                                                className={`${styles.iconOption} ${selectedIcon === p.key ? styles.iconSelected : ''}`}
+                                                style={{ background: p.bg, color: p.color, borderColor: selectedIcon === p.key ? p.color : 'transparent' }}
+                                                onClick={() => setSelectedIcon(p.key)}
+                                            >
+                                                {p.icon}
+                                            </button>
+                                        ))}
                                     </div>
-                                    <input
-                                        ref={avatarInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        hidden
-                                        onChange={handleAvatarChange}
-                                    />
                                 </div>
 
                                 {/* Name */}

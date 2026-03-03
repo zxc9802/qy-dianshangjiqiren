@@ -9,7 +9,7 @@ import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
     ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
-    Plus, ChevronDown,
+    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2,
 } from 'lucide-react';
 
 interface MessageItem {
@@ -114,11 +114,29 @@ export default function ChatPage() {
     const searchParams = useSearchParams();
     const botId = params.id as string;
     const { user } = useAuthStore();
-    const { conversations, saveConversation, getConversation, loadConversations, deleteConversation } = useConversationsStore();
+    const { conversations, favorites, saveConversation, getConversation, loadConversations, deleteConversation, toggleFavorite, removeFavorite } = useConversationsStore();
+
+    // Workflow mode
+    const wfParam = searchParams.get('wf');
+    interface WfStep { botId: string; botName: string; }
+    interface WfState {
+        workflowId: string; workflowName: string; steps: WfStep[];
+        currentStep: number; stepOutputs: string[];
+        selectedMessages: Record<number, string[]>;
+    }
+    const [wfState, setWfState] = useState<WfState | null>(null);
+    const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+    useEffect(() => {
+        if (wfParam && typeof window !== 'undefined') {
+            const raw = sessionStorage.getItem('wf_state');
+            if (raw) { try { setWfState(JSON.parse(raw)); } catch { /**/ } }
+        }
+    }, [wfParam]);
 
     // Per-bot sidebar and bot switcher state
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [botSwitcherOpen, setBotSwitcherOpen] = useState(false);
+    const [sidebarTab, setSidebarTab] = useState<'history' | 'favorites'>('history');
 
     const urlName = searchParams.get('name');
     const botName = BOT_NAMES[botId] || urlName || 'AI助手';
@@ -226,13 +244,18 @@ export default function ChatPage() {
                 try { return JSON.parse(localStorage.getItem('user') || '{}').token || ''; } catch { return ''; }
             })() : '';
 
+            // Build wfContext from previous step outputs
+            const wfContext = wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1]
+                ? wfState.stepOutputs[wfState.currentStep - 1]
+                : undefined;
+
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     ...(token ? { 'x-auth-token': token } : {}),
                 },
-                body: JSON.stringify({ botId, systemPrompt, messages: history }),
+                body: JSON.stringify({ botId, systemPrompt, messages: history, ...(wfContext ? { wfContext } : {}) }),
             });
 
             if (!res.ok) {
@@ -431,8 +454,12 @@ export default function ChatPage() {
         }
     };
 
-    // Per-bot conversation history
+    // Per-bot conversation history & favorites
     const botConversations = conversations
+        .filter(c => c.botId === botId)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    const botFavorites = favorites
         .filter(c => c.botId === botId)
         .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -488,43 +515,162 @@ export default function ChatPage() {
         }
     };
 
+    // Workflow: toggle pin on a message
+    const togglePinMsg = (id: string) => {
+        setSelectedMsgIds(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+    const assistantMsgs = messages.filter(m => m.role === 'assistant' && m.id !== 'welcome');
+    const handleSelectAll = () => setSelectedMsgIds(new Set(assistantMsgs.map(m => m.id)));
+    const handleDeselectAll = () => setSelectedMsgIds(new Set());
+
+    // Workflow: pass selected messages to next step
+    const handleNextStep = () => {
+        if (!wfState) return;
+        const selected = messages.filter(m => selectedMsgIds.has(m.id));
+        const output = selected.map(m => m.content).join('\n\n---\n\n');
+        const newOutputs = [...(wfState.stepOutputs || [])];
+        newOutputs[wfState.currentStep] = output;
+        const nextStep = wfState.currentStep + 1;
+        const isLast = nextStep >= wfState.steps.length;
+        const newState: typeof wfState = { ...wfState, stepOutputs: newOutputs, currentStep: nextStep };
+        sessionStorage.setItem('wf_state', JSON.stringify(newState));
+        setSelectedMsgIds(new Set());
+        if (isLast) {
+            // Show simple completion alert for now
+            alert('🎉 工作流已完成！');
+            router.push('/');
+        } else {
+            router.push(`/chat/${wfState.steps[nextStep].botId}?wf=1`);
+        }
+    };
+
+    // Workflow: go back to previous step
+    const handleBackStep = () => {
+        if (!wfState || wfState.currentStep <= 0) return;
+        const prevStep = wfState.currentStep - 1;
+        const newState: typeof wfState = { ...wfState, currentStep: prevStep };
+        sessionStorage.setItem('wf_state', JSON.stringify(newState));
+        setSelectedMsgIds(new Set());
+        router.push(`/chat/${wfState.steps[prevStep].botId}?wf=1`);
+    };
+
     return (
         <div className={styles.layout}>
             {/* Per-bot history sidebar */}
             <aside className={`${styles.chatSidebar} ${sidebarOpen ? styles.chatSidebarOpen : ''}`}>
                 <div className={styles.chatSidebarHeader}>
-                    <h3 className={styles.chatSidebarTitle}><MessageSquare size={16} /> {botName} 对话记录</h3>
+                    <div style={{ display: 'flex', gap: 0, width: '100%' }}>
+                        <button
+                            onClick={() => setSidebarTab('history')}
+                            style={{
+                                flex: 1, padding: '8px 0', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                                background: sidebarTab === 'history' ? 'var(--bg-surface, #fff)' : 'transparent',
+                                color: sidebarTab === 'history' ? 'var(--text-primary, #0f172a)' : 'var(--text-tertiary, #94a3b8)',
+                                borderBottom: sidebarTab === 'history' ? '2px solid #2563eb' : '2px solid transparent',
+                            }}
+                        >
+                            <MessageSquare size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 聊天记录
+                        </button>
+                        <button
+                            onClick={() => setSidebarTab('favorites')}
+                            style={{
+                                flex: 1, padding: '8px 0', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                                background: sidebarTab === 'favorites' ? 'var(--bg-surface, #fff)' : 'transparent',
+                                color: sidebarTab === 'favorites' ? '#eab308' : 'var(--text-tertiary, #94a3b8)',
+                                borderBottom: sidebarTab === 'favorites' ? '2px solid #eab308' : '2px solid transparent',
+                            }}
+                        >
+                            <Star size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 收藏
+                        </button>
+                    </div>
                 </div>
                 <div className={styles.chatSidebarList}>
-                    {botConversations.length === 0 ? (
-                        <div className={styles.chatSidebarEmpty}>暂无对话记录</div>
-                    ) : botConversations.map(conv => (
-                        <div
-                            key={conv.id}
-                            className={`${styles.chatSidebarItem} ${conv.id === convIdRef.current ? styles.chatSidebarItemActive : ''}`}
-                            onClick={() => { router.push(`/chat/${botId}?cid=${conv.id}`); window.location.reload(); }}
-                        >
-                            <p className={styles.chatSidebarPreview}>
-                                {conv.messages[conv.messages.length - 1]?.content.slice(0, 30) || '新对话'}
-                            </p>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                                <span className={styles.chatSidebarTime}>{formatHistoryTime(conv.updatedAt)}</span>
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                    {typeof window !== 'undefined' && localStorage.getItem(`report-${conv.id}`) && (
-                                        <button className={styles.chatSidebarAction} style={{ color: '#3b82f6' }} onClick={(e) => {
-                                            e.stopPropagation();
-                                            const saved = localStorage.getItem(`report-${conv.id}`);
-                                            if (saved) {
-                                                localStorage.setItem('__report_data__', saved);
-                                                window.open('/report', '_blank');
-                                            }
-                                        }}><BarChart3 size={14} /></button>
-                                    )}
-                                    <button className={styles.chatSidebarAction} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}><Trash2 size={14} /></button>
+                    {sidebarTab === 'history' ? (
+                        botConversations.length === 0 ? (
+                            <div className={styles.chatSidebarEmpty}>暂无对话记录</div>
+                        ) : botConversations.map(conv => (
+                            <div
+                                key={conv.id}
+                                className={`${styles.chatSidebarItem} ${conv.id === convIdRef.current ? styles.chatSidebarItemActive : ''}`}
+                                onClick={() => {
+                                    const existing = getConversation(conv.id);
+                                    if (existing && existing.messages.length > 0) {
+                                        convIdRef.current = conv.id;
+                                        setMessages(existing.messages.map(m => ({ id: m.id, role: m.role, content: m.content })));
+                                        setSuggestions([]);
+                                        setStreamingText('');
+                                        setIsStreaming(false);
+                                        setSidebarOpen(false);
+                                    }
+                                }}
+                            >
+                                <p className={styles.chatSidebarPreview}>
+                                    {conv.messages[conv.messages.length - 1]?.content.slice(0, 30) || '新对话'}
+                                </p>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                                    <span className={styles.chatSidebarTime}>{formatHistoryTime(conv.updatedAt)}</span>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                        <button
+                                            className={styles.chatSidebarAction}
+                                            style={{ color: conv.isFavorite ? '#eab308' : undefined }}
+                                            onClick={(e) => { e.stopPropagation(); toggleFavorite(conv.id); }}
+                                        >
+                                            <Star size={14} fill={conv.isFavorite ? '#eab308' : 'none'} />
+                                        </button>
+                                        {typeof window !== 'undefined' && localStorage.getItem(`report-${conv.id}`) && (
+                                            <button className={styles.chatSidebarAction} style={{ color: '#3b82f6' }} onClick={(e) => {
+                                                e.stopPropagation();
+                                                const saved = localStorage.getItem(`report-${conv.id}`);
+                                                if (saved) {
+                                                    localStorage.setItem('__report_data__', saved);
+                                                    window.open('/report', '_blank');
+                                                }
+                                            }}><BarChart3 size={14} /></button>
+                                        )}
+                                        <button className={styles.chatSidebarAction} onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}><Trash2 size={14} /></button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ))}
+                        ))
+                    ) : (
+                        botFavorites.length === 0 ? (
+                            <div className={styles.chatSidebarEmpty}>暂无收藏</div>
+                        ) : botFavorites.map(conv => (
+                            <div
+                                key={conv.id}
+                                className={`${styles.chatSidebarItem} ${conv.id === convIdRef.current ? styles.chatSidebarItemActive : ''}`}
+                                onClick={() => {
+                                    const existing = getConversation(conv.id);
+                                    if (existing && existing.messages.length > 0) {
+                                        convIdRef.current = conv.id;
+                                        setMessages(existing.messages.map(m => ({ id: m.id, role: m.role, content: m.content })));
+                                        setSuggestions([]);
+                                        setStreamingText('');
+                                        setIsStreaming(false);
+                                        setSidebarOpen(false);
+                                    }
+                                }}
+                            >
+                                <p className={styles.chatSidebarPreview}>
+                                    {conv.messages[conv.messages.length - 1]?.content.slice(0, 30) || '新对话'}
+                                </p>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                                    <span className={styles.chatSidebarTime}>{formatHistoryTime(conv.updatedAt)}</span>
+                                    <button
+                                        className={styles.chatSidebarAction}
+                                        style={{ color: '#ef4444' }}
+                                        onClick={(e) => { e.stopPropagation(); removeFavorite(conv.id); }}
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
                 </div>
             </aside>
 
@@ -558,23 +704,57 @@ export default function ChatPage() {
                             </div>
                         )}
                     </div>
-                    <span className={styles.pointsBadge}>{user?.pointsBalance ?? 0} 积分</span>
                 </div>
             </header>
+
+            {/* Workflow progress bar */}
+            {wfState && (
+                <div className={styles.wfProgressBar}>
+                    <span className={styles.wfProgressTitle}>📋 {wfState.workflowName}</span>
+                    <div className={styles.wfSteps}>
+                        {wfState.steps.map((s, i) => (
+                            <span key={i} className={`${styles.wfStepDot} ${i === wfState.currentStep ? styles.wfStepCurrent : i < wfState.currentStep ? styles.wfStepDone : ''}`}>
+                                <span className={styles.wfStepNum}>{i + 1}</span>
+                                <span className={styles.wfStepName}>{s.botName}</span>
+                                {i < wfState.steps.length - 1 && <span className={styles.wfStepLine}>→</span>}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div className={styles.messagesContainer}>
                 <div className={styles.messages}>
 
-
+                    {/* Workflow context card */}
+                    {wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1] && (
+                        <div className={styles.wfContextCard}>
+                            <div className={styles.wfContextLabel}>
+                                📌 上一步（{wfState.steps[wfState.currentStep - 1]?.botName}）的成果：
+                            </div>
+                            <div className={styles.wfContextContent}>
+                                {wfState.stepOutputs[wfState.currentStep - 1].slice(0, 300)}
+                                {wfState.stepOutputs[wfState.currentStep - 1].length > 300 ? '…' : ''}
+                            </div>
+                        </div>
+                    )}
                     {messages.map(msg => (
                         <div
                             key={msg.id}
-                            className={`${styles.message} ${msg.role === 'user' ? styles.userMsg : styles.assistantMsg}`}
+                            className={`${styles.message} ${msg.role === 'user' ? styles.userMsg : styles.assistantMsg} ${wfState && selectedMsgIds.has(msg.id) ? styles.msgPinned : ''}`}
                         >
                             <div className={styles.msgBubble}>
                                 <div className={styles.msgContent} dangerouslySetInnerHTML={{
                                     __html: formatMessage(msg.content)
                                 }} />
+                                {wfState && msg.role === 'assistant' && msg.id !== 'welcome' && (
+                                    <button
+                                        className={`${styles.pinBtn} ${selectedMsgIds.has(msg.id) ? styles.pinBtnActive : ''}`}
+                                        onClick={() => togglePinMsg(msg.id)}
+                                    >
+                                        <Pin size={14} /> {selectedMsgIds.has(msg.id) ? '已选' : '选择'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -615,6 +795,34 @@ export default function ChatPage() {
                             {s}
                         </button>
                     ))}
+                </div>
+            )}
+
+            {/* Workflow action bar */}
+            {wfState && (
+                <div className={styles.wfActionBar}>
+                    <div className={styles.wfActionLeft}>
+                        <button onClick={selectedMsgIds.size === assistantMsgs.length ? handleDeselectAll : handleSelectAll} className={styles.wfSelectBtn}>
+                            {selectedMsgIds.size === assistantMsgs.length && assistantMsgs.length > 0
+                                ? <><CheckSquare size={14} /> 取消全选</>
+                                : <><Square size={14} /> 全选</>}
+                        </button>
+                        <span className={styles.wfSelectedCount}>已选 {selectedMsgIds.size} 条</span>
+                    </div>
+                    <div className={styles.wfActionRight}>
+                        {wfState.currentStep > 0 && (
+                            <button onClick={handleBackStep} className={styles.wfBackBtn}><Undo2 size={14} /> 回退上一步</button>
+                        )}
+                        <button
+                            onClick={handleNextStep}
+                            disabled={isStreaming || selectedMsgIds.size === 0}
+                            className={styles.wfForwardBtn}
+                        >
+                            {wfState.currentStep + 1 >= wfState.steps.length
+                                ? <>完成工作流 ✅</>
+                                : <>传递到下一步 <ArrowRight size={14} /></>}
+                        </button>
+                    </div>
                 </div>
             )}
 
