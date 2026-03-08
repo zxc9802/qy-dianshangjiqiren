@@ -4,7 +4,7 @@ import { getUserId, AppError, errorResponse } from '../../../lib/auth';
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const { id } = await params;
 
         const row = await prisma.imagePromptTag.findFirst({ where: { id, userId } });

@@ -1,27 +1,16 @@
-import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { ThemeProvider } from "next-themes";
-import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+﻿import type { Metadata, Viewport } from 'next';
+import { ThemeProvider } from 'next-themes';
+import './globals.css';
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width: 'device-width',
   initialScale: 1,
 };
 
 export const metadata: Metadata = {
-  title: "电商AI智能平台 — 你的一站式电商AI顾问团",
-  description: "34个专业智能体，覆盖电商运营、小红书内容、财税合规、AI落地全场景。智能工作流引擎，一键串联多个AI完成复杂任务。",
-  keywords: ["电商AI", "智能体", "天猫", "小红书", "工作流", "AI助手"],
+  title: '电商聚合机器人',
+  description: '企业内部使用的电商 AI 工具平台，支持智能体、工作流、图片生成和对话分析。',
+  keywords: ['电商 AI', '智能体', '工作流', '图片生成', '企业工具'],
 };
 
 export default function RootLayout({
@@ -31,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

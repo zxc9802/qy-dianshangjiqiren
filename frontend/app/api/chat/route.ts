@@ -1,37 +1,19 @@
-import { NextRequest } from 'next/server';
+﻿import { NextRequest } from 'next/server';
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
-import { readServerEnv } from '../../lib/server-env';
+import { readBackendUrl, readServerEnv } from '../../lib/server-env';
 
 const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse';
 const API_KEY = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY') || '';
 
 const GLOBAL_RULES = `
-# 全局交互规则
-
-## 规则1：用户可随时提前结束对话
-- 用户在对话任何阶段都可以跳过剩余提问，直接获取结果
-- 如果用户说“直接给我方案”“够了”“不用再问了”等表达，应立即基于已有信息输出最终结果
-- 信息不足时可用行业常见做法或合理假设补充，并在输出中标注 [基于假设]
-
-## 规则2：每次回复末尾提供预设引导（前端按钮）
-- 每次回复后，在最末尾输出一个 JSON 块，前端会解析成可点击按钮
-- 格式必须严格为：
-\`\`\`json
-{"suggestions": ["选项A的文字", "选项B的文字", "选项C的文字", "直接出方案"]}
-\`\`\`
-- 选项内容要贴合当前对话阶段，数量 3-4 个，并始终保留“直接出方案”
-
-## 规则3：排版与格式
-- 回复结构清晰，善用表格、加粗、分点列表
-- 避免大段纯文字，每段不超过 3-4 行
-- 除小红书相关机器人外，不使用 emoji
-- 像专业顾问一样直接切入问题，不要寒暄或自我介绍
+# ????
+- ???????????????
+- ????????????????????
+- ?????? emoji?
 `;
 
-const XHS_GLOBAL_RULES = GLOBAL_RULES.replace(
-    '除小红书相关机器人外，不使用 emoji',
-    '小红书相关机器人可以适当使用 emoji，符合平台内容风格'
-);
+const XHS_GLOBAL_RULES = `${GLOBAL_RULES}
+- ????????????? emoji???????`;
 
 function normalizeStreamUrl(rawUrl?: string): string {
     let url = (rawUrl || DEFAULT_API_URL).trim();
@@ -76,16 +58,16 @@ export async function POST(req: NextRequest) {
         const botIdString = String(botId ?? '');
         const fallbackPrompt = typeof systemPrompt === 'string' && systemPrompt.trim()
             ? systemPrompt.trim()
-            : '你是一个AI助手。';
+            : '??????? AI ???';
 
         let fullSystemPrompt: string;
 
         if (botIdString.startsWith('custom-')) {
-            // Custom bot — fetch from backend API
+            // Custom bot 鈥?fetch from backend API
             const customId = botIdString.replace('custom-', '');
             const token = req.headers.get('x-auth-token') || '';
             try {
-                const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+                const backendUrl = readBackendUrl();
                 const botRes = await fetch(`${backendUrl}/api/custom-bots/${customId}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
@@ -98,10 +80,10 @@ export async function POST(req: NextRequest) {
                     if (bot.documents && bot.documents.length > 0) {
                         const knowledgeTexts = bot.documents
                             .map((doc: { fileName: string; parsedText: string }) =>
-                                `### 文档: ${doc.fileName}\n${doc.parsedText}`
+                                `### 鏂囨。: ${doc.fileName}\n${doc.parsedText}`
                             )
                             .join('\n\n---\n\n');
-                        prompt += `\n\n---\n# 知识库\n以下是用户上传的参考文档，请基于这些内容回答问题：\n\n${knowledgeTexts}`;
+                        prompt += `\n\n---\n# 鐭ヨ瘑搴揬n浠ヤ笅鏄敤鎴蜂笂浼犵殑鍙傝€冩枃妗ｏ紝璇峰熀浜庤繖浜涘唴瀹瑰洖绛旈棶棰橈細\n\n${knowledgeTexts}`;
                     }
 
                     fullSystemPrompt = `${prompt}\n\n${GLOBAL_RULES}`.trim();
@@ -120,7 +102,7 @@ export async function POST(req: NextRequest) {
 
         // Inject workflow context from previous step
         if (typeof wfContext === 'string' && wfContext.trim()) {
-            fullSystemPrompt += `\n\n---\n# 上一步工作流传递的内容（作为参考背景）\n以下是用户在之前步骤中与其他AI的对话成果，请基于这些内容继续提供帮助：\n\n${wfContext.trim()}`;
+            fullSystemPrompt += `\n\n---\n# 涓婁竴姝ュ伐浣滄祦浼犻€掔殑鍐呭锛堜綔涓哄弬鑰冭儗鏅級\n浠ヤ笅鏄敤鎴峰湪涔嬪墠姝ラ涓笌鍏朵粬AI鐨勫璇濇垚鏋滐紝璇峰熀浜庤繖浜涘唴瀹圭户缁彁渚涘府鍔╋細\n\n${wfContext.trim()}`;
         }
 
         const normalizedMessages = Array.isArray(messages)
@@ -219,10 +201,12 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (err) {
-        const msg = err instanceof Error ? err.message : '未知错误';
+        const msg = err instanceof Error ? err.message : '鏈煡閿欒';
         return new Response(JSON.stringify({ error: msg }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
         });
     }
 }
+
+

@@ -2,11 +2,12 @@ import { randomUUID } from 'crypto';
 import { gunzipSync } from 'zlib';
 import { NextRequest, NextResponse } from 'next/server';
 import { WebSocket, type RawData } from 'ws';
+import { readServerEnv } from '../../lib/server-env';
 
-const VOICE_API_URL = process.env.VOICE_API_URL ?? 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel';
-const VOICE_APP_KEY = process.env.VOICE_APP_KEY ?? '6961943535';
-const VOICE_ACCESS_KEY = process.env.VOICE_ACCESS_KEY ?? 's2X2lUR2XZ83Oy-9eJ0w0uR1wclw4VPv';
-const VOICE_RESOURCE_ID = process.env.VOICE_RESOURCE_ID ?? 'volc.bigasr.sauc.duration';
+const VOICE_API_URL = readServerEnv('VOICE_API_URL')?.trim() || 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel';
+const VOICE_APP_KEY = readServerEnv('VOICE_APP_KEY')?.trim() || '';
+const VOICE_ACCESS_KEY = readServerEnv('VOICE_ACCESS_KEY')?.trim() || '';
+const VOICE_RESOURCE_ID = readServerEnv('VOICE_RESOURCE_ID')?.trim() || 'volc.bigasr.sauc.duration';
 
 // Protocol constants from ByteDance speech SDK.
 const PROTOCOL_VERSION = 0b0001;
@@ -20,8 +21,16 @@ const JSON_SERIALIZATION = 0b0001;
 const NO_COMPRESSION = 0b0000;
 const GZIP_COMPRESSION = 0b0001;
 
-const AUDIO_CHUNK_BYTES = 640; // 20ms for 16k / 16bit / mono PCM.
-const AUDIO_SEND_INTERVAL_MS = 20;
+const PCM_SAMPLE_RATE = 16000;
+const PCM_BITS_PER_SAMPLE = 16;
+const PCM_CHANNELS = 1;
+const PCM_BYTES_PER_SECOND = PCM_SAMPLE_RATE * (PCM_BITS_PER_SAMPLE / 8) * PCM_CHANNELS;
+const AUDIO_CHUNK_BYTES = 32 * 1024;
+const MAX_WS_BUFFERED_BYTES = 256 * 1024;
+const WS_BACKPRESSURE_WAIT_MS = 5;
+const MIN_TIMEOUT_MS = 20_000;
+const EXTRA_TIMEOUT_MS = 15_000;
+const MAX_TIMEOUT_MS = 90_000;
 
 interface ParsedWave {
     pcmData: Buffer;
@@ -30,30 +39,74 @@ interface ParsedWave {
     channels: number;
 }
 
+interface TranscriptionDiagnostics {
+    audioDurationMs: number;
+    timeoutMs: number;
+    chunkBytes: number;
+    chunksSent: number;
+    websocketConnectMs: number;
+    sendDurationMs: number;
+    resultWaitMs: number;
+    totalDurationMs: number;
+    finalEvent: string;
+}
+
 export async function POST(req: NextRequest) {
+    const startedAt = Date.now();
+
     try {
+        if (!VOICE_APP_KEY || !VOICE_ACCESS_KEY) {
+            return NextResponse.json({ error: 'Voice service is not configured.' }, { status: 500 });
+        }
+
+        const formDataStartedAt = Date.now();
         const formData = await req.formData();
+        const formDataDurationMs = Date.now() - formDataStartedAt;
         const audio = formData.get('audio');
 
         if (!(audio instanceof File)) {
             return NextResponse.json({ error: 'Missing audio file' }, { status: 400 });
         }
 
+        const bufferStartedAt = Date.now();
         const uploadedBuffer = Buffer.from(await audio.arrayBuffer());
-        const { pcmData, sampleRate, bitsPerSample, channels } = normalizeAudioToPcm(uploadedBuffer, audio.name);
+        const bufferReadDurationMs = Date.now() - bufferStartedAt;
 
-        if (sampleRate !== 16000 || bitsPerSample !== 16 || channels !== 1) {
+        const parseStartedAt = Date.now();
+        const { pcmData, sampleRate, bitsPerSample, channels } = normalizeAudioToPcm(uploadedBuffer, audio.name);
+        const parseDurationMs = Date.now() - parseStartedAt;
+
+        if (sampleRate !== PCM_SAMPLE_RATE || bitsPerSample !== PCM_BITS_PER_SAMPLE || channels !== PCM_CHANNELS) {
             return NextResponse.json(
-                { error: `WAV format must be 16kHz / 16bit / mono, got ${sampleRate}Hz / ${bitsPerSample}bit / ${channels}ch` },
+                {
+                    error: `WAV format must be ${PCM_SAMPLE_RATE / 1000}kHz / ${PCM_BITS_PER_SAMPLE}bit / ${PCM_CHANNELS}ch, got ${sampleRate}Hz / ${bitsPerSample}bit / ${channels}ch`,
+                },
                 { status: 400 },
             );
         }
 
-        const { text, debugLogs } = await transcribeWithByteDance(pcmData);
-        return NextResponse.json({ text, debug: debugLogs });
+        const transcriptionStartedAt = Date.now();
+        const { text, diagnostics } = await transcribeWithByteDance(pcmData);
+        const transcriptionDurationMs = Date.now() - transcriptionStartedAt;
+
+        console.info('[voice] transcription completed', {
+            requestDurationMs: Date.now() - startedAt,
+            formDataDurationMs,
+            bufferReadDurationMs,
+            parseDurationMs,
+            transcriptionDurationMs,
+            uploadedBytes: uploadedBuffer.length,
+            pcmBytes: pcmData.length,
+            ...diagnostics,
+        });
+
+        return NextResponse.json({ text });
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Voice transcription failed';
-        console.error('Voice API error:', message);
+        console.error('[voice] transcription failed', {
+            message,
+            totalDurationMs: Date.now() - startedAt,
+        });
         return NextResponse.json({ error: message }, { status: 500 });
     }
 }
@@ -124,19 +177,21 @@ function parseWavePcm(audioData: Buffer): ParsedWave {
     };
 }
 
-function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; debugLogs: string[] }> {
+function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; diagnostics: TranscriptionDiagnostics }> {
     return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
         const connectId = randomUUID();
-        const debugLogs: string[] = [];
+        const audioDurationMs = Math.ceil((audioData.length / PCM_BYTES_PER_SECOND) * 1000);
+        const timeoutMs = calculateTimeoutMs(audioDurationMs);
         const requestConfig = {
             user: {
                 uid: 'web-voice-input',
             },
             audio: {
                 format: 'pcm',
-                rate: 16000,
-                bits: 16,
-                channel: 1,
+                rate: PCM_SAMPLE_RATE,
+                bits: PCM_BITS_PER_SAMPLE,
+                channel: PCM_CHANNELS,
             },
             request: {
                 model_name: 'bigmodel',
@@ -146,8 +201,10 @@ function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; deb
 
         let fullText = '';
         let settled = false;
-
-        debugLogs.push(`Audio PCM size: ${audioData.length} bytes`);
+        let chunksSent = 0;
+        let websocketOpenedAt = 0;
+        let streamCompletedAt = 0;
+        let finalEvent = 'socket_closed';
 
         const ws = new WebSocket(VOICE_API_URL, {
             headers: {
@@ -162,61 +219,70 @@ function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; deb
             if (settled) return;
             settled = true;
             clearTimeout(timeout);
+
+            const finishedAt = Date.now();
             if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
                 ws.close();
             }
-            resolve({ text: resultText.trim(), debugLogs });
+
+            resolve({
+                text: resultText.trim(),
+                diagnostics: {
+                    audioDurationMs,
+                    timeoutMs,
+                    chunkBytes: AUDIO_CHUNK_BYTES,
+                    chunksSent,
+                    websocketConnectMs: websocketOpenedAt ? websocketOpenedAt - startedAt : 0,
+                    sendDurationMs: websocketOpenedAt && streamCompletedAt ? streamCompletedAt - websocketOpenedAt : 0,
+                    resultWaitMs: streamCompletedAt ? finishedAt - streamCompletedAt : finishedAt - startedAt,
+                    totalDurationMs: finishedAt - startedAt,
+                    finalEvent,
+                },
+            });
         };
 
         const timeout = setTimeout(() => {
-            debugLogs.push('Timeout reached (30s)');
+            finalEvent = 'timeout';
             finalize(fullText);
-        }, 30000);
+        }, timeoutMs);
 
         ws.on('open', () => {
-            debugLogs.push('WebSocket opened, sending config packet...');
+            websocketOpenedAt = Date.now();
             ws.send(encodeFullClientRequest(requestConfig));
 
-            void streamAudio(ws, audioData, debugLogs).catch((err) => {
-                if (!settled) {
-                    settled = true;
-                    clearTimeout(timeout);
-                    reject(err instanceof Error ? err : new Error('Audio streaming failed'));
-                }
-            });
+            void streamAudio(ws, audioData)
+                .then((result) => {
+                    chunksSent = result.chunksSent;
+                    streamCompletedAt = Date.now();
+                })
+                .catch((err) => {
+                    if (!settled) {
+                        settled = true;
+                        clearTimeout(timeout);
+                        reject(err instanceof Error ? err : new Error('Audio streaming failed'));
+                    }
+                });
         });
 
         ws.on('message', (raw: RawData) => {
             try {
                 const buf = toBuffer(raw);
-                const headerHex = buf.subarray(0, Math.min(20, buf.length)).toString('hex');
-                const msgType = buf.length >= 2 ? (buf[1] >> 4) : -1;
-                const msgFlags = buf.length >= 2 ? (buf[1] & 0x0f) : -1;
-                const compression = buf.length >= 3 ? (buf[2] & 0x0f) : -1;
-                debugLogs.push(`RawFrame: len=${buf.length}, type=${msgType}, flags=${msgFlags}, comp=${compression}, hex=${headerHex}`);
-
                 const message = parseServerPayload(buf);
                 if (!message || typeof message !== 'object') {
-                    debugLogs.push(`Parsed null/non-object, skipping`);
                     return;
                 }
-
-                debugLogs.push(`ParsedJSON: ${JSON.stringify(message).slice(0, 300)}`);
 
                 const text = extractText(message);
                 if (text) {
                     fullText = text;
                 }
 
-                const eventName = extractEventName(message);
-                debugLogs.push(`Event: ${eventName}, text: ${text || '(none)'}`);
-
                 if (isFinalMessage(message)) {
+                    finalEvent = extractEventName(message) || 'final';
                     finalize(fullText);
                 }
-            } catch (err) {
-                const message = err instanceof Error ? err.message : 'unknown';
-                debugLogs.push(`Failed to parse message: ${message}`);
+            } catch {
+                // Ignore malformed ACK/heartbeat frames from the upstream service.
             }
         });
 
@@ -229,7 +295,6 @@ function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; deb
         });
 
         ws.on('close', () => {
-            debugLogs.push(`WebSocket closed. fullText: "${fullText.slice(0, 120)}"`);
             if (!settled) {
                 finalize(fullText);
             }
@@ -237,16 +302,37 @@ function transcribeWithByteDance(audioData: Buffer): Promise<{ text: string; deb
     });
 }
 
-async function streamAudio(ws: WebSocket, audioData: Buffer, debugLogs: string[]) {
-    debugLogs.push(`Streaming PCM in ${AUDIO_CHUNK_BYTES}-byte packets...`);
+async function streamAudio(ws: WebSocket, audioData: Buffer): Promise<{ chunksSent: number }> {
+    let chunksSent = 0;
+
     for (let offset = 0; offset < audioData.length; offset += AUDIO_CHUNK_BYTES) {
+        while (ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+            await delay(WS_BACKPRESSURE_WAIT_MS);
+        }
+
+        if (ws.readyState !== WebSocket.OPEN) {
+            throw new Error('Voice WebSocket closed before audio upload finished.');
+        }
+
         const chunk = audioData.subarray(offset, Math.min(offset + AUDIO_CHUNK_BYTES, audioData.length));
         ws.send(encodeAudioOnlyRequest(chunk));
-        await delay(AUDIO_SEND_INTERVAL_MS);
+        chunksSent++;
     }
 
-    debugLogs.push('Sending final negative packet');
+    while (ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+        await delay(WS_BACKPRESSURE_WAIT_MS);
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+        throw new Error('Voice WebSocket closed before final packet was sent.');
+    }
+
     ws.send(encodeAudioOnlyRequest(Buffer.alloc(0), NEG_WITHOUT_SEQUENCE));
+    return { chunksSent };
+}
+
+function calculateTimeoutMs(audioDurationMs: number): number {
+    return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, audioDurationMs + EXTRA_TIMEOUT_MS));
 }
 
 function toBuffer(raw: RawData): Buffer {
@@ -295,14 +381,12 @@ function parseServerPayload(frame: Buffer): unknown {
     const messageTypeFlags = frame[1] & 0x0f;
     const compressionType = frame[2] & 0x0f;
 
-    // Detect sequence from flags: POS_SEQUENCE(1), NEG_SEQUENCE(2), NEG_WITH_SEQUENCE(3) all have sequence
     const hasSequence = messageTypeFlags > 0;
     const messageDescriptionLength = messageType === SERVER_ERROR_RESPONSE ? 8 : 4;
     const sequenceLength = hasSequence ? 4 : 0;
     const payloadOffset = headerSize * 4 + messageDescriptionLength + sequenceLength;
 
     if (payloadOffset > frame.length) {
-        // Try without sequence as fallback
         const fallbackOffset = headerSize * 4 + messageDescriptionLength;
         if (fallbackOffset <= frame.length) {
             let payload = frame.subarray(fallbackOffset);
@@ -328,11 +412,9 @@ function parseServerPayload(frame: Buffer): unknown {
         return null;
     }
 
-    const text = payload.toString('utf-8');
     try {
-        return JSON.parse(text);
+        return JSON.parse(payload.toString('utf-8'));
     } catch {
-        // Not valid JSON - might be a binary ACK frame, skip it
         return null;
     }
 }

@@ -761,13 +761,22 @@
     background: hsla(0, 72%, 51%, 0.08);
 }
 
+.attachmentList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 760px;
+    margin: 0 auto 8px;
+    width: 100%;
+}
+
 /* Attachment preview bar */
 .attachmentBar {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 8px 16px;
-    margin: 0 auto 8px;
+    margin: 0;
     background: var(--color-card);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);

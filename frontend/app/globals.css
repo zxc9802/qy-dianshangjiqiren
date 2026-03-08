@@ -341,6 +341,16 @@ a:focus-visible {
   }
 }
 
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes scaleIn {
   from {
     opacity: 0;
@@ -431,6 +441,10 @@ a:focus-visible {
 
 .animate-pulse {
   animation: pulse 2s var(--ease-smooth) infinite;
+}
+
+.animate-spin {
+  animation: spin 0.9s linear infinite;
 }
 
 .animate-scaleIn {

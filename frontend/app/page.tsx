@@ -9,7 +9,7 @@ import styles from './page.module.css';
 import {
   Bot, Search, Sun, Moon, Home, Zap, ImageIcon, User, Trash2,
   Target, Compass, MapPin, Briefcase, Users, Sparkles, TrendingUp,
-  Zap as ZapIcon, FrameIcon, Star, Swords, Coins, Camera, Link,
+  FrameIcon, Star, Swords, Coins, Camera, Link,
   FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
@@ -136,9 +136,17 @@ export default function HomePage() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   useEffect(() => { loadUser(); }, [loadUser]);
-  useEffect(() => { if (isAuthenticated) loadConversations(); }, [isAuthenticated, loadConversations]);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    void loadConversations().catch((error) => {
+      console.error('[Home] Failed to load conversations', error);
+    });
+  }, [isAuthenticated, loadConversations]);
 
   const requireAuth = (path: string) => {
     if (!isAuthenticated) {
@@ -222,6 +230,10 @@ export default function HomePage() {
         <div className={styles.headerRight}>
           <button onClick={() => requireAuth('/my-bots')} className={styles.navBtn}>我的智能体</button>
           <button onClick={() => requireAuth('/my-workflows')} className={styles.navBtn}>我的工作流</button>
+          {user?.role === 'admin' && (
+            <button onClick={() => requireAuth('/admin/invite-codes')} className={styles.navBtn}>邀请码管理</button>
+          )}
+          <button onClick={() => requireAuth('/insights')} className={styles.navBtn}>网页洞察</button>
           {mounted && (
             <button
               className={styles.themeToggle}
@@ -274,12 +286,12 @@ export default function HomePage() {
                     <button
                       className={styles.sidebarActionBtn}
                       style={{ color: conv.isFavorite ? '#eab308' : undefined }}
-                      onClick={(e) => { e.stopPropagation(); toggleFavorite(conv.id); }}
+                      onClick={(e) => { e.stopPropagation(); void toggleFavorite(conv.id); }}
                     >
                       <Star size={14} fill={conv.isFavorite ? '#eab308' : 'none'} />
                     </button>
                   )}
-                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); sidebarTab === 'favorites' ? removeFavorite(conv.id) : deleteConversation(conv.id); }}><Trash2 size={14} /></button>
+                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); if (sidebarTab === 'favorites') { void removeFavorite(conv.id); } else { void deleteConversation(conv.id); } }}><Trash2 size={14} /></button>
                 </div>
               </div>
             ))}

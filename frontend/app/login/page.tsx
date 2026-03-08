@@ -1,58 +1,74 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Bot } from 'lucide-react';
+import { ApiError } from '../lib/api';
 import { useAuthStore } from '../stores/auth';
 import styles from './login.module.css';
-import { Bot } from 'lucide-react';
+
+type AuthMode = 'login' | 'register' | 'activate';
 
 export default function LoginPage() {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState('');
+    const [mode, setMode] = useState<AuthMode>('login');
+    const [account, setAccount] = useState('');
     const [password, setPassword] = useState('');
     const [nickname, setNickname] = useState('');
-    const [code, setCode] = useState('');
+    const [groupName, setGroupName] = useState('');
+    const [inviteCode, setInviteCode] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [codeSent, setCodeSent] = useState(false);
-    const [countdown, setCountdown] = useState(0);
+
     const router = useRouter();
-    const { login, register, sendCode } = useAuthStore();
+    const { login, register, activate } = useAuthStore();
 
-    useEffect(() => {
-        if (countdown <= 0) return;
-        const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
-        return () => clearTimeout(timer);
-    }, [countdown]);
+    const setModeAndResetError = (nextMode: AuthMode) => {
+        setMode(nextMode);
+        setError('');
+    };
 
-    const handleSendCode = useCallback(async () => {
-        if (!email || countdown > 0) return;
+    const isRegister = mode === 'register';
+    const isActivate = mode === 'activate';
+    const showInviteCode = isRegister || isActivate;
+    const showProfileFields = isRegister || isActivate;
+
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
         setError('');
         setLoading(true);
-        try {
-            await sendCode(email);
-            setCodeSent(true);
-            setCountdown(60);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : '发送验证码失败');
-        } finally {
-            setLoading(false);
-        }
-    }, [email, countdown, sendCode]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
         try {
-            if (isLogin) {
-                await login(email, password);
+            if (mode === 'login') {
+                await login(account, password);
+            } else if (mode === 'register') {
+                await register(account, password, inviteCode, nickname, groupName);
             } else {
-                await register(email, password, code, nickname || undefined);
+                await activate(account, password, inviteCode, nickname, groupName);
             }
+
             router.push('/');
         } catch (err) {
-            setError(err instanceof Error ? err.message : '操作失败');
+            if (err instanceof ApiError) {
+                if (err.code === 'INVITE_REQUIRED') {
+                    setMode('activate');
+                    setError('该账号尚未获得成员权限，请填写邀请码、姓名和组别完成激活。');
+                } else if (err.code === 'ACCOUNT_EXISTS_USE_ACTIVATE') {
+                    setMode('activate');
+                    setError('该账号已存在，但还没有完成成员激活。请填写邀请码、姓名和组别后继续。');
+                } else if (err.code === 'INVITE_CODE_INVALID') {
+                    setError('邀请码无效或已被使用。');
+                } else if (err.code === 'PROFILE_NAME_REQUIRED') {
+                    setMode('activate');
+                    setError('激活成员账号前必须填写姓名。');
+                } else if (err.code === 'PROFILE_GROUP_REQUIRED') {
+                    setMode('activate');
+                    setError('激活成员账号前必须填写组别。');
+                } else {
+                    setError(err.message);
+                }
+            } else {
+                setError(err instanceof Error ? err.message : '操作失败，请稍后重试。');
+            }
         } finally {
             setLoading(false);
         }
@@ -60,84 +76,83 @@ export default function LoginPage() {
 
     return (
         <div className={styles.container}>
-            {/* Left branding panel */}
             <div className={styles.brandPanel}>
                 <div className={styles.brandContent}>
                     <div className={styles.brandLogo}><Bot size={40} /></div>
-                    <h1 className={styles.brandTitle}>电商AI智能平台</h1>
-                    <p className={styles.brandSub}>你的一站式电商AI顾问团</p>
+                    <h1 className={styles.brandTitle}>电商 AI 智能平台</h1>
+                    <p className={styles.brandSub}>企业内部使用，请先登录账号，再通过邀请码完成成员准入与权限激活。</p>
                     <div className={styles.features}>
-                        <span className={styles.featureTag}>✦ 34个专业智能体</span>
-                        <span className={styles.featureTag}>✦ 智能工作流引擎</span>
-                        <span className={styles.featureTag}>✦ 安全文件上传</span>
+                        <span className={styles.featureTag}>34 个预设机器人</span>
+                        <span className={styles.featureTag}>支持自定义工作流</span>
+                        <span className={styles.featureTag}>插件与主站账号同步</span>
                     </div>
                 </div>
             </div>
 
-            {/* Right form panel */}
             <div className={styles.formPanel}>
                 <div className={styles.formContainer}>
                     <div className={styles.tabs}>
                         <button
-                            className={`${styles.tab} ${isLogin ? styles.tabActive : ''}`}
-                            onClick={() => { setIsLogin(true); setError(''); }}
+                            type="button"
+                            className={`${styles.tab} ${mode === 'login' ? styles.tabActive : ''}`}
+                            onClick={() => setModeAndResetError('login')}
                         >
                             登录
                         </button>
                         <button
-                            className={`${styles.tab} ${!isLogin ? styles.tabActive : ''}`}
-                            onClick={() => { setIsLogin(false); setError(''); }}
+                            type="button"
+                            className={`${styles.tab} ${mode === 'register' ? styles.tabActive : ''}`}
+                            onClick={() => setModeAndResetError('register')}
                         >
                             注册
+                        </button>
+                        <button
+                            type="button"
+                            className={`${styles.tab} ${mode === 'activate' ? styles.tabActive : ''}`}
+                            onClick={() => setModeAndResetError('activate')}
+                        >
+                            激活成员
                         </button>
                     </div>
 
                     <form onSubmit={handleSubmit} className={styles.form}>
                         <div className={styles.field}>
-                            <label className={styles.label}>邮箱</label>
+                            <label className={styles.label}>账号</label>
                             <input
-                                type="email"
-                                value={email}
-                                onChange={e => setEmail(e.target.value)}
-                                placeholder="请输入邮箱地址"
+                                type="text"
+                                value={account}
+                                onChange={(event) => setAccount(event.target.value)}
+                                placeholder="请输入账号"
                                 required
                                 className={styles.input}
                             />
                         </div>
 
-                        {!isLogin && (
+                        {showProfileFields && (
                             <>
                                 <div className={styles.field}>
-                                    <label className={styles.label}>验证码</label>
-                                    <div className={styles.codeRow}>
-                                        <input
-                                            type="text"
-                                            value={code}
-                                            onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                            placeholder="6位验证码"
-                                            required
-                                            className={styles.codeInput}
-                                            maxLength={6}
-                                        />
-                                        <button
-                                            type="button"
-                                            className={styles.sendCodeBtn}
-                                            onClick={handleSendCode}
-                                            disabled={!email || countdown > 0 || loading}
-                                        >
-                                            {countdown > 0 ? `${countdown}s` : codeSent ? '重新发送' : '发送验证码'}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className={styles.field}>
-                                    <label className={styles.label}>昵称</label>
+                                    <label className={styles.label}>姓名</label>
                                     <input
                                         type="text"
                                         value={nickname}
-                                        onChange={e => setNickname(e.target.value)}
-                                        placeholder="给自己取个名字（选填）"
+                                        onChange={(event) => setNickname(event.target.value)}
+                                        placeholder="请输入真实姓名"
                                         className={styles.input}
+                                        maxLength={20}
+                                        required
+                                    />
+                                </div>
+
+                                <div className={styles.field}>
+                                    <label className={styles.label}>组别</label>
+                                    <input
+                                        type="text"
+                                        value={groupName}
+                                        onChange={(event) => setGroupName(event.target.value)}
+                                        placeholder="例如：运营组 / 设计组 / 销售组"
+                                        className={styles.input}
+                                        maxLength={50}
+                                        required
                                     />
                                 </div>
                             </>
@@ -148,23 +163,47 @@ export default function LoginPage() {
                             <input
                                 type="password"
                                 value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                placeholder={isLogin ? '请输入密码' : '设置密码（至少6位）'}
+                                onChange={(event) => setPassword(event.target.value)}
+                                placeholder={mode === 'login' ? '请输入密码' : '请输入至少 6 位密码'}
                                 required
                                 className={styles.input}
                             />
                         </div>
 
-                        {error && <p className={styles.error}>{error}</p>}
+                        {showInviteCode && (
+                            <div className={styles.field}>
+                                <label className={styles.label}>邀请码</label>
+                                <input
+                                    type="text"
+                                    value={inviteCode}
+                                    onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+                                    placeholder="请输入管理员发放的邀请码"
+                                    required
+                                    className={styles.input}
+                                />
+                            </div>
+                        )}
+
+                        {showInviteCode && (
+                            <p className={styles.switchHint}>
+                                邀请码为一次性凭证。成员注册和激活都需要填写邀请码，并补全姓名与组别。
+                            </p>
+                        )}
+
+                        {error ? <p className={styles.error}>{error}</p> : null}
 
                         <button type="submit" className={styles.submitBtn} disabled={loading}>
-                            {loading ? '处理中...' : isLogin ? '登录' : '注册'}
+                            {loading ? '提交中...' : mode === 'login' ? '登录' : mode === 'register' ? '注册并进入' : '激活成员权限'}
                         </button>
 
                         <p className={styles.switchHint}>
-                            {isLogin ? '还没有账号？' : '已有账号？'}
-                            <button type="button" className={styles.switchBtn} onClick={() => { setIsLogin(!isLogin); setError(''); }}>
-                                {isLogin ? '立即注册' : '去登录'}
+                            {mode === 'login' ? '还没有账号？' : mode === 'register' ? '已经有账号？' : '返回普通登录？'}
+                            <button
+                                type="button"
+                                className={styles.switchBtn}
+                                onClick={() => setModeAndResetError(mode === 'login' ? 'register' : 'login')}
+                            >
+                                {mode === 'login' ? '去注册' : '返回登录'}
                             </button>
                         </p>
                     </form>

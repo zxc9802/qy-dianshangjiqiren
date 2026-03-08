@@ -1,5 +1,17 @@
 const API_BASE = '/api';
 
+export class ApiError extends Error {
+    status: number;
+    code?: string;
+
+    constructor(message: string, status: number, code?: string) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.code = code;
+    }
+}
+
 export function resolveImageAssetUrl(input: string): string {
     return input || '';
 }
@@ -34,7 +46,8 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
         const message = typeof data === 'string'
             ? data
             : data?.message || data?.error || 'Request failed';
-        throw new Error(message);
+        const code = typeof data === 'string' ? undefined : data?.code;
+        throw new ApiError(message, res.status, code);
     }
 
     return data as T;
@@ -42,19 +55,44 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
     // Auth
-    sendCode: (body: { email: string }) =>
-        request<{ success: boolean; message: string }>('/auth?action=send-code', { method: 'POST', body: JSON.stringify(body) }),
-
-    verifyCode: (body: { email: string; code: string }) =>
-        request<{ success: boolean; message: string }>('/auth?action=verify-code', { method: 'POST', body: JSON.stringify(body) }),
-
-    register: (body: { email: string; password: string; code: string; nickname?: string; inviteCode?: string }) =>
+    register: (body: { account: string; password: string; nickname: string; groupName: string; inviteCode: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=register', { method: 'POST', body: JSON.stringify(body) }),
 
-    login: (body: { email: string; password: string }) =>
+    login: (body: { account: string; password: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=login', { method: 'POST', body: JSON.stringify(body) }),
 
+    activate: (body: { account: string; password: string; inviteCode: string; nickname?: string; groupName?: string }) =>
+        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=activate', { method: 'POST', body: JSON.stringify(body) }),
+
     getMe: () => request<{ success: boolean; data: UserInfo }>('/auth/me'),
+
+    updateProfile: (body: { nickname: string }) =>
+        request<{ success: boolean; data: UserInfo }>('/auth/me', { method: 'PATCH', body: JSON.stringify(body) }),
+
+    // Admin invite codes
+    createInviteCodeBatch: (body: { count: number }) =>
+        request<{ success: boolean; data: { batch: InviteCodeBatchInfo; codes: InviteCodeInfo[] } }>('/admin/invite-code-batches', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
+    getInviteCodeBatches: () =>
+        request<{ success: boolean; data: InviteCodeBatchInfo[] }>('/admin/invite-code-batches'),
+
+    getInviteCodes: (batchId: string) =>
+        request<{ success: boolean; data: InviteCodeInfo[] }>(`/admin/invite-codes?batchId=${encodeURIComponent(batchId)}`),
+
+    updateInviteCodeBatch: (batchId: string, body: { remark: string }) =>
+        request<{ success: boolean; data: InviteCodeBatchInfo }>(`/admin/invite-code-batches/${batchId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        }),
+
+    searchInviteCodeUsage: (keyword: string) =>
+        request<{ success: boolean; data: InviteCodeUsageInfo[] }>(`/admin/invite-code-usage?keyword=${encodeURIComponent(keyword)}`),
+
+    revokeInviteCodeUsage: (inviteCodeId: string) =>
+        request<{ success: boolean }>(`/admin/invite-codes/${inviteCodeId}/revoke`, { method: 'POST' }),
 
     // Bots
     getBots: (params?: { category?: string; search?: string }) => {
@@ -82,16 +120,30 @@ export const api = {
     deleteConversation: (id: string) =>
         request<{ success: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
 
-    // Points
-    getBalance: () => request<{ success: boolean; data: { balance: number } }>('/points?action=balance'),
-    getTransactions: (params?: { page?: number; type?: string }) => {
-        const qs = new URLSearchParams(params as unknown as Record<string, string>).toString();
-        return request<{ success: boolean; data: { transactions: PointsTransaction[]; total: number } }>(`/points${qs ? `?${qs}` : ''}`);
+    sendConversationMessage: (id: string, body: {
+        content: string;
+        displayContent?: string;
+        inputType?: 'text' | 'voice' | 'file';
+    }) => {
+        const token = getToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return fetch(`${API_BASE}/conversations/${id}/messages`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+        });
     },
-    redeem: (code: string) =>
-        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points?action=redeem', { method: 'POST', body: JSON.stringify({ code }) }),
-    recharge: (amount: number) =>
-        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points?action=recharge', { method: 'POST', body: JSON.stringify({ amount }) }),
+
+    migrateLocalData: (body: {
+        conversations: LocalConversationItem[];
+        favorites: LocalConversationItem[];
+        workflows: LocalWorkflowItem[];
+    }) =>
+        request<{ success: boolean; data: { migratedConversations: number; migratedWorkflows: number } }>(
+            '/migrations/local-data',
+            { method: 'POST', body: JSON.stringify(body) },
+        ),
 
     // Image generations
     generateImage: (body: Record<string, unknown>) =>
@@ -124,6 +176,53 @@ export const api = {
     deleteImagePromptTag: (id: string) =>
         request<{ success: boolean; message?: string }>(`/image-prompt-tags/${id}`, { method: 'DELETE' }),
 
+    // Workflows
+    getWorkflows: (params?: { action?: string; scope?: string }) => {
+        const qs = new URLSearchParams(params as Record<string, string>).toString();
+        return request<{ success: boolean; data: WorkflowInfo[] }>(`/workflows${qs ? `?${qs}` : ''}`);
+    },
+
+    getWorkflow: (id: string) =>
+        request<{ success: boolean; data: WorkflowInfo }>(`/workflows/${id}`),
+
+    createWorkflow: (body: {
+        name: string;
+        description?: string;
+        canvasData: string;
+        clientSourceId?: string;
+    }) =>
+        request<{ success: boolean; data: WorkflowInfo }>('/workflows', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
+    updateWorkflow: (id: string, body: {
+        name?: string;
+        description?: string;
+        canvasData?: string;
+        triggerType?: string;
+        cronExpr?: string | null;
+        clientSourceId?: string | null;
+    }) =>
+        request<{ success: boolean; data: WorkflowInfo }>(`/workflows/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(body),
+        }),
+
+    deleteWorkflow: (id: string) =>
+        request<{ success: boolean }>(`/workflows/${id}`, { method: 'DELETE' }),
+
+    // Page insights
+    getInsights: (params?: { limit?: number }) => {
+        const query: Record<string, string> = {};
+        if (typeof params?.limit === 'number') query.limit = String(params.limit);
+        const qs = new URLSearchParams(query).toString();
+        return request<{ success: boolean; data: PageInsightInfo[] }>(`/insights${qs ? `?${qs}` : ''}`);
+    },
+
+    getInsight: (id: string) =>
+        request<{ success: boolean; data: PageInsightInfo }>(`/insights/${id}`),
+
     // SSE streaming (returns EventSource URL)
     getMessageStreamUrl: (conversationId: string) => `/api/conversations/${conversationId}/messages`,
 };
@@ -131,12 +230,15 @@ export const api = {
 // Types
 export interface UserInfo {
     id: string;
-    email: string;
+    account: string;
     nickname: string;
+    groupName: string;
     avatar: string;
-    pointsBalance: number;
+    role: UserRole;
     createdAt?: string;
 }
+
+export type UserRole = 'admin' | 'member';
 
 export interface BotInfo {
     id: string;
@@ -148,6 +250,17 @@ export interface BotInfo {
     pointsPerUse: number;
 }
 
+export interface ConversationBotInfo {
+    routeId: string;
+    kind: 'builtin' | 'custom';
+    refId: string;
+    name: string;
+    icon: string;
+    category: string;
+    pointsPerUse: number;
+    isActive: boolean;
+}
+
 export interface ConversationInfo {
     id: string;
     botId: string;
@@ -155,12 +268,12 @@ export interface ConversationInfo {
     isFavorited: boolean;
     createdAt: string;
     updatedAt: string;
-    bot: { name: string; icon: string; category: string };
-    messages?: { content: string; createdAt: string }[];
+    bot: ConversationBotInfo;
+    messageCount: number;
+    messages?: Array<{ id: string; role: string; content: string; createdAt: string }>;
 }
 
 export interface ConversationDetail extends ConversationInfo {
-    bot: { id: string; name: string; icon: string; category: string; pointsPerUse: number };
     messages: MessageInfo[];
 }
 
@@ -180,15 +293,6 @@ export interface AttachmentInfo {
     fileUrl: string;
     fileName: string;
     fileSize: number;
-}
-
-export interface PointsTransaction {
-    id: string;
-    type: string;
-    amount: number;
-    balanceAfter: number;
-    description: string;
-    createdAt: string;
 }
 
 export interface ImageGenerationRequest {
@@ -243,3 +347,123 @@ export interface CreateImagePromptTagRequest {
     groupKey: string;
     label: string;
 }
+
+export interface WorkflowInfo {
+    id: string;
+    clientSourceId: string | null;
+    userId: string;
+    name: string;
+    description: string;
+    canvasData: string;
+    triggerType: string;
+    isPreset: boolean;
+    isPublished: boolean;
+    usageCount: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface PageContextInfo {
+    title: string;
+    url: string;
+    domain: string;
+    mainText: string;
+    metaDescription: string;
+    selectedText: string;
+    hasVideo: boolean;
+    videoTitle: string;
+    videoDescription: string;
+    captionsText: string;
+    transcriptSource: 'dom' | 'track' | 'page' | 'none';
+}
+
+export interface PageInsightInfo {
+    id: string;
+    sourceUrl: string;
+    sourceTitle: string;
+    sourceDomain: string;
+    summary: string | null;
+    botId: string;
+    botKind: 'builtin' | 'custom';
+    botName: string;
+    createdAt: string;
+    updatedAt: string;
+    pageContext: PageContextInfo;
+    chatTranscript: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+        createdAt?: string;
+    }>;
+}
+
+export interface LocalConversationMessageItem {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp?: number;
+}
+
+export interface LocalConversationItem {
+    id: string;
+    botId: string;
+    botName?: string;
+    messages: LocalConversationMessageItem[];
+    isFavorite?: boolean;
+    createdAt?: number;
+    updatedAt?: number;
+}
+
+export interface LocalWorkflowItem {
+    id: string;
+    name: string;
+    description?: string;
+    steps: Array<{ botId: string; botName: string }>;
+    createdAt?: number;
+    updatedAt?: number;
+}
+
+export interface InviteCodeBatchInfo {
+    id: string;
+    count: number;
+    remark: string;
+    createdAt: string;
+    createdBy: {
+        id: string;
+        account: string;
+        nickname: string;
+    };
+    usedCount: number;
+    unusedCount: number;
+}
+
+export interface InviteCodeInfo {
+    id: string;
+    code: string;
+    createdAt: string;
+    usedAt: string | null;
+    batchId: string;
+    canRevoke: boolean;
+    usedBy: {
+        id: string;
+        account: string;
+        nickname: string;
+        groupName: string;
+    } | null;
+}
+
+export interface InviteCodeUsageInfo {
+    inviteCodeId: string;
+    code: string;
+    batchId: string;
+    batchCreatedAt: string;
+    batchRemark: string;
+    usedAt: string | null;
+    canRevoke: boolean;
+    usedBy: {
+        id: string;
+        account: string;
+        nickname: string;
+        groupName: string;
+    } | null;
+}
+

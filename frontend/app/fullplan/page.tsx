@@ -1,13 +1,24 @@
-'use client';
+﻿'use client';
 
-import { useState, useRef, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuthStore } from '../stores/auth';
 import styles from './fullplan.module.css';
 import {
-    Search, Swords, Zap, Palette, FileText, Star, BookOpen,
-    Coins, Target, Rocket, CheckCircle, Loader2, XCircle,
-    ArrowLeft, Square,
+    Search,
+    Swords,
+    Zap,
+    Palette,
+    FileText,
+    Star,
+    BookOpen,
+    Coins,
+    Target,
+    Rocket,
+    CheckCircle,
+    Loader2,
+    XCircle,
+    ArrowLeft,
+    Square,
 } from 'lucide-react';
 
 interface PlanStep {
@@ -21,67 +32,136 @@ interface PlanStep {
 }
 
 const PLAN_STEPS: Omit<PlanStep, 'status' | 'result'>[] = [
-    { id: 'market', title: '市场分析', icon: <Search size={18} />, description: '分析市场趋势、价格带、人群画像', prompt: '你是电商市场分析专家。请对以下产品做详细市场分析：\n\n{input}\n\n请从以下维度分析：\n1. 市场规模和增长趋势\n2. 价格带分布（低/中/高端占比）\n3. 目标人群画像（年龄、性别、消费习惯）\n4. 市场机会和风险\n5. 季节性趋势\n\n用数据化、结构化的方式输出，包含具体数字估算。' },
-    { id: 'competitor', title: '竞品扫描', icon: <Swords size={18} />, description: '分析TOP竞品的产品、定价、流量策略', prompt: '你是电商竞争策略专家。基于以下产品信息和前面的市场分析，做竞品分析：\n\n产品：{input}\n市场分析：{prev}\n\n请输出：\n1. TOP5竞品对比表（产品名、价格、月销、评分、核心卖点）\n2. 各竞品的差异化策略\n3. 竞品的流量来源分析\n4. 可切入的竞争空白点\n5. 建议的差异化定位\n\n用表格和要点形式输出。' },
-    { id: 'selling', title: '超级卖点', icon: <Zap size={18} />, description: '提炼3个核心卖点 + FAB分析', prompt: '你是卖点提炼专家。基于以下产品信息和之前的市场竞品分析，提炼超级卖点：\n\n产品：{input}\n前序分析：{prev}\n\n请输出：\n1. 3个超级卖点（每个包含FAB分析：Feature特点、Advantage优势、Benefit利益点）\n2. 30字以内的核心广告语\n3. 每个卖点对应的使用场景\n4. 与竞品的差异化话术\n5. 适合放在主图上的3句话\n\n要求：口语化、有画面感、能打动消费者。' },
-    { id: 'mainimg', title: '主图策划', icon: <Palette size={18} />, description: '策划天猫5张主图方案', prompt: '你是天猫主图策划专家。基于以下产品和卖点，策划5张主图：\n\n产品：{input}\n卖点：{prev}\n\n请输出每张主图的详细方案：\n- 第1张（首图/点击图）：构图、文案、视觉重点\n- 第2张（核心卖点图）：展示方式、排版建议\n- 第3张（场景/情感图）：使用场景、氛围\n- 第4张（对比/数据图）：对比维度、呈现方式\n- 第5张（促销/行动图）：促销信息、CTA\n\n每张图包含：构图描述、主标题（8字内）、副标题、配色建议、AI出图提示词（英文）。' },
-    { id: 'detail', title: '详情页框架', icon: <FileText size={18} />, description: '生成完整的详情页文案结构', prompt: '你是电商详情页文案专家。基于以下产品和之前的分析，生成完整详情页：\n\n产品：{input}\n参考：{prev}\n\n请输出详情页结构（从上到下）：\n1. 开屏大图文案（一句话戛中痛点）\n2. 核心卖点展示区（3个卖点各配标题+说明+场景图建议）\n3. 产品参数表\n4. 使用场景展示（4个场景）\n5. 对比优势图（vs竞品对比表）\n6. 用户好评展示区（6条模拟好评）\n7. 品牌故事段\n8. 售后保障区\n\n每个模块都包含：标题、正文、视觉建议。' },
-    { id: 'review', title: '评价模板', icon: <Star size={18} />, description: '生成20条种子评价', prompt: '你是天猫评价内容策划专家。基于以下产品和卖点，生成种子评价：\n\n产品：{input}\n卖点：{prev}\n\n请生成20条不同视角的买家好评（分类输出）：\n- 5条"首次使用"视角\n- 5条"对比竞品"视角\n- 5条"送礼/推荐"视角\n- 5条"回购/长期使用"视角\n\n要求：口语化、有细节、有情感、长度100-200字、包含具体使用场景。每条标注建议星级和晒图建议。' },
-    { id: 'xiaohongshu', title: '小红书种草', icon: <BookOpen size={18} />, description: '生成5篇小红书笔记初稿', prompt: '你是小红书爆文写手。基于以下产品信息，生成5篇种草笔记：\n\n产品：{input}\n卖点：{prev}\n\n5篇笔记类型：\n1. 开箱测评文（详细测评体验）\n2. 合集种草文（XX元好物合集）\n3. 场景安利文（特定场景推荐）\n4. 对比测评文（vs竞品真实对比）\n5. 干货攻略文（选购指南类）\n\n每篇包含：\n- 标题（3个备选，含emoji）\n- 正文（800字左右，口语化，多emoji）\n- 标签（10个#话题标签）\n- 封面拍摄建议\n\n风格：真实、种草感强、像真人分享。' },
-    { id: 'pricing', title: '定价策略', icon: <Coins size={18} />, description: '输出阶梯定价 + 促销方案', prompt: '你是电商定价策略专家。基于以下产品和市场竞品分析，制定定价策略：\n\n产品：{input}\n参考：{prev}\n\n请输出：\n1. 建议零售价（含定价逻辑推导过程）\n2. SKU价格体系（基础款/标准款/豪华款）\n3. 上市前90天促销节奏表\n4. 优惠券设计方案（面额、门槛、投放渠道）\n5. 满减活动方案\n6. 利润率测算表\n7. 价格锚定策略\n\n用表格和具体数字输出。' },
+    {
+        id: 'market',
+        title: '市场分析',
+        icon: <Search size={18} />,
+        description: '分析市场规模、目标人群和机会点。',
+        prompt: '请根据以下产品信息输出一份市场分析，包含目标用户、核心需求、竞争机会和风险提示。\n\n产品信息：\n{input}',
+    },
+    {
+        id: 'competitor',
+        title: '竞品扫描',
+        icon: <Swords size={18} />,
+        description: '梳理主要竞品和差异化方向。',
+        prompt: '请基于以下产品信息和前一步结论，整理竞品对比，输出竞品特征、价格带和可切入空白。\n\n产品信息：\n{input}\n\n前一步结果：\n{prev}',
+    },
+    {
+        id: 'selling',
+        title: '核心卖点',
+        icon: <Zap size={18} />,
+        description: '提炼最有说服力的卖点与传播话术。',
+        prompt: '请基于以下信息提炼 3 个核心卖点，每个卖点都输出特征、优势、利益点和适用场景。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
+    {
+        id: 'mainimg',
+        title: '主图方案',
+        icon: <Palette size={18} />,
+        description: '生成主图思路、标题和视觉重点。',
+        prompt: '请基于以下产品信息和卖点，给出 5 张主图方案，每张包含主题、标题、视觉重点和拍摄建议。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
+    {
+        id: 'detail',
+        title: '详情页结构',
+        icon: <FileText size={18} />,
+        description: '输出详情页模块顺序和每屏重点。',
+        prompt: '请基于以下产品信息和已有分析，整理一份详情页结构方案，输出每个模块的目标、文案重点和视觉建议。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
+    {
+        id: 'review',
+        title: '评价与种草',
+        icon: <Star size={18} />,
+        description: '生成评价方向、晒单建议和种草素材。',
+        prompt: '请基于以下产品信息和已有分析，输出评价内容方向、晒单建议和用户种草素材。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
+    {
+        id: 'xiaohongshu',
+        title: '内容分发',
+        icon: <BookOpen size={18} />,
+        description: '整理小红书等内容平台的传播方向。',
+        prompt: '请基于以下产品信息和前面结论，输出适合内容平台传播的选题、标题和内容方向。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
+    {
+        id: 'pricing',
+        title: '定价与促销',
+        icon: <Coins size={18} />,
+        description: '给出定价建议和短期促销策略。',
+        prompt: '请基于以下产品信息和前面结论，给出定价建议、促销组合和上线前 30 天运营节奏。\n\n产品信息：\n{input}\n\n参考信息：\n{prev}',
+    },
 ];
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderStepResultHtml(text: string): string {
+    const sanitized = escapeHtml(text.replace(/```json[\s\S]*?```/g, '').trim());
+    return sanitized
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br/>');
+}
 
 export default function FullPlanPage() {
     const router = useRouter();
-    const { user } = useAuthStore();
+    const abortRef = useRef(false);
+    const resultsRef = useRef<HTMLDivElement>(null);
     const [productInput, setProductInput] = useState('');
     const [isRunning, setIsRunning] = useState(false);
     const [steps, setSteps] = useState<PlanStep[]>([]);
-    const [currentStep, setCurrentStep] = useState(-1);
-    const abortRef = useRef(false);
-    const resultsRef = useRef<HTMLDivElement>(null);
 
     const runPlan = async () => {
         if (!productInput.trim() || isRunning) return;
         abortRef.current = false;
 
-        const initialSteps: PlanStep[] = PLAN_STEPS.map(s => ({
-            ...s, status: 'waiting', result: '',
+        const initialSteps: PlanStep[] = PLAN_STEPS.map((step) => ({
+            ...step,
+            status: 'waiting',
+            result: '',
         }));
+
         setSteps(initialSteps);
         setIsRunning(true);
 
         let prevResult = '';
 
-        for (let i = 0; i < initialSteps.length; i++) {
+        for (let index = 0; index < initialSteps.length; index += 1) {
             if (abortRef.current) break;
-            setCurrentStep(i);
-            setSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'running' } : s));
 
-            // Scroll to current step
+            setSteps((current) => current.map((step, currentIndex) => (
+                currentIndex === index ? { ...step, status: 'running' } : step
+            )));
+
             setTimeout(() => {
-                const el = document.getElementById(`step-${i}`);
-                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const element = document.getElementById(`step-${index}`);
+                element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 200);
 
             try {
-                const prompt = initialSteps[i].prompt
+                const prompt = initialSteps[index].prompt
                     .replace('{input}', productInput)
-                    .replace('{prev}', prevResult.slice(-2000)); // Last 2000 chars of prev
+                    .replace('{prev}', prevResult.slice(-2000));
 
-                const res = await fetch('/api/chat', {
+                const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: prompt,
-                        systemPrompt: '你是电商全案策划专家团队的成员。请直接输出专业分析结果，不要寒暄或解释你的身份。用markdown格式输出，包含标题、表格、列表等结构化内容。',
+                        systemPrompt: '你是电商全案策划顾问，请直接输出结构化、可执行的结果。',
                         conversationHistory: [],
                     }),
                 });
 
-                if (!res.ok) throw new Error('API请求失败');
+                if (!response.ok) {
+                    throw new Error('接口请求失败');
+                }
 
-                const reader = res.body?.getReader();
+                const reader = response.body?.getReader();
                 const decoder = new TextDecoder();
                 let fullText = '';
 
@@ -89,99 +169,106 @@ export default function FullPlanPage() {
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
+
                         const chunk = decoder.decode(value, { stream: true });
                         const lines = chunk.split('\n');
                         for (const line of lines) {
-                            if (line.startsWith('data: ')) {
-                                const data = line.slice(6);
-                                if (data === '[DONE]') continue;
-                                try {
-                                    const parsed = JSON.parse(data);
-                                    const content = parsed.choices?.[0]?.delta?.content;
-                                    if (content) {
-                                        fullText += content;
-                                        setSteps(prev => prev.map((s, idx) =>
-                                            idx === i ? { ...s, result: fullText } : s
-                                        ));
-                                    }
-                                } catch { /* skip parse errors */ }
+                            if (!line.startsWith('data: ')) continue;
+                            const data = line.slice(6);
+                            if (data === '[DONE]') continue;
+
+                            try {
+                                const parsed = JSON.parse(data);
+                                const content = parsed.type === 'text'
+                                    ? parsed.content
+                                    : parsed.choices?.[0]?.delta?.content;
+                                if (typeof content === 'string' && content.length > 0) {
+                                    fullText += content;
+                                    setSteps((current) => current.map((step, currentIndex) => (
+                                        currentIndex === index ? { ...step, result: fullText } : step
+                                    )));
+                                }
+                            } catch {
+                                // ignore partial SSE chunks
                             }
                         }
                     }
                 }
 
                 prevResult = fullText;
-                setSteps(prev => prev.map((s, idx) =>
-                    idx === i ? { ...s, status: 'done', result: fullText } : s
-                ));
-            } catch (err) {
-                setSteps(prev => prev.map((s, idx) =>
-                    idx === i ? { ...s, status: 'error', result: `错误: ${err instanceof Error ? err.message : '未知错误'}` } : s
-                ));
+                setSteps((current) => current.map((step, currentIndex) => (
+                    currentIndex === index ? { ...step, status: 'done', result: fullText } : step
+                )));
+            } catch (error) {
+                setSteps((current) => current.map((step, currentIndex) => (
+                    currentIndex === index
+                        ? { ...step, status: 'error', result: `错误：${error instanceof Error ? error.message : '未知错误'}` }
+                        : step
+                )));
             }
         }
 
         setIsRunning(false);
-        setCurrentStep(-1);
     };
 
     const stopPlan = () => {
         abortRef.current = true;
+        setIsRunning(false);
     };
 
-    const completedCount = steps.filter(s => s.status === 'done').length;
+    const completedCount = steps.filter((step) => step.status === 'done').length;
     const progress = steps.length > 0 ? Math.round((completedCount / steps.length) * 100) : 0;
 
     return (
         <div className={styles.layout}>
             <header className={styles.header}>
-                <button onClick={() => router.push('/')} className={styles.backBtn}><ArrowLeft size={16} /> 返回</button>
-                <h1 className={styles.title}><Target size={20} /> 一键全案生成器</h1>
-                <span className={styles.badge}>AI自动化</span>
+                <button onClick={() => router.push('/')} className={styles.backBtn}>
+                    <ArrowLeft size={16} /> 返回首页
+                </button>
+                <h1 className={styles.title}><Target size={20} /> AI 全案策划</h1>
+                <span className={styles.badge}>结构化输出</span>
             </header>
 
             <main className={styles.main}>
-                {/* Input area */}
                 <div className={styles.inputSection}>
-                    <h2 className={styles.inputTitle}>输入你的产品信息</h2>
-                    <p className={styles.inputDesc}>告诉AI你要卖什么，10分钟自动生成完整上市方案</p>
+                    <h2 className={styles.inputTitle}>输入产品信息</h2>
+                    <p className={styles.inputDesc}>输入产品卖点、客群、价格带或你已知的背景信息，系统会分步骤生成完整策划方案。</p>
                     <textarea
                         className={styles.inputArea}
                         value={productInput}
-                        onChange={e => setProductInput(e.target.value)}
-                        placeholder="例如：我要在天猫卖蓝牙耳机，价格区间150-300元，主打降噪和长续航，目标人群是上班族和学生。"
+                        onChange={(event) => setProductInput(event.target.value)}
+                        placeholder="例如：一款面向 25-35 岁女性的轻养生饮品，客单价 59 元，主打低糖和便携场景。"
                         rows={4}
                         disabled={isRunning}
                     />
                     <div className={styles.inputActions}>
                         {!isRunning ? (
                             <button className={styles.startBtn} onClick={runPlan} disabled={!productInput.trim()}>
-                                <Rocket size={16} /> 开始生成全案
+                                <Rocket size={16} /> 开始生成方案
                             </button>
                         ) : (
-                            <button className={styles.stopBtn} onClick={stopPlan}><Square size={14} /> 停止</button>
+                            <button className={styles.stopBtn} onClick={stopPlan}>
+                                <Square size={14} /> 停止生成
+                            </button>
                         )}
-                        <span className={styles.costHint}>预计消耗 40 积分 · 约10分钟</span>
+                        <span className={styles.costHint}>生成过程大约需要 1-3 分钟</span>
                     </div>
                 </div>
 
-                {/* Progress */}
                 {steps.length > 0 && (
                     <div className={styles.progressSection}>
                         <div className={styles.progressBar}>
                             <div className={styles.progressFill} style={{ width: `${progress}%` }} />
                         </div>
                         <div className={styles.progressInfo}>
-                            <span>{completedCount}/{steps.length} 步骤完成</span>
+                            <span>{completedCount}/{steps.length} 个步骤已完成</span>
                             <span>{progress}%</span>
                         </div>
                         <div className={styles.stepsTimeline}>
-                            {steps.map((step, i) => (
+                            {steps.map((step) => (
                                 <div key={step.id} className={`${styles.timelineItem} ${styles[step.status]}`}>
                                     <span className={styles.timelineIcon}>
-                                        {step.status === 'done' ? <CheckCircle size={14} /> :
-                                            step.status === 'running' ? <Loader2 size={14} className="animate-spin" /> :
-                                                step.status === 'error' ? <XCircle size={14} /> : '○'}
+                                        {step.status === 'done' ? <CheckCircle size={14} /> : step.status === 'running' ? <Loader2 size={14} className="animate-spin" /> : step.status === 'error' ? <XCircle size={14} /> : '•'}
                                     </span>
                                     <span className={styles.timelineLabel}>{step.icon} {step.title}</span>
                                 </div>
@@ -190,28 +277,22 @@ export default function FullPlanPage() {
                     </div>
                 )}
 
-                {/* Results */}
                 <div className={styles.results} ref={resultsRef}>
-                    {steps.map((step, i) => (
-                        <div key={step.id} id={`step-${i}`} className={`${styles.resultCard} ${styles[step.status]}`}>
+                    {steps.map((step, index) => (
+                        <div key={step.id} id={`step-${index}`} className={`${styles.resultCard} ${styles[step.status]}`}>
                             <div className={styles.resultHeader}>
                                 <span className={styles.resultIcon}>{step.icon}</span>
-                                <h3 className={styles.resultTitle}>Step {i + 1}: {step.title}</h3>
+                                <h3 className={styles.resultTitle}>步骤 {index + 1}：{step.title}</h3>
                                 <span className={styles.resultStatus}>
                                     {step.status === 'running' && <span className={styles.spinner2} />}
-                                    {step.status === 'done' && <><CheckCircle size={14} /> 完成</>}
-                                    {step.status === 'error' && <><XCircle size={14} /> 出错</>}
+                                    {step.status === 'done' && <><CheckCircle size={14} /> 已完成</>}
+                                    {step.status === 'error' && <><XCircle size={14} /> 失败</>}
                                     {step.status === 'waiting' && '等待中'}
                                 </span>
                             </div>
                             <p className={styles.resultDesc}>{step.description}</p>
                             {step.result && (
-                                <div className={styles.resultContent} dangerouslySetInnerHTML={{
-                                    __html: step.result
-                                        .replace(/\n/g, '<br/>')
-                                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                        .replace(/\|(.*)\|/g, (match) => `<code>${match}</code>`)
-                                }} />
+                                <div className={styles.resultContent} dangerouslySetInnerHTML={{ __html: renderStepResultHtml(step.result) }} />
                             )}
                         </div>
                     ))}

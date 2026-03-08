@@ -153,6 +153,7 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
     const [state, setState] = useState<DraftState>(DEFAULT_STATE);
     const [referenceFile, setReferenceFile] = useState<File | null>(null);
     const [referencePreview, setReferencePreview] = useState<string | null>(null);
+    const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [latestResult, setLatestResult] = useState<ImageGenerationItem | null>(null);
@@ -202,6 +203,25 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
     useEffect(() => () => {
         if (referencePreview) URL.revokeObjectURL(referencePreview);
     }, [referencePreview]);
+
+    useEffect(() => {
+        if (!previewImageUrl) return;
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setPreviewImageUrl(null);
+            }
+        };
+
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        window.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }, [previewImageUrl]);
 
     const selectedTagSet = useMemo(() => new Set(state.selectedTags), [state.selectedTags]);
 
@@ -379,6 +399,8 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
             // ignore clipboard errors
         }
     };
+
+    const closePreview = () => setPreviewImageUrl(null);
 
     const onChangeCustomTagInput = (groupKey: string, value: string) => {
         setCustomTagInputs((prev) => ({ ...prev, [groupKey]: value }));
@@ -672,12 +694,16 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
             <div className={styles.resultsWrap}>
                 <div className={styles.resultsHead}>
                     <h3>本次生成结果</h3>
-                    {latestResult && <span className={styles.status}>{statusText(latestResult.status)}</span>}
+                    {isGenerating ? (
+                        <span className={styles.status}>生成中...</span>
+                    ) : latestResult ? (
+                        <span className={styles.status}>{statusText(latestResult.status)}</span>
+                    ) : null}
                 </div>
                 {isGenerating && (
-                    <div className={styles.skeletonGrid}>
+                    <div className={styles.loadingResult} aria-live="polite" aria-busy="true">
                         <div className={styles.skeletonCard} />
-                        <div className={styles.skeletonCard} />
+                        <p className={styles.loadingHint}>正在生成图片，完成后会在这里显示结果。</p>
                     </div>
                 )}
                 {!isGenerating && latestResult?.resultImagePaths?.length ? (
@@ -686,8 +712,17 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                             const resolvedUrl = resolveImageAssetUrl(url);
                             return (
                                 <div key={url} className={styles.imageCard}>
-                                    <img src={resolvedUrl} alt="生成结果图" loading="lazy" />
+                                    <button
+                                        type="button"
+                                        className={styles.imagePreviewBtn}
+                                        onClick={() => setPreviewImageUrl(resolvedUrl)}
+                                        aria-label="放大预览生成图片"
+                                    >
+                                        <img src={resolvedUrl} alt="生成结果图" loading="lazy" />
+                                        <span className={styles.imagePreviewHint}>点击放大预览</span>
+                                    </button>
                                     <div className={styles.imageActions}>
+                                        <button className={styles.linkBtn} onClick={() => setPreviewImageUrl(resolvedUrl)}>预览</button>
                                         <a className={styles.linkBtn} href={resolvedUrl} download target="_blank" rel="noreferrer">下载</a>
                                         <button className={styles.linkBtn} onClick={copyPrompt}>复制提示词</button>
                                     </div>
@@ -778,6 +813,34 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                     </div>
                 )}
             </div>
+
+            {previewImageUrl && (
+                <div className={styles.lightbox} onClick={closePreview}>
+                    <div
+                        className={styles.lightboxPanel}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="图片预览"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className={styles.lightboxHeader}>
+                            <p className={styles.lightboxTitle}>图片预览</p>
+                            <button type="button" className={styles.lightboxClose} onClick={closePreview} aria-label="关闭预览">
+                                关闭
+                            </button>
+                        </div>
+                        <div className={styles.lightboxBody}>
+                            <img src={previewImageUrl} alt="放大预览图" className={styles.lightboxImage} />
+                        </div>
+                        <div className={styles.lightboxFooter}>
+                            <span className={styles.lightboxTip}>点击遮罩或按 Esc 可关闭</span>
+                            <a className={styles.secondaryBtn} href={previewImageUrl} download target="_blank" rel="noreferrer">
+                                下载原图
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     );
 }

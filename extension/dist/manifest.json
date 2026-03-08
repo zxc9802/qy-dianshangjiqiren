@@ -1,19 +1,21 @@
 {
   "name": "电商AI智能助手",
-  "version": "1.0.0",
-  "description": "电商AI智能平台配套插件 - 总结页面内容，与预设智能体对话",
+  "version": "1.1.0",
+  "description": "主站配套浏览器插件：总结网页内容、视频字幕摘要，并与网页内容对话。",
   "manifest_version": 3,
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "tabs",
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
-    "http://localhost:3000/*",
+    "http://*/*",
     "https://*/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_title": "网页助手",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -23,6 +25,9 @@
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {

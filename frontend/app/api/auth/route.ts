@@ -1,149 +1,316 @@
 import { NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
-import { signToken, AppError, errorResponse } from '../../lib/auth';
-import { generateCode, sendVerificationEmail } from '../../lib/email';
+import {
+    signToken,
+    AppError,
+    errorResponse,
+    ensureAccessControlBootstrap,
+} from '../../lib/auth';
 
-const sendCodeSchema = z.object({ email: z.string().email('请输入有效的邮箱地址') });
-
-const verifyCodeSchema = z.object({
-    email: z.string().email(),
-    code: z.string().length(6, '验证码为6位'),
-});
+const accountSchema = z.string().trim().min(3, 'Account must be at least 3 characters.').max(64, 'Account is too long.');
+const passwordSchema = z.string().min(6, 'Password must be at least 6 characters.');
+const inviteCodeSchema = z.string().trim().min(6, 'Invite code is required.').max(32, 'Invite code is invalid.');
+const nicknameSchema = z.string().trim().min(1, 'Name is required.').max(20, 'Name is too long.');
+const optionalNicknameSchema = z.string().trim().max(20, 'Name is too long.').optional();
+const groupNameSchema = z.string().trim().min(1, 'Group is required.').max(50, 'Group is too long.');
+const optionalGroupNameSchema = z.string().trim().max(50, 'Group is too long.').optional();
 
 const registerSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(6, '密码至少6位'),
-    code: z.string().length(6, '验证码为6位'),
-    nickname: z.string().optional(),
-    inviteCode: z.string().optional(),
+    account: accountSchema,
+    password: passwordSchema,
+    nickname: nicknameSchema,
+    groupName: groupNameSchema,
+    inviteCode: inviteCodeSchema,
 });
 
 const loginSchema = z.object({
-    email: z.string().email(),
+    account: accountSchema,
     password: z.string(),
 });
 
+const activateSchema = z.object({
+    account: accountSchema,
+    password: z.string(),
+    inviteCode: inviteCodeSchema,
+    nickname: optionalNicknameSchema,
+    groupName: optionalGroupNameSchema,
+});
+
+const AUTH_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 20_000,
+} as const;
+
 export async function POST(req: NextRequest) {
     try {
+        await ensureAccessControlBootstrap();
+
         const url = new URL(req.url);
         const action = url.searchParams.get('action');
         const body = await req.json();
 
         switch (action) {
-            case 'send-code':
-                return handleSendCode(body);
-            case 'verify-code':
-                return handleVerifyCode(body);
             case 'register':
-                return handleRegister(body);
+                return await handleRegister(body);
             case 'login':
-                return handleLogin(body);
+                return await handleLogin(body);
+            case 'activate':
+                return await handleActivate(body);
             default:
-                return Response.json({ error: '无效的操作' }, { status: 400 });
+                throw new AppError('Invalid auth action.', 400);
         }
     } catch (err) {
         return errorResponse(err);
     }
 }
 
-async function handleSendCode(body: unknown) {
-    const { email } = sendCodeSchema.parse(body);
-
-    const recent = await prisma.verificationCode.findFirst({
-        where: { email, createdAt: { gt: new Date(Date.now() - 60_000) } },
-    });
-    if (recent) throw new AppError('发送太频繁，请60秒后再试', 429);
-
-    const code = generateCode();
-    const expiresAt = new Date(Date.now() + 5 * 60_000);
-
-    await prisma.verificationCode.create({ data: { email, code, expiresAt } });
-    await sendVerificationEmail(email, code);
-
-    return Response.json({ success: true, message: '验证码已发送' });
+function normalizeAccount(account: string): string {
+    return account.trim();
 }
 
-async function handleVerifyCode(body: unknown) {
-    const { email, code } = verifyCodeSchema.parse(body);
-
-    const record = await prisma.verificationCode.findFirst({
-        where: { email, code, used: false, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' },
-    });
-    if (!record) throw new AppError('验证码无效或已过期');
-
-    return Response.json({ success: true, message: '验证码正确' });
+function normalizeInviteCode(code: string): string {
+    return code.trim().toUpperCase();
 }
 
-async function handleRegister(body: unknown) {
-    const data = registerSchema.parse(body);
+function normalizeProfileValue(value: string | undefined): string {
+    return value?.trim() || '';
+}
 
-    const codeRecord = await prisma.verificationCode.findFirst({
-        where: { email: data.email, code: data.code, used: false, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' },
-    });
-    if (!codeRecord) throw new AppError('验证码无效或已过期');
+function parseRequestBody<T>(schema: z.ZodSchema<T>, body: unknown): T {
+    const result = schema.safeParse(body);
+    if (!result.success) {
+        throw new AppError(result.error.issues[0]?.message || 'Invalid request.', 400);
+    }
 
-    const existing = await prisma.user.findUnique({ where: { email: data.email } });
-    if (existing) throw new AppError('该邮箱已注册');
+    return result.data;
+}
 
-    const passwordHash = await bcrypt.hash(data.password, 10);
-    const user = await prisma.user.create({
+function toUserPayload(user: {
+    id: string;
+    email: string;
+    nickname: string;
+    groupName: string;
+    avatar: string;
+    role: string;
+    createdAt?: Date;
+}) {
+    return {
+        id: user.id,
+        account: user.email,
+        nickname: user.nickname,
+        groupName: user.groupName,
+        avatar: user.avatar,
+        role: user.role,
+        ...(user.createdAt ? { createdAt: user.createdAt } : {}),
+    };
+}
+
+function issueAuthResponse(user: {
+    id: string;
+    email: string;
+    nickname: string;
+    groupName: string;
+    avatar: string;
+    role: string;
+    createdAt?: Date;
+}, status = 200) {
+    return Response.json({
+        success: true,
         data: {
-            email: data.email,
-            passwordHash,
-            isVerified: true,
-            nickname: data.nickname || `用户${data.email.split('@')[0].slice(0, 6)}`,
-            pointsBalance: 100,
+            token: signToken(user.id),
+            user: toUserPayload(user),
+        },
+    }, { status });
+}
+
+async function consumeInviteCode(tx: Prisma.TransactionClient, inviteCode: string, userId: string) {
+    const invite = await tx.inviteCode.findUnique({
+        where: { code: inviteCode },
+        select: { id: true, usedByUserId: true },
+    });
+
+    if (!invite || invite.usedByUserId) {
+        throw new AppError('Invite code is invalid.', 400, 'INVITE_CODE_INVALID');
+    }
+
+    const consumeResult = await tx.inviteCode.updateMany({
+        where: { id: invite.id, usedByUserId: null },
+        data: {
+            usedByUserId: userId,
+            usedAt: new Date(),
         },
     });
 
-    await prisma.verificationCode.update({
-        where: { id: codeRecord.id },
-        data: { used: true },
-    });
-
-    await prisma.pointsTransaction.create({
-        data: { userId: user.id, type: 'reward', amount: 100, balanceAfter: 100, description: '新用户注册赠送' },
-    });
-
-    if (data.inviteCode) {
-        const inviter = await prisma.user.findUnique({ where: { id: data.inviteCode } });
-        if (inviter) {
-            const reward = 30;
-            await prisma.user.update({ where: { id: inviter.id }, data: { pointsBalance: { increment: reward } } });
-            await prisma.pointsTransaction.create({
-                data: { userId: inviter.id, type: 'reward', amount: reward, balanceAfter: inviter.pointsBalance + reward, description: '邀请好友注册奖励' },
-            });
-            await prisma.user.update({ where: { id: user.id }, data: { pointsBalance: { increment: reward } } });
-            await prisma.pointsTransaction.create({
-                data: { userId: user.id, type: 'reward', amount: reward, balanceAfter: 100 + reward, description: '受邀注册奖励' },
-            });
-            await prisma.invitation.create({ data: { inviterId: inviter.id, inviteeId: user.id, rewardPoints: reward } });
-        }
+    if (consumeResult.count !== 1) {
+        throw new AppError('Invite code is invalid.', 400, 'INVITE_CODE_INVALID');
     }
+}
 
-    const token = signToken(user.id);
-    return Response.json({
-        success: true,
-        data: { token, user: { id: user.id, email: user.email, nickname: user.nickname, avatar: user.avatar, pointsBalance: user.pointsBalance } },
-    }, { status: 201 });
+async function handleRegister(body: unknown) {
+    const data = parseRequestBody(registerSchema, body);
+    const account = normalizeAccount(data.account);
+    const inviteCode = normalizeInviteCode(data.inviteCode);
+
+    const user = await prisma.$transaction(async (tx) => {
+        const existing = await tx.user.findUnique({
+            where: { email: account },
+            select: {
+                id: true,
+                email: true,
+                nickname: true,
+                groupName: true,
+                avatar: true,
+                role: true,
+                accessGrantedAt: true,
+                createdAt: true,
+            },
+        });
+
+        if (existing) {
+            if (existing.role !== 'admin' && !existing.accessGrantedAt) {
+                throw new AppError('Account exists but still needs activation.', 409, 'ACCOUNT_EXISTS_USE_ACTIVATE');
+            }
+            throw new AppError('Account already exists.', 409);
+        }
+
+        const passwordHash = await bcrypt.hash(data.password, 10);
+        const createdUser = await tx.user.create({
+            data: {
+                email: account,
+                passwordHash,
+                isVerified: true,
+                role: 'member',
+                accessGrantedAt: new Date(),
+                nickname: normalizeProfileValue(data.nickname),
+                groupName: normalizeProfileValue(data.groupName),
+            },
+            select: {
+                id: true,
+                email: true,
+                nickname: true,
+                groupName: true,
+                avatar: true,
+                role: true,
+                createdAt: true,
+            },
+        });
+
+        await consumeInviteCode(tx, inviteCode, createdUser.id);
+
+        return createdUser;
+    }, AUTH_TRANSACTION_OPTIONS);
+
+    return issueAuthResponse(user, 201);
 }
 
 async function handleLogin(body: unknown) {
-    const data = loginSchema.parse(body);
+    const data = parseRequestBody(loginSchema, body);
+    const account = normalizeAccount(data.account);
 
-    const user = await prisma.user.findUnique({ where: { email: data.email } });
-    if (!user) throw new AppError('邮箱未注册');
+    const user = await prisma.user.findUnique({
+        where: { email: account },
+        select: {
+            id: true,
+            email: true,
+            passwordHash: true,
+            nickname: true,
+            groupName: true,
+            avatar: true,
+            role: true,
+            accessGrantedAt: true,
+            createdAt: true,
+        },
+    });
+
+    if (!user) {
+        throw new AppError('Account not found.', 404);
+    }
 
     const valid = await bcrypt.compare(data.password, user.passwordHash);
-    if (!valid) throw new AppError('密码错误');
+    if (!valid) {
+        throw new AppError('Incorrect password.', 400);
+    }
 
-    const token = signToken(user.id);
-    return Response.json({
-        success: true,
-        data: { token, user: { id: user.id, email: user.email, nickname: user.nickname, avatar: user.avatar, pointsBalance: user.pointsBalance } },
-    });
+    if (user.role !== 'admin' && !user.accessGrantedAt) {
+        throw new AppError('Invite code required.', 403, 'INVITE_REQUIRED');
+    }
+
+    return issueAuthResponse(user);
+}
+
+async function handleActivate(body: unknown) {
+    const data = parseRequestBody(activateSchema, body);
+    const account = normalizeAccount(data.account);
+    const inviteCode = normalizeInviteCode(data.inviteCode);
+
+    const user = await prisma.$transaction(async (tx) => {
+        const existing = await tx.user.findUnique({
+            where: { email: account },
+            select: {
+                id: true,
+                email: true,
+                passwordHash: true,
+                nickname: true,
+                groupName: true,
+                avatar: true,
+                role: true,
+                accessGrantedAt: true,
+                createdAt: true,
+            },
+        });
+
+        if (!existing) {
+            throw new AppError('Account not found.', 404);
+        }
+
+        const valid = await bcrypt.compare(data.password, existing.passwordHash);
+        if (!valid) {
+            throw new AppError('Incorrect password.', 400);
+        }
+
+        if (existing.role === 'admin') {
+            return existing;
+        }
+
+        if (existing.accessGrantedAt) {
+            return existing;
+        }
+
+        const nextNickname = normalizeProfileValue(data.nickname) || existing.nickname.trim();
+        const nextGroupName = normalizeProfileValue(data.groupName) || existing.groupName.trim();
+
+        if (!nextNickname) {
+            throw new AppError('Name is required for activation.', 400, 'PROFILE_NAME_REQUIRED');
+        }
+
+        if (!nextGroupName) {
+            throw new AppError('Group is required for activation.', 400, 'PROFILE_GROUP_REQUIRED');
+        }
+
+        await consumeInviteCode(tx, inviteCode, existing.id);
+
+        return tx.user.update({
+            where: { id: existing.id },
+            data: {
+                accessGrantedAt: new Date(),
+                isVerified: true,
+                nickname: nextNickname,
+                groupName: nextGroupName,
+            },
+            select: {
+                id: true,
+                email: true,
+                nickname: true,
+                groupName: true,
+                avatar: true,
+                role: true,
+                createdAt: true,
+            },
+        });
+    }, AUTH_TRANSACTION_OPTIONS);
+
+    return issueAuthResponse(user);
 }

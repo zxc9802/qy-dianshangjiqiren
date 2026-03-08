@@ -374,18 +374,26 @@
   padding: 4px 10px;
 }
 
-.skeletonGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.loadingResult {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  width: min(100%, 320px);
 }
 
 .skeletonCard {
+  width: 100%;
   height: 260px;
   border-radius: var(--radius-lg);
   background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-border) 50%, var(--color-border-light) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
+}
+
+.loadingHint {
+  color: var(--color-muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .imageGrid {
@@ -401,16 +409,64 @@
   background: var(--color-muted);
 }
 
-.imageCard img {
+.imagePreviewBtn {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  display: block;
+}
+
+.imagePreviewBtn img {
   width: 100%;
   height: 220px;
   object-fit: cover;
   display: block;
+  transition:
+    transform var(--duration-normal) var(--ease-smooth),
+    filter var(--duration-normal) var(--ease-smooth);
+}
+
+.imagePreviewBtn:hover img {
+  transform: scale(1.02);
+  filter: saturate(1.05);
+}
+
+.imagePreviewHint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  border-radius: var(--radius-full);
+  padding: 5px 10px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth),
+    transform var(--duration-fast) var(--ease-smooth);
+}
+
+.imagePreviewBtn:hover .imagePreviewHint,
+.imagePreviewBtn:focus-visible .imagePreviewHint {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.imagePreviewBtn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .imageActions {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  align-items: center;
   padding: 10px;
 }
 
@@ -500,6 +556,82 @@
   background: var(--color-primary-light);
 }
 
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.lightboxPanel {
+  width: min(100%, 1080px);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: calc(var(--radius-xl) + 4px);
+  border: 1px solid hsla(var(--color-primary-raw), 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 252, 0.96));
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+  animation: dialogIn var(--duration-normal) var(--ease-smooth);
+}
+
+.lightboxHeader,
+.lightboxFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lightboxTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-foreground);
+}
+
+.lightboxClose {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 8px 14px;
+  background: var(--color-card);
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+
+.lightboxClose:hover {
+  background: var(--color-muted);
+}
+
+.lightboxBody {
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at top, hsla(var(--color-primary-raw), 0.08), transparent 44%),
+    #f8fafc;
+}
+
+.lightboxImage {
+  width: 100%;
+  max-height: calc(100vh - 220px);
+  object-fit: contain;
+  display: block;
+}
+
+.lightboxTip {
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+}
+
 @media (max-width: 1024px) {
   .controlsGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -533,7 +665,26 @@
     justify-content: flex-end;
   }
 
-  .skeletonGrid {
-    grid-template-columns: 1fr;
+  .loadingResult {
+    width: 100%;
+  }
+
+  .imageActions,
+  .lightboxHeader,
+  .lightboxFooter {
+    flex-wrap: wrap;
+  }
+
+  .lightbox {
+    padding: 12px;
+  }
+
+  .lightboxPanel {
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .lightboxImage {
+    max-height: calc(100vh - 240px);
   }
 }

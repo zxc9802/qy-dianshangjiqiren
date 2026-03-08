@@ -271,6 +271,24 @@
     color: var(--color-muted-foreground);
 }
 
+.successText {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: hsla(142, 76%, 36%, 0.08);
+    color: var(--color-success);
+    border: 1px solid hsla(142, 76%, 36%, 0.18);
+}
+
+.errorText {
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: hsla(0, 72%, 51%, 0.08);
+    color: var(--color-danger);
+    border: 1px solid hsla(0, 72%, 51%, 0.18);
+}
+
 /* Settings */
 .settingsCard {
     background: var(--color-card);

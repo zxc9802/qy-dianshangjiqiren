@@ -7,25 +7,69 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  passwordHash  String   @map("password_hash")
-  isVerified    Boolean  @default(false) @map("is_verified")
-  nickname      String   @default("")
-  avatar        String   @default("")
-  pointsBalance Int      @default(0) @map("points_balance")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  isVerified      Boolean   @default(false) @map("is_verified")
+  role            String    @default("member")
+  accessGrantedAt DateTime? @map("access_granted_at")
+  nickname        String    @default("")
+  groupName       String    @default("") @map("group_name")
+  avatar          String    @default("")
+  pointsBalance   Int       @default(0) @map("points_balance")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  conversations      Conversation[]
-  pointsTransactions PointsTransaction[]
-  workflows          Workflow[]
-  imageGenerations   ImageGeneration[]
-  imagePromptTags    ImagePromptTag[]
-  invitationsSent    Invitation[]        @relation("Inviter")
-  invitationsReceived Invitation[]       @relation("Invitee")
+  conversations            Conversation[]
+  pointsTransactions       PointsTransaction[]
+  workflows                Workflow[]
+  imageGenerations         ImageGeneration[]
+  imagePromptTags          ImagePromptTag[]
+  customBots               CustomBot[]
+  pageInsights             PageInsight[]
+  invitationsSent          Invitation[]        @relation("Inviter")
+  invitationsReceived      Invitation[]        @relation("Invitee")
+  createdInviteCodeBatches InviteCodeBatch[]   @relation("InviteCodeBatchCreator")
+  createdInviteCodes       InviteCode[]        @relation("InviteCodeCreator")
+  usedInviteCodes          InviteCode[]        @relation("InviteCodeConsumer")
 
   @@map("users")
+}
+
+model CustomBot {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  name         String
+  description  String   @default("")
+  avatar       String   @default("")
+  icon         String   @default("bot")
+  systemPrompt String   @map("system_prompt") @db.Text
+  pointsPerUse Int      @default(3) @map("points_per_use")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents     BotDocument[]
+  conversations Conversation[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("custom_bots")
+}
+
+model BotDocument {
+  id          String   @id @default(uuid())
+  customBotId String   @map("custom_bot_id")
+  fileName    String   @map("file_name")
+  fileType    String   @map("file_type")
+  fileSize    Int      @map("file_size")
+  parsedText  String   @map("parsed_text") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  customBot CustomBot @relation(fields: [customBotId], references: [id], onDelete: Cascade)
+
+  @@index([customBotId])
+  @@map("bot_documents")
 }
 
 model ImagePromptTag {
@@ -43,22 +87,22 @@ model ImagePromptTag {
 }
 
 model ImageGeneration {
-  id                String   @id @default(uuid())
-  userId            String   @map("user_id")
-  prompt            String   @db.Text
-  negativePrompt    String?  @map("negative_prompt") @db.Text
-  aspectRatio       String   @default("1:1") @map("aspect_ratio")
-  imageSize         String   @default("2K") @map("image_size")
-  stylePreset       String?  @map("style_preset")
-  background        String?
-  lighting          String?
-  referenceStrength Int      @default(50) @map("reference_strength")
-  count             Int      @default(1)
-  referenceImagePath String? @map("reference_image_path")
-  resultImagePaths  Json     @map("result_image_paths")
-  status            String   @default("success") // success | partial | failed
-  errorMessage      String?  @map("error_message") @db.Text
-  createdAt         DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  prompt             String   @db.Text
+  negativePrompt     String?  @map("negative_prompt") @db.Text
+  aspectRatio        String   @default("1:1") @map("aspect_ratio")
+  imageSize          String   @default("2K") @map("image_size")
+  stylePreset        String?  @map("style_preset")
+  background         String?
+  lighting           String?
+  referenceStrength  Int      @default(50) @map("reference_strength")
+  count              Int      @default(1)
+  referenceImagePath String?  @map("reference_image_path")
+  resultImagePaths   Json     @map("result_image_paths")
+  status             String   @default("success") // success | partial | failed
+  errorMessage       String?  @map("error_message") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -75,6 +119,38 @@ model VerificationCode {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("verification_codes")
+}
+
+model InviteCodeBatch {
+  id              String   @id @default(uuid())
+  createdByUserId String   @map("created_by_user_id")
+  count           Int
+  remark          String   @default("")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  createdBy User         @relation("InviteCodeBatchCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  codes     InviteCode[]
+
+  @@index([createdByUserId, createdAt(sort: Desc)])
+  @@map("invite_code_batches")
+}
+
+model InviteCode {
+  id              String    @id @default(uuid())
+  batchId         String    @map("batch_id")
+  code            String    @unique
+  createdByUserId String    @map("created_by_user_id")
+  usedByUserId    String?   @map("used_by_user_id")
+  usedAt          DateTime? @map("used_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  batch     InviteCodeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  createdBy User            @relation("InviteCodeCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  usedBy    User?           @relation("InviteCodeConsumer", fields: [usedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([batchId, createdAt(sort: Desc)])
+  @@index([usedByUserId])
+  @@map("invite_codes")
 }
 
 model Bot {
@@ -96,26 +172,39 @@ model Bot {
 }
 
 model Conversation {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  botId       String   @map("bot_id")
-  title       String   @default("")
-  isFavorited Boolean  @default(false) @map("is_favorited")
-  status      String   @default("active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                   String   @id @default(uuid())
+  userId               String   @map("user_id")
+  botId                String?  @map("bot_id")
+  customBotId          String?  @map("custom_bot_id")
+  clientSourceId       String?  @map("client_source_id")
+  title                String   @default("")
+  botKindSnapshot      String   @default("builtin") @map("bot_kind_snapshot")
+  botRouteIdSnapshot   String   @default("") @map("bot_route_id_snapshot")
+  botRefIdSnapshot     String   @default("") @map("bot_ref_id_snapshot")
+  botNameSnapshot      String   @default("") @map("bot_name_snapshot")
+  botIconSnapshot      String   @default("") @map("bot_icon_snapshot")
+  botCategorySnapshot  String   @default("") @map("bot_category_snapshot")
+  pointsPerUseSnapshot Int      @default(0) @map("points_per_use_snapshot")
+  isFavorited          Boolean  @default(false) @map("is_favorited")
+  status               String   @default("active")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  user     User      @relation(fields: [userId], references: [id])
-  bot      Bot       @relation(fields: [botId], references: [id])
-  messages Message[]
+  user      User       @relation(fields: [userId], references: [id])
+  bot       Bot?       @relation(fields: [botId], references: [id], onDelete: SetNull)
+  customBot CustomBot? @relation(fields: [customBotId], references: [id], onDelete: SetNull)
+  messages  Message[]
 
+  @@unique([userId, clientSourceId])
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([userId, isFavorited, updatedAt(sort: Desc)])
   @@map("conversations")
 }
 
 model Message {
   id             String   @id @default(uuid())
   conversationId String   @map("conversation_id")
-  role           String   // "user" | "assistant"
+  role           String // "user" | "assistant"
   content        String   @db.Text
   inputType      String   @default("text") @map("input_type") // "text" | "voice" | "file"
   suggestions    String?  @db.Text // JSON string of suggestion buttons
@@ -145,6 +234,7 @@ model Attachment {
 model Workflow {
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
+  clientSourceId String?  @map("client_source_id")
   name           String
   description    String   @default("")
   canvasData     String   @map("canvas_data") @db.Text
@@ -158,9 +248,11 @@ model Workflow {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  user       User              @relation(fields: [userId], references: [id])
+  user       User                @relation(fields: [userId], references: [id])
   executions WorkflowExecution[]
 
+  @@unique([userId, clientSourceId])
+  @@index([userId, updatedAt(sort: Desc)])
   @@map("workflows")
 }
 
@@ -181,10 +273,32 @@ model WorkflowExecution {
   @@map("workflow_executions")
 }
 
+model PageInsight {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  sourceUrl          String   @map("source_url") @db.Text
+  sourceTitle        String   @default("") @map("source_title")
+  sourceDomain       String   @default("") @map("source_domain")
+  pageContextJson    Json     @map("page_context_json")
+  summary            String?  @db.Text
+  chatTranscriptJson Json     @map("chat_transcript_json")
+  botId              String   @map("bot_id")
+  botKind            String   @map("bot_kind")
+  botName            String   @map("bot_name")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([userId, sourceDomain, updatedAt(sort: Desc)])
+  @@map("page_insights")
+}
+
 model PointsTransaction {
   id                    String   @id @default(uuid())
   userId                String   @map("user_id")
-  type                  String   // "recharge" | "consume" | "reward" | "redeem"
+  type                  String // "recharge" | "consume" | "reward" | "redeem"
   amount                Int
   balanceAfter          Int      @map("balance_after")
   description           String   @default("")
@@ -219,4 +333,13 @@ model Invitation {
   invitee User @relation("Invitee", fields: [inviteeId], references: [id])
 
   @@map("invitations")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
 }

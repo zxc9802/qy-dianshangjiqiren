@@ -4,7 +4,7 @@ import { getUserId, AppError, errorResponse } from '../../../lib/auth';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const { id } = await params;
         const row = await prisma.imageGeneration.findFirst({ where: { id, userId } });
         if (!row) throw new AppError('Image generation not found', 404);
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const { id } = await params;
         const row = await prisma.imageGeneration.findFirst({ where: { id, userId } });
         if (!row) throw new AppError('Image generation not found', 404);

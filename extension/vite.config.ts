@@ -7,18 +7,22 @@ function copyExtensionFiles() {
   return {
     name: 'copy-extension-files',
     closeBundle() {
-      // Copy manifest.json to dist
       copyFileSync(
         resolve(__dirname, 'manifest.json'),
         resolve(__dirname, 'dist/manifest.json'),
       );
-      // Copy popup.html from nested path to dist root
-      try {
-        copyFileSync(
-          resolve(__dirname, 'dist/src/popup/popup.html'),
-          resolve(__dirname, 'dist/popup.html'),
-        );
-      } catch { /* already at root */ }
+      const htmlFiles: Array<[string, string]> = [
+        ['dist/src/popup/popup.html', 'dist/popup.html'],
+        ['dist/src/sidepanel/sidepanel.html', 'dist/sidepanel.html'],
+      ];
+
+      for (const [from, to] of htmlFiles) {
+        try {
+          copyFileSync(resolve(__dirname, from), resolve(__dirname, to));
+        } catch {
+          // Vite may already emit the file at the root.
+        }
+      }
     },
   };
 }
@@ -31,6 +35,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'src/popup/popup.html'),
+        sidepanel: resolve(__dirname, 'src/sidepanel/sidepanel.html'),
         background: resolve(__dirname, 'src/background/background.ts'),
         content: resolve(__dirname, 'src/content/content.ts'),
       },

@@ -4,6 +4,46 @@ import { prisma } from '../../../../lib/prisma';
 import { readServerEnv } from '../../../../lib/server-env';
 import { getUserId, AppError, errorResponse } from '../../../../lib/auth';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
+import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
+
+const GLOBAL_RULES = `
+# Global interaction rules
+
+1. The user can end discovery early. If they ask for the answer directly, provide it based on current context and mark assumptions when needed.
+2. End every reply with a JSON suggestions block:
+\`\`\`json
+{"suggestions":["Option A","Option B","Option C","Give me the answer directly"]}
+\`\`\`
+3. Keep the answer structured, concise, and practical.
+`;
+
+const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
+
+const SUGGESTION_BLOCK_PATTERN = /```json[\s\S]*?(\{"suggestions":\s*\[[\s\S]*?\]\})[\s\S]*?```/;
+
+function stripSuggestionBlock(text: string): string {
+    return text
+        .replace(/```json[\s\S]*?\{"suggestions":\s*\[[\s\S]*?\}[\s\S]*?```/g, '')
+        .replace(/\n?```json[\s\S]*$/g, '')
+        .trimEnd();
+}
+
+function extractSuggestions(text: string): { suggestions: string[]; cleanResponse: string } {
+    const suggestionMatch = text.match(SUGGESTION_BLOCK_PATTERN);
+    let suggestions: string[] = [];
+    let cleanResponse = stripSuggestionBlock(text).trim();
+
+    if (suggestionMatch) {
+        try {
+            const parsed = JSON.parse(suggestionMatch[1]);
+            suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+        } catch {
+            suggestions = [];
+        }
+    }
+
+    return { suggestions, cleanResponse };
+}
 
 function normalizeStreamUrl(rawUrl?: string): string {
     let url = (rawUrl || 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent').trim();
@@ -16,47 +56,94 @@ function normalizeStreamUrl(rawUrl?: string): string {
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const userId = getUserId(req);
-        const { id: convId } = await params;
-        const { content, inputType } = z.object({
+        const userId = await getUserId(req);
+        const { id: conversationId } = await params;
+        const { content, displayContent, inputType } = z.object({
             content: z.string().min(1),
+            displayContent: z.string().optional(),
             inputType: z.enum(['text', 'voice', 'file']).default('text'),
         }).parse(await req.json());
 
         const conversation = await prisma.conversation.findFirst({
-            where: { id: convId, userId },
-            include: { bot: true, messages: { orderBy: { createdAt: 'asc' } } },
+            where: { id: conversationId, userId },
+            include: {
+                bot: true,
+                customBot: {
+                    include: {
+                        documents: {
+                            select: { fileName: true, parsedText: true },
+                            orderBy: { createdAt: 'asc' },
+                        },
+                    },
+                },
+                messages: { orderBy: { createdAt: 'asc' } },
+            },
         });
-        if (!conversation) throw new AppError('对话不存在', 404);
 
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (!user || user.pointsBalance < conversation.bot.pointsPerUse) {
-            throw new AppError('积分不足，请先充值', 402);
+        if (!conversation) {
+            throw new AppError('Conversation not found', 404);
+        }
+
+        const bot = getConversationBotPayload(conversation);
+        let systemPrompt = '';
+
+        if (bot.kind === 'custom') {
+            if (!conversation.customBot || !conversation.customBot.isActive) {
+                throw new AppError('Custom bot is no longer available', 410);
+            }
+
+            systemPrompt = conversation.customBot.systemPrompt || `You are ${bot.name}. Provide structured, practical guidance.`;
+
+            if (conversation.customBot.documents.length > 0) {
+                const knowledgeText = conversation.customBot.documents
+                    .map((document) => `### ${document.fileName}\n${document.parsedText}`)
+                    .join('\n\n---\n\n');
+                systemPrompt = `${systemPrompt}\n\n# Knowledge Base\nUse the following user-uploaded context when answering:\n\n${knowledgeText}`;
+            }
+
+            systemPrompt = `${systemPrompt}\n\n${GLOBAL_RULES}`.trim();
+        } else {
+            if (!conversation.bot || !conversation.bot.isActive) {
+                throw new AppError('Bot is no longer available', 410);
+            }
+
+            const fallbackPrompt = `You are ${conversation.bot.name}. Provide structured, practical guidance.`;
+            const basePrompt = isPlaceholderPrompt(conversation.bot.systemPrompt)
+                ? getSystemPromptBySortOrder(conversation.bot.sortOrder, fallbackPrompt)
+                : conversation.bot.systemPrompt;
+            const rules = conversation.bot.sortOrder >= 15 && conversation.bot.sortOrder <= 22
+                ? XHS_GLOBAL_RULES
+                : GLOBAL_RULES;
+            systemPrompt = `${basePrompt}\n\n${rules}`.trim();
         }
 
         await prisma.message.create({
-            data: { conversationId: convId, role: 'user', content, inputType },
+            data: {
+                conversationId,
+                role: 'user',
+                content: displayContent || content,
+                inputType,
+            },
         });
 
-        const apiMessages = conversation.messages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }],
+        const apiMessages = conversation.messages.map((message) => ({
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: message.content }],
         }));
         apiMessages.push({ role: 'user', parts: [{ text: content }] });
 
-        const apiUrl = normalizeStreamUrl(readServerEnv('AI_API_URL'));
-        const apiKey = readServerEnv('AI_API_KEY');
-        const fallbackPrompt = `你是${conversation.bot.name}，请给出专业、结构化、可执行的建议。`;
-        const systemPrompt = isPlaceholderPrompt(conversation.bot.systemPrompt)
-            ? getSystemPromptBySortOrder(conversation.bot.sortOrder, fallbackPrompt)
-            : conversation.bot.systemPrompt;
-
+        const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
+        const apiKey = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY');
         const encoder = new TextEncoder();
+
+        const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
+
         const stream = new ReadableStream({
             async start(controller) {
                 let fullResponse = '';
+                let streamedVisibleLength = 0;
                 try {
-                    const apiResponse = await fetch(apiUrl, {
+                    const upstream = await fetch(apiUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -69,11 +156,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         }),
                     });
 
-                    if (!apiResponse.ok || !apiResponse.body) {
-                        throw new Error(`AI API error: ${apiResponse.status}`);
+                    if (!upstream.ok || !upstream.body) {
+                        throw new Error(`AI API error: ${upstream.status}`);
                     }
 
-                    const reader = apiResponse.body.getReader();
+                    const reader = upstream.body.getReader();
                     const decoder = new TextDecoder();
 
                     while (true) {
@@ -82,64 +169,73 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                         const chunk = decoder.decode(value, { stream: true });
                         for (const line of chunk.split('\n')) {
-                            if (!line.startsWith('data: ')) continue;
-                            const jsonStr = line.slice(6).trim();
-                            if (jsonStr === '[DONE]') continue;
+                            const trimmed = line.trim();
+                            if (!trimmed.startsWith('data:')) continue;
+
+                            const payload = trimmed.slice(5).trim();
+                            if (!payload || payload === '[DONE]') continue;
+
+                            let data: {
+                                candidates?: Array<{
+                                    content?: {
+                                        parts?: Array<{ text?: string }>;
+                                    };
+                                }>;
+                            };
                             try {
-                                const data = JSON.parse(jsonStr);
-                                const parts = data?.candidates?.[0]?.content?.parts;
-                                if (Array.isArray(parts)) {
-                                    for (const part of parts) {
-                                        if (part?.text && !part?.thought) {
-                                            fullResponse += part.text;
-                                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: part.text })}\n\n`));
-                                        }
-                                    }
-                                }
-                            } catch { /* skip */ }
+                                data = JSON.parse(payload) as {
+                                    candidates?: Array<{
+                                        content?: {
+                                            parts?: Array<{ text?: string }>;
+                                        };
+                                    }>;
+                                };
+                            } catch {
+                                continue;
+                            }
+
+                            const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('') || '';
+                            if (!text) continue;
+
+                            fullResponse += text;
+                            const visibleResponse = stripSuggestionBlock(fullResponse);
+                            if (visibleResponse.length <= streamedVisibleLength) continue;
+
+                            const visibleDelta = visibleResponse.slice(streamedVisibleLength);
+                            streamedVisibleLength = visibleResponse.length;
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                         }
                     }
 
-                    // Extract suggestions
-                    let suggestions: string | null = null;
-                    const match = fullResponse.match(/```json\s*(\{"suggestions":\s*\[[\s\S]*?\]\})\s*```/);
-                    if (match) {
-                        suggestions = match[1];
-                        fullResponse = fullResponse.replace(match[0], '').trim();
+                    const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
+
+                    await prisma.$transaction(async (tx) => {
+                        await tx.message.create({
+                            data: {
+                                conversationId,
+                                role: 'assistant',
+                                content: cleanResponse,
+                                suggestions: suggestions.length ? JSON.stringify(suggestions) : null,
+                            },
+                        });
+
+                        await tx.conversation.update({
+                            where: { id: conversationId },
+                            data: {
+                                title: shouldSetInitialTitle
+                                    ? buildConversationTitle(bot.name, [{ role: 'user', content: displayContent || content }])
+                                    : conversation.title,
+                                updatedAt: new Date(),
+                            },
+                        });
+                    });
+
+                    if (suggestions.length) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'suggestions', content: suggestions })}\n\n`));
                     }
-
-                    // Save AI reply
-                    await prisma.message.create({
-                        data: { conversationId: convId, role: 'assistant', content: fullResponse, suggestions },
-                    });
-
-                    // Deduct points
-                    const pointsCost = conversation.bot.pointsPerUse;
-                    await prisma.user.update({
-                        where: { id: userId },
-                        data: { pointsBalance: { decrement: pointsCost } },
-                    });
-                    await prisma.pointsTransaction.create({
-                        data: {
-                            userId,
-                            type: 'consume',
-                            amount: -pointsCost,
-                            balanceAfter: user!.pointsBalance - pointsCost,
-                            description: `使用${conversation.bot.name}`,
-                            relatedConversationId: convId,
-                        },
-                    });
-
-                    await prisma.conversation.update({
-                        where: { id: convId },
-                        data: { updatedAt: new Date() },
-                    });
-
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'suggestions', content: suggestions })}\n\n`));
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', pointsUsed: pointsCost })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {
-                    const errMsg = error instanceof Error ? error.message : '未知错误';
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: errMsg })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: error instanceof Error ? error.message : 'Request failed' })}\n\n`));
                 } finally {
                     controller.close();
                 }
@@ -149,11 +245,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return new Response(stream, {
             headers: {
                 'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
+                'Cache-Control': 'no-cache, no-transform',
                 Connection: 'keep-alive',
             },
         });
-    } catch (err) {
-        return errorResponse(err);
+    } catch (error) {
+        return errorResponse(error);
     }
 }

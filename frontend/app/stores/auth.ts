@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api, UserInfo } from '../lib/api';
+import { runLocalDataMigration } from '../lib/local-data-migration';
 
 interface AuthState {
     user: UserInfo | null;
@@ -7,13 +8,11 @@ interface AuthState {
     isLoading: boolean;
     isAuthenticated: boolean;
 
-    login: (email: string, password: string) => Promise<void>;
-    register: (email: string, password: string, code: string, nickname?: string) => Promise<void>;
-    sendCode: (email: string) => Promise<void>;
-    verifyCode: (email: string, code: string) => Promise<void>;
+    login: (account: string, password: string) => Promise<void>;
+    register: (account: string, password: string, inviteCode: string, nickname: string, groupName: string) => Promise<void>;
+    activate: (account: string, password: string, inviteCode: string, nickname?: string, groupName?: string) => Promise<void>;
     logout: () => void;
     loadUser: () => Promise<void>;
-    updatePoints: (balance: number) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -22,28 +21,43 @@ export const useAuthStore = create<AuthState>((set) => ({
     isLoading: true,
     isAuthenticated: false,
 
-    login: async (email, password) => {
-        const res = await api.login({ email, password });
+    login: async (account, password) => {
+        const res = await api.login({ account, password });
         const { token, user } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
+        try {
+            await runLocalDataMigration(user.id);
+        } catch (error) {
+            console.error('[Migration] Failed after login', error);
+        }
         set({ user, token, isAuthenticated: true });
     },
 
-    register: async (email, password, code, nickname) => {
-        const res = await api.register({ email, password, code, nickname });
+    register: async (account, password, inviteCode, nickname, groupName) => {
+        const res = await api.register({ account, password, inviteCode, nickname, groupName });
         const { token, user } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
+        try {
+            await runLocalDataMigration(user.id);
+        } catch (error) {
+            console.error('[Migration] Failed after register', error);
+        }
         set({ user, token, isAuthenticated: true });
     },
 
-    sendCode: async (email) => {
-        await api.sendCode({ email });
-    },
-
-    verifyCode: async (email, code) => {
-        await api.verifyCode({ email, code });
+    activate: async (account, password, inviteCode, nickname, groupName) => {
+        const res = await api.activate({ account, password, inviteCode, nickname, groupName });
+        const { token, user } = res.data;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        try {
+            await runLocalDataMigration(user.id);
+        } catch (error) {
+            console.error('[Migration] Failed after activate', error);
+        }
+        set({ user, token, isAuthenticated: true });
     },
 
     logout: () => {
@@ -62,6 +76,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         try {
             const res = await api.getMe();
             const user = res.data;
+            try {
+                await runLocalDataMigration(user.id);
+            } catch (error) {
+                console.error('[Migration] Failed during user load', error);
+            }
             localStorage.setItem('user', JSON.stringify(user));
             set({ user, token, isAuthenticated: true, isLoading: false });
         } catch {
@@ -69,13 +88,5 @@ export const useAuthStore = create<AuthState>((set) => ({
             localStorage.removeItem('user');
             set({ isLoading: false, isAuthenticated: false });
         }
-    },
-
-    updatePoints: (balance) => {
-        set((state) => {
-            const newUser = state.user ? { ...state.user, pointsBalance: balance } : null;
-            if (newUser) localStorage.setItem('user', JSON.stringify(newUser));
-            return { user: newUser };
-        });
     },
 }));

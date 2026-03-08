@@ -18,10 +18,39 @@ import customBotRoutes from './routes/custom-bots';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+function getAllowedOrigins(): string[] {
+    const configured = [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
+        .filter(Boolean)
+        .flatMap((value) => String(value).split(','))
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+    if (configured.length > 0) {
+        return Array.from(new Set(configured));
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+        return ['http://localhost:3000'];
+    }
+
+    return [];
+}
+
+const allowedOrigins = getAllowedOrigins();
+
 app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error('Origin not allowed by CORS.'));
+    },
+    credentials: true,
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/image-assets', express.static(path.join(process.cwd(), 'storage')));

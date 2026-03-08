@@ -53,7 +53,7 @@ ${BOT_LIST.map(b => `ID=${b.id} 名称=${b.name}`).join('\n')}
 
 export async function POST(req: NextRequest) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const { prompt } = await req.json();
         if (!prompt) return Response.json({ success: false, message: '请描述你的需求' }, { status: 400 });
 

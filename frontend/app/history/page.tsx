@@ -32,7 +32,9 @@ export default function HistoryPage() {
     const [tab, setTab] = useState<FilterTab>('all');
 
     useEffect(() => {
-        loadConversations();
+        void loadConversations().catch((error) => {
+            console.error('[History] Failed to load conversations', error);
+        });
     }, [loadConversations]);
 
     useEffect(() => {
@@ -79,13 +81,13 @@ export default function HistoryPage() {
     const handleDelete = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
         if (confirm('确定删除这条对话吗？')) {
-            deleteConversation(id);
+            void deleteConversation(id);
         }
     };
 
     const handleFavorite = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        toggleFavorite(id);
+        void toggleFavorite(id);
     };
 
     return (
@@ -150,7 +152,7 @@ export default function HistoryPage() {
                             <p className={styles.preview}>{getPreview(conv)}</p>
                             <div className={styles.cardFooter}>
                                 <span className={styles.msgCount}>
-                                    {conv.messages.length} 条消息
+                                    {conv.messageCount} 条消息
                                 </span>
                                 <div className={styles.actions}>
                                     <button

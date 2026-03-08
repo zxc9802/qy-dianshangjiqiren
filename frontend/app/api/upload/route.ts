@@ -22,8 +22,8 @@ const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
 const TEXT_EXTS = new Set(['txt', 'md', 'csv']);
 
 function normalizeStreamUrl(rawUrl?: string): string {
-    const DEFAULT = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse';
-    let url = (rawUrl || DEFAULT).trim();
+    const defaultUrl = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse';
+    let url = (rawUrl || defaultUrl).trim();
     url = url.replace(':generateContent', ':streamGenerateContent');
 
     if (!/[?&]alt=sse(?:&|$)/.test(url)) {
@@ -59,8 +59,7 @@ function parseSseText(sseBody: string): string {
     return result;
 }
 
-// Local document parsing — no AI API needed
-async function parseDocumentLocally(buffer: Buffer, ext: string, fileName: string): Promise<string> {
+async function parseDocumentLocally(buffer: Buffer, ext: string): Promise<string> {
     if (TEXT_EXTS.has(ext)) {
         const text = buffer.toString('utf-8');
         if (!text.trim()) throw new Error('文件内容为空');
@@ -76,13 +75,16 @@ async function parseDocumentLocally(buffer: Buffer, ext: string, fileName: strin
     }
 
     if (ext === 'pdf') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mod: any = await import('pdf-parse');
-        const pdfParse = mod.default || mod;
-        const result = await pdfParse(buffer);
-        if (!result.text.trim()) throw new Error('PDF 文档内容为空');
-        console.log(`[Upload] PDF parsed: ${result.text.length} chars, ${result.numpages} pages`);
-        return result.text;
+        const { PDFParse } = await import('pdf-parse');
+        const parser = new PDFParse({ data: buffer });
+        try {
+            const result = await parser.getText();
+            if (!result.text.trim()) throw new Error('PDF 文档内容为空');
+            console.log(`[Upload] PDF parsed: ${result.text.length} chars, ${result.total} pages`);
+            return result.text;
+        } finally {
+            await parser.destroy();
+        }
     }
 
     if (ext === 'doc') {
@@ -96,7 +98,6 @@ async function parseDocumentLocally(buffer: Buffer, ext: string, fileName: strin
     throw new Error(`不支持的文档格式: .${ext}`);
 }
 
-// Image parsing — uses Gemini API via inlineData
 async function parseImageWithAI(base64Data: string, mimeType: string, fileName: string): Promise<string> {
     const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_UPLOAD_API_URL') || readServerEnv('AI_API_URL'));
     console.log(`[Upload] Sending image ${fileName} to Gemini API...`);
@@ -119,7 +120,7 @@ async function parseImageWithAI(base64Data: string, mimeType: string, fileName: 
                         inlineData: { mimeType, data: base64Data },
                     },
                     {
-                        text: '请详细描述这张图片的内容，包括画面中的文字、物体、布局、颜色等所有视觉信息。',
+                        text: '请详细描述这张图片的内容，包括画面中的文字、物体、布局、颜色等所有可见信息。',
                     },
                 ],
             }],
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
         if (!mimeType) {
             return NextResponse.json(
                 { error: '不支持的文件格式，请上传 PDF、Word、TXT、MD、CSV 或图片文件' },
-                { status: 400 }
+                { status: 400 },
             );
         }
 
@@ -176,16 +177,14 @@ export async function POST(req: NextRequest) {
         let extractedText: string;
 
         if (IMAGE_EXTS.has(ext)) {
-            // Images → Gemini API (inlineData works for images)
             if (!API_KEY) {
                 return NextResponse.json({ error: 'Missing API key' }, { status: 500 });
             }
             const base64Data = buffer.toString('base64');
             extractedText = await parseImageWithAI(base64Data, mimeType, file.name);
         } else {
-            // Documents → local parsing (no API needed)
             console.log(`[Upload] Parsing ${file.name} locally (${(file.size / 1024).toFixed(1)}KB)...`);
-            extractedText = await parseDocumentLocally(buffer, ext, file.name);
+            extractedText = await parseDocumentLocally(buffer, ext);
         }
 
         return NextResponse.json({
@@ -197,6 +196,7 @@ export async function POST(req: NextRequest) {
         if (err instanceof Error && err.name === 'AbortError') {
             return NextResponse.json({ error: '图片解析超时（60秒）' }, { status: 504 });
         }
+
         const msg = err instanceof Error ? err.message : '文件解析失败';
         console.error('[Upload] Error:', msg);
         return NextResponse.json({ error: msg }, { status: 500 });

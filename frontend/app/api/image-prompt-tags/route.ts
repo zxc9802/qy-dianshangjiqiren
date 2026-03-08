@@ -24,7 +24,7 @@ const createSchema = z.object({
 
 export async function GET(req: NextRequest) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const rows = await prisma.imagePromptTag.findMany({
             where: { userId },
             orderBy: [{ groupKey: 'asc' }, { createdAt: 'desc' }],
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const parsed = createSchema.parse(await req.json());
         const groupKey = parsed.groupKey.trim();
         const label = parsed.label.trim().replace(/\s+/g, ' ');

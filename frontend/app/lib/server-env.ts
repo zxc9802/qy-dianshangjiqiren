@@ -55,3 +55,25 @@ export function readServerEnv(key: string): string | undefined {
     return process.env[key] || loadFallbackEnv()[key];
 }
 
+export function readBackendUrl(): string {
+    const fallbackEnv = loadFallbackEnv();
+    const explicit = process.env.BACKEND_URL?.trim() || fallbackEnv.BACKEND_URL?.trim();
+    if (explicit) {
+        return explicit.replace(/\/+$/, '');
+    }
+
+    const protocol = process.env.BACKEND_PROTOCOL?.trim() || fallbackEnv.BACKEND_PROTOCOL?.trim() || 'http';
+    const host = process.env.BACKEND_HOST?.trim() || fallbackEnv.BACKEND_HOST?.trim() || 'localhost';
+    const port = process.env.BACKEND_PORT?.trim() || fallbackEnv.BACKEND_PORT?.trim() || fallbackEnv.PORT?.trim() || '3001';
+
+    return `${protocol}://${host}:${port}`.replace(/\/+$/, '');
+}
+
+export function readRequiredServerEnv(key: string): string {
+    const value = readServerEnv(key)?.trim();
+    if (!value) {
+        throw new Error(`${key} is not configured.`);
+    }
+    return value;
+}
+

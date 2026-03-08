@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -57,7 +57,7 @@ interface CustomBot {
     createdAt: string;
 }
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = '/api';
 
 function getToken(): string | null {
     if (typeof window === 'undefined') return null;
@@ -112,7 +112,7 @@ export default function MyBotsPage() {
             const res = await apiFetch('/custom-bots');
             setBots(res.data || []);
         } catch (err) {
-            console.error('加载失败:', err);
+            console.error('加载智能体失败:', err);
         } finally {
             setLoading(false);
         }
@@ -195,7 +195,7 @@ export default function MyBotsPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('确定删除这个智能体？相关知识库文档也会被删除。')) return;
+        if (!confirm('确定要删除这个智能体吗？')) return;
         try {
             await apiFetch(`/custom-bots/${id}`, { method: 'DELETE' });
             await loadBots();
@@ -209,7 +209,7 @@ export default function MyBotsPage() {
         if (!file) return;
 
         const totalDocs = docs.length + pendingDocs.length;
-        if (totalDocs >= 10) { setError('每个智能体最多上传 10 个文档'); return; }
+        if (totalDocs >= 10) { setError('最多只能上传 10 个文档'); return; }
 
         setUploadingDoc(true);
         setError('');
@@ -256,7 +256,7 @@ export default function MyBotsPage() {
 
     const handleDeleteDoc = async (docId: string) => {
         if (editingBot) {
-            // Saved doc—delete from backend
+            // Saved doc - delete from backend
             try {
                 await apiFetch(`/custom-bots/${editingBot.id}/documents/${docId}`, { method: 'DELETE' });
                 setDocs(prev => prev.filter(d => d.id !== docId));
@@ -264,7 +264,7 @@ export default function MyBotsPage() {
                 alert(err instanceof Error ? err.message : '删除失败');
             }
         } else {
-            // Pending doc—remove from local queue
+            // Pending doc - remove from local queue
             setPendingDocs(prev => prev.filter((_, i) => `pending-${i}` !== docId));
         }
     };
@@ -289,11 +289,11 @@ export default function MyBotsPage() {
         <div className={styles.layout}>
             <header className={styles.header}>
                 <button onClick={() => router.push('/')} className={styles.backBtn}>
-                    <ArrowLeft size={16} /> 返回首页
+                    <ArrowLeft size={16} /> 返回
                 </button>
                 <h1 className={styles.title}><Sparkles size={20} /> 我的智能体</h1>
                 <button className={styles.createBtn} onClick={openCreateForm}>
-                    <Plus size={16} /> 创建智能体
+                    <Plus size={16} /> 新建智能体
                 </button>
             </header>
 
@@ -302,8 +302,8 @@ export default function MyBotsPage() {
                 {bots.length === 0 && !showForm ? (
                     <div className={styles.emptyState}>
                         <Bot size={48} />
-                        <h3>{loading ? '加载中...' : '还没有创建智能体'}</h3>
-                        <p>创建你的第一个自定义智能体，设置专属提示词和知识库</p>
+                        <h3>{loading ? '加载中...' : '还没有智能体'}</h3>
+                        <p>创建你的第一个智能体，支持上传知识库和自定义提示词。</p>
                         <button className={styles.createBtnLarge} onClick={openCreateForm}>
                             <Plus size={18} /> 创建智能体
                         </button>
@@ -329,7 +329,7 @@ export default function MyBotsPage() {
                                         </div>
                                         <div className={styles.cardActions}>
                                             <button onClick={() => startChat(bot)} className={styles.chatBtn}>
-                                                <MessageSquare size={14} /> 对话
+                                                <MessageSquare size={14} /> 开始对话
                                             </button>
                                             <button onClick={() => openEditForm(bot)} className={styles.editBtn}>
                                                 <Edit3 size={14} /> 编辑
@@ -347,7 +347,7 @@ export default function MyBotsPage() {
                         {showForm && (
                             <div className={styles.formCard}>
                                 <div className={styles.formHeader}>
-                                    <h2>{editingBot ? '编辑智能体' : '创建智能体'}</h2>
+                                    <h2>{editingBot ? '编辑智能体' : '新建智能体'}</h2>
                                     <button onClick={() => { setShowForm(false); resetForm(); }} className={styles.closeBtn}>
                                         <X size={18} />
                                     </button>
@@ -357,7 +357,7 @@ export default function MyBotsPage() {
 
                                 {/* Icon Picker */}
                                 <div className={styles.formGroup}>
-                                    <label>选择图标</label>
+                                    <label>图标</label>
                                     <div className={styles.iconGrid}>
                                         {PRESET_ICONS.map(p => (
                                             <button
@@ -379,7 +379,7 @@ export default function MyBotsPage() {
                                     <input
                                         value={name}
                                         onChange={e => setName(e.target.value)}
-                                        placeholder="给你的智能体起个名字"
+                                        placeholder="请输入智能体名称"
                                         maxLength={50}
                                     />
                                 </div>
@@ -390,7 +390,7 @@ export default function MyBotsPage() {
                                     <input
                                         value={description}
                                         onChange={e => setDescription(e.target.value)}
-                                        placeholder="简单描述智能体的用途"
+                                        placeholder="请输入智能体简介（选填）"
                                         maxLength={200}
                                     />
                                 </div>
@@ -401,16 +401,16 @@ export default function MyBotsPage() {
                                     <textarea
                                         value={systemPrompt}
                                         onChange={e => setSystemPrompt(e.target.value)}
-                                        placeholder="告诉 AI 它的角色和行为规范。例如：你是一位专业的产品经理，擅长需求分析和产品规划..."
+                                        placeholder="告诉 AI 它的角色、擅长事项和回答风格。例如：你是一位专业的产品经理，擅长需求分析和产品规划。"
                                         rows={8}
                                     />
                                     <span className={styles.charCount}>{systemPrompt.length} 字</span>
                                 </div>
 
-                                {/* Knowledge Base Documents — always visible */}
+                                {/* Knowledge Base Documents - always visible */}
                                 <div className={styles.formGroup}>
-                                    <label>知识库文档</label>
-                                    <p className={styles.hint}>上传 PDF、Word、TXT 或图片，AI 将基于这些内容回答问题</p>
+                                    <label>知识库</label>
+                                    <p className={styles.hint}>支持 PDF、Word、TXT、Markdown、CSV 和图片，上传后会作为 AI 知识库使用。</p>
 
                                     <div className={styles.docList}>
                                         {/* Saved docs (for editing) */}
@@ -443,7 +443,7 @@ export default function MyBotsPage() {
                                         disabled={uploadingDoc || (docs.length + pendingDocs.length) >= 10}
                                     >
                                         {uploadingDoc ? (
-                                            <><Loader2 size={14} className="animate-spin" /> 解析中...</>
+                                            <><Loader2 size={14} className="animate-spin" /> 上传中...</>
                                         ) : (
                                             <><Upload size={14} /> 上传文档 ({docs.length + pendingDocs.length}/10)</>
                                         )}

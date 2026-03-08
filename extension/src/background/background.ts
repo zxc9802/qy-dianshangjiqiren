@@ -1,93 +1,68 @@
-import { API_BASE } from '../shared/bots';
-import type { ExtMessage, Message } from '../shared/types';
+import { DEFAULT_SITE_BASE_URL, SITE_BASE_URL_KEY } from '../shared/storage';
 
-// ─── Helper: get stored token ────────────────────────────────────────────────
-async function getToken(): Promise<string | null> {
-  const result = await chrome.storage.local.get('token');
-  return result.token ?? null;
-}
+async function openCurrentWindowSidePanel(): Promise<void> {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!activeTab?.windowId) return;
 
-// ─── Helper: stream chat from API ────────────────────────────────────────────
-async function streamChat(
-  botId: string,
-  messages: Message[],
-  onChunk: (text: string) => void,
-): Promise<void> {
-  const token = await getToken();
+  if (typeof activeTab.id === 'number') {
+    await chrome.sidePanel.setOptions({
+      tabId: activeTab.id,
+      path: 'sidepanel.html',
+      enabled: true,
+    });
 
-  const res = await fetch(`${API_BASE}/api/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ botId, messages }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${err}`);
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    const chunk = decoder.decode(value, { stream: true });
-    for (const line of chunk.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      try {
-        const event = JSON.parse(line.slice(6));
-        if (event.type === 'text' && event.content) {
-          onChunk(event.content as string);
-        }
-      } catch { /* ignore malformed lines */ }
+    try {
+      await chrome.sidePanel.open({ tabId: activeTab.id });
+      return;
+    } catch {
+      // Fall back to opening by window when tab-scoped open is unavailable.
     }
   }
+
+  await chrome.sidePanel.open({ windowId: activeTab.windowId });
 }
 
-// ─── Message listener ─────────────────────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg: ExtMessage, _sender, sendResponse) => {
+async function configureActionClickBehavior(): Promise<void> {
+  if (!chrome.sidePanel?.setPanelBehavior) return;
 
-  // Popup asking for stored token
-  if (msg.type === 'GET_TOKEN') {
-    getToken().then(token => sendResponse({ token }));
-    return true;
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch {
+    // Keep the manual click handler below as a fallback for browsers that do not support it.
   }
+}
 
-  // Popup sending a chat request
-  if (msg.type === 'CHAT') {
-    const { botId, messages } = msg.payload;
-
-    // Find the popup tab to send streaming chunks back to
-    const sendChunk = (content: string) => {
-      chrome.runtime.sendMessage({ type: 'CHAT_CHUNK', content } satisfies ExtMessage)
-        .catch(() => { /* popup may have closed */ });
-    };
-
-    streamChat(botId, messages, sendChunk)
-      .then(() => {
-        chrome.runtime.sendMessage({ type: 'CHAT_DONE' } satisfies ExtMessage)
-          .catch(() => {});
-        sendResponse({ ok: true });
-      })
-      .catch(err => {
-        chrome.runtime.sendMessage({
-          type: 'CHAT_ERROR',
-          error: err instanceof Error ? err.message : String(err),
-        } satisfies ExtMessage).catch(() => {});
-        sendResponse({ ok: false });
-      });
-
-    return true; // keep message channel open
+async function initializeBackground(): Promise<void> {
+  const current = await chrome.storage.local.get(SITE_BASE_URL_KEY);
+  if (typeof current[SITE_BASE_URL_KEY] !== 'string') {
+    await chrome.storage.local.set({ [SITE_BASE_URL_KEY]: DEFAULT_SITE_BASE_URL });
   }
+  await configureActionClickBehavior();
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void initializeBackground();
 });
 
-// ─── On install: try to read token from the main site ────────────────────────
-chrome.runtime.onInstalled.addListener(() => {
-  // Will be populated when content script syncs the token
-  console.log('[电商AI插件] 已安装');
+chrome.runtime.onStartup.addListener(() => {
+  void configureActionClickBehavior();
+});
+
+chrome.action.onClicked.addListener(() => {
+  void openCurrentWindowSidePanel();
+});
+
+chrome.runtime.onMessage.addListener((message: { type?: string }, _sender, sendResponse) => {
+  if (message.type !== 'OPEN_SIDE_PANEL') return undefined;
+
+  openCurrentWindowSidePanel()
+    .then(() => sendResponse({ ok: true }))
+    .catch((error) => {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : '打开侧边栏失败',
+      });
+    });
+
+  return true;
 });

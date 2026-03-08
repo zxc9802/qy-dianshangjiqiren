@@ -123,7 +123,7 @@ async function generateOneImage(args: {
 
 export async function GET(req: NextRequest) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const { searchParams } = new URL(req.url);
         const cursor = searchParams.get('cursor');
         const limitRaw = Number(searchParams.get('limit') || '20');
@@ -164,7 +164,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
     try {
-        const userId = getUserId(req);
+        const userId = await getUserId(req);
         const body = await req.json();
         const parsed = payloadSchema.parse(body);
         const apiUrl = buildImageApiUrl();
