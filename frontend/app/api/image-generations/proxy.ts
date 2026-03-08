@@ -73,6 +73,23 @@ function normalizeImageGenerationRecord(record: unknown): unknown {
     return next;
 }
 
+function normalizeImageGenerationPayload(payload: Record<string, unknown>): Record<string, unknown> {
+    const nextPayload: Record<string, unknown> = { ...payload };
+    const data = payload.data;
+
+    if (Array.isArray((data as Record<string, unknown> | undefined)?.items)) {
+        const record = data as Record<string, unknown>;
+        nextPayload.data = {
+            ...record,
+            items: (record.items as unknown[]).map((item) => normalizeImageGenerationRecord(item)),
+        };
+        return nextPayload;
+    }
+
+    nextPayload.data = normalizeImageGenerationRecord(data);
+    return nextPayload;
+}
+
 async function normalizeImageGenerationResponse(upstream: Response): Promise<Response> {
     const contentType = upstream.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
@@ -85,18 +102,7 @@ async function normalizeImageGenerationResponse(upstream: Response): Promise<Res
     }
 
     const payload = await upstream.json() as Record<string, unknown>;
-    const nextPayload: Record<string, unknown> = { ...payload };
-    const data = payload.data;
-
-    if (Array.isArray((data as Record<string, unknown> | undefined)?.items)) {
-        const record = data as Record<string, unknown>;
-        nextPayload.data = {
-            ...record,
-            items: (record.items as unknown[]).map((item) => normalizeImageGenerationRecord(item)),
-        };
-    } else {
-        nextPayload.data = normalizeImageGenerationRecord(data);
-    }
+    const nextPayload = normalizeImageGenerationPayload(payload);
 
     return Response.json(nextPayload, {
         status: upstream.status,
@@ -140,48 +146,74 @@ function fileExtensionFromMimeType(mimeType: string): string {
     }
 }
 
-export async function proxyGenerateImageRequest(req: NextRequest): Promise<Response> {
-    const headers = copyRequestHeaders(req, false);
+async function requestBackendImageGeneration(sourceHeaders: Headers, body: Record<string, unknown>) {
+    const headers = new Headers();
+    const authorization = sourceHeaders.get('authorization');
+    const accept = sourceHeaders.get('accept');
+    if (authorization) headers.set('authorization', authorization);
+    if (accept) headers.set('accept', accept);
+
     const backendUrl = readBackendUrl();
     const targetUrl = `${backendUrl}/api/image-generations/generate`;
+    const formData = new FormData();
 
+    const scalarKeys = [
+        'prompt',
+        'negativePrompt',
+        'aspectRatio',
+        'stylePreset',
+        'background',
+        'lighting',
+        'referenceStrength',
+        'count',
+    ] as const;
+
+    for (const key of scalarKeys) {
+        const value = body[key];
+        if (value === undefined || value === null || value === '') continue;
+        formData.set(key, String(value));
+    }
+
+    const referenceImage = body.referenceImage;
+    const referenceImageMime = body.referenceImageMime;
+    if (typeof referenceImage === 'string' && referenceImage && typeof referenceImageMime === 'string' && referenceImageMime) {
+        const extension = fileExtensionFromMimeType(referenceImageMime);
+        const blob = new Blob([Buffer.from(referenceImage, 'base64')], { type: referenceImageMime });
+        formData.set('referenceImage', blob, `reference.${extension}`);
+    }
+
+    const upstream = await fetch(targetUrl, {
+        method: 'POST',
+        headers,
+        body: formData,
+        cache: 'no-store',
+    });
+
+    const contentType = upstream.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json')
+        ? await upstream.json() as Record<string, unknown>
+        : { success: false, message: await upstream.text() };
+
+    return {
+        ok: upstream.ok,
+        status: upstream.status,
+        statusText: upstream.statusText,
+        payload: normalizeImageGenerationPayload(payload),
+    };
+}
+
+export async function generateImageViaBackend(sourceHeaders: Headers, body: Record<string, unknown>) {
+    return requestBackendImageGeneration(sourceHeaders, body);
+}
+
+export async function proxyGenerateImageRequest(req: NextRequest): Promise<Response> {
     try {
         const body = await req.json() as Record<string, unknown>;
-        const formData = new FormData();
-
-        const scalarKeys = [
-            'prompt',
-            'negativePrompt',
-            'aspectRatio',
-            'stylePreset',
-            'background',
-            'lighting',
-            'referenceStrength',
-            'count',
-        ] as const;
-
-        for (const key of scalarKeys) {
-            const value = body[key];
-            if (value === undefined || value === null || value === '') continue;
-            formData.set(key, String(value));
-        }
-
-        const referenceImage = body.referenceImage;
-        const referenceImageMime = body.referenceImageMime;
-        if (typeof referenceImage === 'string' && referenceImage && typeof referenceImageMime === 'string' && referenceImageMime) {
-            const extension = fileExtensionFromMimeType(referenceImageMime);
-            const blob = new Blob([Buffer.from(referenceImage, 'base64')], { type: referenceImageMime });
-            formData.set('referenceImage', blob, `reference.${extension}`);
-        }
-
-        const upstream = await fetch(targetUrl, {
-            method: 'POST',
-            headers,
-            body: formData,
-            cache: 'no-store',
+        const upstream = await requestBackendImageGeneration(req.headers, body);
+        return Response.json(upstream.payload, {
+            status: upstream.status,
+            statusText: upstream.statusText,
         });
-
-        return normalizeImageGenerationResponse(upstream);
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Image generation request failed';
         return Response.json({ success: false, message }, { status: 502 });

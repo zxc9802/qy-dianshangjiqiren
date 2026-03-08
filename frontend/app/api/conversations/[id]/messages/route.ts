@@ -10,6 +10,7 @@ import {
 } from '../../../../lib/conversation-message-codec';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
+import { generateImageViaBackend } from '../../../image-generations/proxy';
 
 const GLOBAL_RULES = `
 # Global interaction rules
@@ -40,8 +41,8 @@ function extractSuggestions(text: string): { suggestions: string[]; cleanRespons
 
     if (suggestionMatch) {
         try {
-            const parsed = JSON.parse(suggestionMatch[1]);
-            suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+            const parsed = JSON.parse(suggestionMatch[1]) as { suggestions?: unknown };
+            suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((item): item is string => typeof item === 'string') : [];
         } catch {
             suggestions = [];
         }
@@ -57,10 +58,6 @@ function normalizeStreamUrl(rawUrl?: string): string {
         url += url.includes('?') ? '&alt=sse' : '?alt=sse';
     }
     return url;
-}
-
-function buildSameOriginUrl(req: NextRequest, pathname: string): string {
-    return new URL(pathname, req.url).toString();
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -147,13 +144,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
         const apiKey = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY');
         const encoder = new TextEncoder();
-
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
 
         const stream = new ReadableStream({
             async start(controller) {
                 let fullResponse = '';
                 let streamedVisibleLength = 0;
+
                 try {
                     if (inputType === 'image') {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -161,33 +158,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             content: '正在调用图片模型，通常需要 10 到 40 秒。',
                         })}\n\n`));
 
-                        const authorization = req.headers.get('authorization');
-                        const cookie = req.headers.get('cookie');
-                        const imageResponse = await fetch(buildSameOriginUrl(req, '/api/image-generations'), {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                ...(authorization ? { Authorization: authorization } : {}),
-                                ...(cookie ? { Cookie: cookie } : {}),
-                            },
-                            body: JSON.stringify({
-                                prompt: content,
-                                aspectRatio: aspectRatio || '1:1',
-                                count: 1,
-                            }),
+                        const imageResponse = await generateImageViaBackend(req.headers, {
+                            prompt: content,
+                            aspectRatio: aspectRatio || '1:1',
+                            count: 1,
                         });
 
-                        const imagePayload = await imageResponse.json();
+                        const imagePayload = imageResponse.payload as Record<string, unknown>;
                         if (!imageResponse.ok) {
-                            throw new Error(imagePayload?.error || imagePayload?.message || '图片生成失败');
+                            throw new Error(
+                                (typeof imagePayload.error === 'string' ? imagePayload.error : '')
+                                || (typeof imagePayload.message === 'string' ? imagePayload.message : '')
+                                || '图片生成失败',
+                            );
                         }
 
-                        const generated = imagePayload?.data as {
+                        const generated = imagePayload.data as {
                             prompt: string;
                             aspectRatio: string;
                             errorMessage: string | null;
                             resultImagePaths: string[];
-                        };
+                        } | undefined;
 
                         if (!generated?.resultImagePaths?.length) {
                             throw new Error(generated?.errorMessage || '图片生成失败');
@@ -280,6 +271,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     };
                                 }>;
                             };
+
                             try {
                                 data = JSON.parse(payload) as {
                                     candidates?: Array<{
@@ -333,7 +325,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     }
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: error instanceof Error ? error.message : 'Request failed' })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'error',
+                        content: error instanceof Error ? error.message : 'Request failed',
+                    })}\n\n`));
                 } finally {
                     controller.close();
                 }
