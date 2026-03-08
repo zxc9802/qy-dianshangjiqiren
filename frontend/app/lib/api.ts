@@ -123,7 +123,8 @@ export const api = {
     sendConversationMessage: (id: string, body: {
         content: string;
         displayContent?: string;
-        inputType?: 'text' | 'voice' | 'file';
+        inputType?: 'text' | 'voice' | 'file' | 'image';
+        aspectRatio?: string;
     }) => {
         const token = getToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -270,7 +271,17 @@ export interface ConversationInfo {
     updatedAt: string;
     bot: ConversationBotInfo;
     messageCount: number;
-    messages?: Array<{ id: string; role: string; content: string; createdAt: string }>;
+    messages?: Array<{
+        id: string;
+        role: string;
+        content: string;
+        createdAt: string;
+        inputType?: string;
+        kind?: 'text' | 'image';
+        imageUrls?: string[];
+        imagePrompt?: string;
+        aspectRatio?: string;
+    }>;
 }
 
 export interface ConversationDetail extends ConversationInfo {
@@ -284,6 +295,10 @@ export interface MessageInfo {
     inputType: string;
     suggestions: string | null;
     createdAt: string;
+    kind?: 'text' | 'image';
+    imageUrls?: string[];
+    imagePrompt?: string;
+    aspectRatio?: string;
     attachments?: AttachmentInfo[];
 }
 
@@ -393,6 +408,10 @@ export interface PageInsightInfo {
         role: 'user' | 'assistant';
         content: string;
         createdAt?: string;
+        kind?: 'text' | 'image';
+        imageUrls?: string[];
+        imagePrompt?: string;
+        aspectRatio?: string;
     }>;
 }
 

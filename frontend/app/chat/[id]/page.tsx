@@ -9,13 +9,17 @@ import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
     ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
-    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2,
+    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon,
 } from 'lucide-react';
 
 interface MessageItem {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    kind?: 'text' | 'image';
+    imageUrls?: string[];
+    imagePrompt?: string;
+    aspectRatio?: string;
 }
 
 interface AttachedFile {
@@ -27,6 +31,7 @@ interface AttachedFile {
 }
 
 const MAX_ATTACHMENTS = 10;
+const IMAGE_MODE_ASPECT_RATIO = '1:1';
 
 interface WfState {
     workflowId: string;
@@ -88,6 +93,10 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
         id: message.id,
         role: message.role,
         content: message.content,
+        kind: message.kind,
+        imageUrls: message.imageUrls,
+        imagePrompt: message.imagePrompt,
+        aspectRatio: message.aspectRatio,
     }));
 
     if (history.some((message) => message.id === 'welcome')) {
@@ -133,8 +142,10 @@ export default function ChatPage() {
 
     const [messages, setMessages] = useState<MessageItem[]>([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
     const [inputText, setInputText] = useState('');
+    const [imageModeEnabled, setImageModeEnabled] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const [streamingText, setStreamingText] = useState('');
+    const [imageStatusText, setImageStatusText] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -265,6 +276,13 @@ export default function ChatPage() {
         setAttachedFiles([]);
     };
 
+    const toggleImageMode = () => {
+        if (!imageModeEnabled && attachedFiles.length > 0) {
+            clearAttachments();
+        }
+        setImageModeEnabled((current) => !current);
+    };
+
     const removeAttachment = (index: number) => {
         setAttachedFiles((current) => current.filter((file, itemIndex) => {
             if (itemIndex === index && file.previewUrl) {
@@ -289,11 +307,12 @@ export default function ChatPage() {
     };
 
     const sendMessage = async (rawText: string) => {
-        const hasFiles = attachedFiles.length > 0;
+        const isImageRequest = imageModeEnabled;
+        const hasFiles = !isImageRequest && attachedFiles.length > 0;
         if ((!rawText.trim() && !hasFiles) || isStreaming || isUploading) return;
 
         let parsedAttachments = attachedFiles;
-        if (attachedFiles.length > 0) {
+        if (!isImageRequest && attachedFiles.length > 0) {
             setIsUploading(true);
             try {
                 parsedAttachments = [];
@@ -336,12 +355,20 @@ export default function ChatPage() {
 
         setMessages((current) => [
             ...current,
-            { id: `user-${Date.now()}`, role: 'user', content: displayText },
+            {
+                id: `user-${Date.now()}`,
+                role: 'user',
+                content: displayText,
+                kind: isImageRequest ? 'image' : 'text',
+                imagePrompt: isImageRequest ? displayText : undefined,
+                aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
+            },
         ]);
         setInputText('');
         setSuggestions([]);
         setIsStreaming(true);
         setStreamingText('');
+        setImageStatusText(isImageRequest ? '正在提交绘图请求...' : '');
 
         await new Promise<void>((resolve) => {
             if (typeof window === 'undefined') {
@@ -369,7 +396,8 @@ export default function ChatPage() {
             const response = await api.sendConversationMessage(activeConversationId, {
                 content,
                 displayContent: displayText,
-                inputType: hasFiles ? 'file' : 'text',
+                inputType: isImageRequest ? 'image' : hasFiles ? 'file' : 'text',
+                aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
             });
 
             if (!response.ok) {
@@ -388,13 +416,16 @@ export default function ChatPage() {
             const decoder = new TextDecoder();
             let fullText = '';
             pendingStreamingTextRef.current = '';
+            let pending = '';
 
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                pending += decoder.decode(value || new Uint8Array(), { stream: !done });
 
-                const chunk = decoder.decode(value, { stream: true });
-                for (const line of chunk.split('\n')) {
+                const lines = pending.split('\n');
+                pending = lines.pop() || '';
+
+                for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;
 
                     try {
@@ -409,11 +440,58 @@ export default function ChatPage() {
                             }
                         } else if (event.type === 'suggestions' && Array.isArray(event.content)) {
                             setSuggestions(event.content);
+                        } else if (event.type === 'status' && typeof event.content === 'string') {
+                            setImageStatusText(event.content);
+                        } else if (event.type === 'image' && event.content) {
+                            setMessages((current) => [
+                                ...current,
+                                {
+                                    id: `assistant-image-${Date.now()}`,
+                                    role: 'assistant',
+                                    content: event.content.content || '已生成图片。',
+                                    kind: 'image',
+                                    imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
+                                    imagePrompt: event.content.imagePrompt,
+                                    aspectRatio: event.content.aspectRatio,
+                                },
+                            ]);
+                            setImageStatusText('');
                         } else if (event.type === 'error') {
                             throw new Error(event.content || 'AI 回复失败');
                         }
                     } catch (error) {
                         if (error instanceof SyntaxError) continue;
+                        throw error;
+                    }
+                }
+
+                if (done) break;
+            }
+
+            if (pending.trim().startsWith('data: ')) {
+                try {
+                    const event = JSON.parse(pending.trim().slice(6));
+                    if (event.type === 'status' && typeof event.content === 'string') {
+                        setImageStatusText(event.content);
+                    } else if (event.type === 'image' && event.content) {
+                        setMessages((current) => [
+                            ...current,
+                            {
+                                id: `assistant-image-${Date.now()}`,
+                                role: 'assistant',
+                                content: event.content.content || '已生成图片。',
+                                kind: 'image',
+                                imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
+                                imagePrompt: event.content.imagePrompt,
+                                aspectRatio: event.content.aspectRatio,
+                            },
+                        ]);
+                        setImageStatusText('');
+                    } else if (event.type === 'error') {
+                        throw new Error(event.content || 'AI 回复失败');
+                    }
+                } catch (error) {
+                    if (!(error instanceof SyntaxError)) {
                         throw error;
                     }
                 }
@@ -447,6 +525,7 @@ export default function ChatPage() {
             pendingStreamingTextRef.current = '';
             setIsStreaming(false);
             setStreamingText('');
+            setImageStatusText('');
 
             if (shouldRefreshConversation && activeConversationId) {
                 void refreshConversation(activeConversationId, { syncMessages: false }).catch((error) => {
@@ -564,7 +643,7 @@ export default function ChatPage() {
         }
     };
 
-    const assistantMessages = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome');
+    const assistantMessages = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image');
     const showLoadingBubble = isLoadingConversation && !isStreaming && messages.length <= 1;
     const showStreamingBubble = isStreaming;
 
@@ -813,8 +892,41 @@ export default function ChatPage() {
                             className={`${styles.message} ${message.role === 'user' ? styles.userMsg : styles.assistantMsg} ${wfState && selectedMsgIds.has(message.id) ? styles.msgPinned : ''}`}
                         >
                             <div className={styles.msgBubble}>
-                                <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
-                                {wfState && message.role === 'assistant' && message.id !== 'welcome' && (
+                                {message.kind === 'image' && message.imageUrls?.length ? (
+                                    <div className={styles.imageMessage}>
+                                        {message.content ? (
+                                            <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                        ) : null}
+                                        {message.imagePrompt ? (
+                                            <div className={styles.imagePrompt}>
+                                                <span>绘图提示词</span>
+                                                <p>{message.imagePrompt}</p>
+                                            </div>
+                                        ) : null}
+                                        <div className={styles.imageGrid}>
+                                            {message.imageUrls.map((imageUrl, imageIndex) => (
+                                                <a
+                                                    key={`${imageUrl}-${imageIndex}`}
+                                                    href={imageUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className={styles.imageLink}
+                                                >
+                                                    {/* eslint-disable-next-line @next/next/no-img-element -- generated chat images are data URIs or remote assets returned at runtime */}
+                                                    <img
+                                                        src={imageUrl}
+                                                        alt={`generated-${imageIndex + 1}`}
+                                                        className={styles.imageThumb}
+                                                        loading="lazy"
+                                                    />
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                )}
+                                {wfState && message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image' && (
                                     <button
                                         className={`${styles.pinBtn} ${selectedMsgIds.has(message.id) ? styles.pinBtnActive : ''}`}
                                         onClick={() => togglePinMsg(message.id)}
@@ -842,6 +954,17 @@ export default function ChatPage() {
                             <div className={styles.msgBubble}>
                                 {streamingText ? (
                                     <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
+                                ) : imageModeEnabled ? (
+                                    <div className={styles.imagePending}>
+                                        <div className={styles.thinking}>
+                                            <span />
+                                            <span />
+                                            <span />
+                                        </div>
+                                        <div className={styles.imagePendingText}>
+                                            {imageStatusText || '正在生成图片，通常需要 10 到 40 秒。'}
+                                        </div>
+                                    </div>
                                 ) : (
                                     <div className={styles.thinking}>
                                         <span />
@@ -856,7 +979,7 @@ export default function ChatPage() {
                 </div>
             </div>
 
-            {suggestions.length > 0 && !isStreaming && (
+            {suggestions.length > 0 && !isStreaming && !imageModeEnabled && (
                 <div className={styles.suggestions}>
                     {suggestions.map((suggestion, index) => (
                         <button
@@ -922,6 +1045,7 @@ export default function ChatPage() {
                         {attachedFiles.map((file, index) => (
                             <div key={`${file.name}-${index}`} className={styles.attachmentBar}>
                                 {file.isImage && file.previewUrl ? (
+                                    /* eslint-disable-next-line @next/next/no-img-element -- local attachment previews rely on temporary object URLs */
                                     <img src={file.previewUrl} alt={file.name} className={styles.attachThumb} />
                                 ) : (
                                     <span className={styles.attachIcon}><FileText size={18} /></span>
@@ -932,6 +1056,24 @@ export default function ChatPage() {
                         ))}
                     </div>
                 )}
+                <div className={styles.inputMeta}>
+                    <button
+                        type="button"
+                        className={`${styles.modeToggle} ${imageModeEnabled ? styles.modeToggleActive : ''}`}
+                        onClick={toggleImageMode}
+                        disabled={isStreaming || isUploading || isTranscribing}
+                    >
+                        <ImageIcon size={16} />
+                        {imageModeEnabled ? '绘图已开' : '绘图已关'}
+                    </button>
+                    <span className={styles.inputHint}>
+                        {isStreaming && imageModeEnabled
+                            ? (imageStatusText || '正在生成图片，通常需要 10 到 40 秒。')
+                            : imageModeEnabled
+                            ? '当前输入会直接调用绘图能力，默认生成 1 张 1:1 图片。'
+                            : '关闭时为普通聊天模式。'}
+                    </span>
+                </div>
                 <div className={styles.inputWrapper}>
                     <input
                         ref={fileInputRef}
@@ -944,8 +1086,8 @@ export default function ChatPage() {
                     <button
                         className={styles.toolBtn}
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={isStreaming || isUploading}
-                        title="上传文件"
+                        disabled={isStreaming || isUploading || imageModeEnabled}
+                        title={imageModeEnabled ? '绘图模式下暂不支持上传文件' : '上传文件'}
                     >
                         {isUploading ? '...' : <Paperclip size={18} />}
                     </button>
@@ -966,7 +1108,11 @@ export default function ChatPage() {
                                 void sendMessage(inputText);
                             }
                         }}
-                        placeholder={isTranscribing ? '语音转录中，请稍候...' : '输入消息...'}
+                        placeholder={isTranscribing
+                            ? '语音转录中，请稍候...'
+                            : imageModeEnabled
+                                ? '输入想生成的图片描述...'
+                                : '输入消息...'}
                         className={styles.textInput}
                         rows={1}
                         disabled={isStreaming || isUploading}
@@ -976,7 +1122,7 @@ export default function ChatPage() {
                         className={styles.sendBtn}
                         disabled={(!inputText.trim() && attachedFiles.length === 0) || isStreaming || isTranscribing || isUploading}
                     >
-                        <Send size={18} />
+                        {imageModeEnabled ? <ImageIcon size={18} /> : <Send size={18} />}
                     </button>
                 </div>
             </div>

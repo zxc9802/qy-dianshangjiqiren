@@ -1,11 +1,16 @@
 export type ExtensionBotKind = 'builtin' | 'custom';
 export type ExtensionChatMode = 'summary' | 'chat';
 export type TranscriptSource = 'dom' | 'track' | 'page' | 'none';
+export type ExtensionMessageKind = 'text' | 'image';
 
 export interface ExtensionChatMessage {
     role: 'user' | 'assistant';
     content: string;
     createdAt?: string;
+    kind?: ExtensionMessageKind;
+    imageUrls?: string[];
+    imagePrompt?: string;
+    aspectRatio?: string;
 }
 
 export interface ExtensionBot {
@@ -58,6 +63,17 @@ export interface PageInsightRecord {
     updatedAt: string;
     pageContext: PageContext;
     chatTranscript: ExtensionChatMessage[];
+}
+
+export interface ExtensionImageGenerationItem {
+    id: string;
+    prompt: string;
+    aspectRatio: string;
+    count: number;
+    status: 'success' | 'partial' | 'failed' | string;
+    errorMessage: string | null;
+    resultImagePaths: string[];
+    createdAt: string;
 }
 
 export interface LocalPageSession {

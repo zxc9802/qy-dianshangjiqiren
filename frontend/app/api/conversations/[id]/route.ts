@@ -2,6 +2,7 @@
 import { getUserId, AppError, errorResponse } from '../../../lib/auth';
 import { prisma, withPrismaRetry } from '../../../lib/prisma';
 import { getConversationBotPayload } from '../../../lib/server-conversations';
+import { normalizeConversationMessage } from '../../../lib/server-conversation-message-normalizer';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
@@ -41,6 +42,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         }
 
         const bot = getConversationBotPayload(conversation);
+        const normalizedMessages = await Promise.all(conversation.messages.map(async (message) => ({
+            message,
+            normalized: await normalizeConversationMessage({
+                content: message.content,
+                inputType: message.inputType,
+            }),
+        })));
+        const mutatedUpdates = normalizedMessages
+            .filter((item) => item.normalized.mutated)
+            .map((item) => prisma.message.update({
+                where: { id: item.message.id },
+                data: { content: item.normalized.normalizedContent },
+            }));
+
+        if (mutatedUpdates.length) {
+            await prisma.$transaction(mutatedUpdates);
+        }
 
         return Response.json({
             success: true,
@@ -53,13 +71,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                 updatedAt: conversation.updatedAt.toISOString(),
                 bot,
                 messageCount: conversation.messages.length,
-                messages: conversation.messages.map((message) => ({
+                messages: normalizedMessages.map(({ message, normalized }) => ({
                     id: message.id,
                     role: message.role,
-                    content: message.content,
+                    content: normalized.decoded.content,
                     inputType: message.inputType,
                     suggestions: message.suggestions,
                     createdAt: message.createdAt.toISOString(),
+                    kind: normalized.decoded.kind,
+                    imageUrls: normalized.decoded.imageUrls,
+                    imagePrompt: normalized.decoded.imagePrompt,
+                    aspectRatio: normalized.decoded.aspectRatio,
                     attachments: message.attachments.map((attachment) => ({
                         id: attachment.id,
                         fileType: attachment.fileType,

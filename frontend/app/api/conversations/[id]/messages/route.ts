@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
 import { readServerEnv } from '../../../../lib/server-env';
 import { getUserId, AppError, errorResponse } from '../../../../lib/auth';
+import {
+    buildConversationImageSummary,
+    encodeConversationImageMessage,
+    isConversationImageTurn,
+} from '../../../../lib/conversation-message-codec';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 
@@ -31,7 +36,7 @@ function stripSuggestionBlock(text: string): string {
 function extractSuggestions(text: string): { suggestions: string[]; cleanResponse: string } {
     const suggestionMatch = text.match(SUGGESTION_BLOCK_PATTERN);
     let suggestions: string[] = [];
-    let cleanResponse = stripSuggestionBlock(text).trim();
+    const cleanResponse = stripSuggestionBlock(text).trim();
 
     if (suggestionMatch) {
         try {
@@ -54,14 +59,19 @@ function normalizeStreamUrl(rawUrl?: string): string {
     return url;
 }
 
+function buildSameOriginUrl(req: NextRequest, pathname: string): string {
+    return new URL(pathname, req.url).toString();
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
         const userId = await getUserId(req);
         const { id: conversationId } = await params;
-        const { content, displayContent, inputType } = z.object({
+        const { content, displayContent, inputType, aspectRatio } = z.object({
             content: z.string().min(1),
             displayContent: z.string().optional(),
-            inputType: z.enum(['text', 'voice', 'file']).default('text'),
+            inputType: z.enum(['text', 'voice', 'file', 'image']).default('text'),
+            aspectRatio: z.string().min(3).max(10).optional(),
         }).parse(await req.json());
 
         const conversation = await prisma.conversation.findFirst({
@@ -126,10 +136,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
         });
 
-        const apiMessages = conversation.messages.map((message) => ({
-            role: message.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: message.content }],
-        }));
+        const apiMessages = conversation.messages
+            .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
+            .map((message) => ({
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: message.content }],
+            }));
         apiMessages.push({ role: 'user', parts: [{ text: content }] });
 
         const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
@@ -143,6 +155,92 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 let fullResponse = '';
                 let streamedVisibleLength = 0;
                 try {
+                    if (inputType === 'image') {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'status',
+                            content: '正在调用图片模型，通常需要 10 到 40 秒。',
+                        })}\n\n`));
+
+                        const authorization = req.headers.get('authorization');
+                        const cookie = req.headers.get('cookie');
+                        const imageResponse = await fetch(buildSameOriginUrl(req, '/api/image-generations'), {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                ...(authorization ? { Authorization: authorization } : {}),
+                                ...(cookie ? { Cookie: cookie } : {}),
+                            },
+                            body: JSON.stringify({
+                                prompt: content,
+                                aspectRatio: aspectRatio || '1:1',
+                                count: 1,
+                            }),
+                        });
+
+                        const imagePayload = await imageResponse.json();
+                        if (!imageResponse.ok) {
+                            throw new Error(imagePayload?.error || imagePayload?.message || '图片生成失败');
+                        }
+
+                        const generated = imagePayload?.data as {
+                            prompt: string;
+                            aspectRatio: string;
+                            errorMessage: string | null;
+                            resultImagePaths: string[];
+                        };
+
+                        if (!generated?.resultImagePaths?.length) {
+                            throw new Error(generated?.errorMessage || '图片生成失败');
+                        }
+
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'status',
+                            content: '图片已生成，正在整理结果。',
+                        })}\n\n`));
+
+                        const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);
+                        const encodedAssistantMessage = encodeConversationImageMessage({
+                            content: assistantText,
+                            imageUrls: generated.resultImagePaths,
+                            imagePrompt: generated.prompt,
+                            aspectRatio: generated.aspectRatio,
+                        });
+
+                        await prisma.$transaction(async (tx) => {
+                            await tx.message.create({
+                                data: {
+                                    conversationId,
+                                    role: 'assistant',
+                                    content: encodedAssistantMessage,
+                                    inputType: 'image',
+                                },
+                            });
+
+                            await tx.conversation.update({
+                                where: { id: conversationId },
+                                data: {
+                                    title: shouldSetInitialTitle
+                                        ? buildConversationTitle(bot.name, [{ role: 'user', content: displayContent || content }])
+                                        : conversation.title,
+                                    updatedAt: new Date(),
+                                },
+                            });
+                        });
+
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'image',
+                            content: {
+                                content: assistantText,
+                                kind: 'image',
+                                imageUrls: generated.resultImagePaths,
+                                imagePrompt: generated.prompt,
+                                aspectRatio: generated.aspectRatio,
+                            },
+                        })}\n\n`));
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                        return;
+                    }
+
                     const upstream = await fetch(apiUrl, {
                         method: 'POST',
                         headers: {

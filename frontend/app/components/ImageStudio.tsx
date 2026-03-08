@@ -383,7 +383,8 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
 
             const response = await api.generateImage(body);
             setLatestResult(response.data);
-            await loadRecent();
+            setIsGenerating(false);
+            void loadRecent();
         } catch (err) {
             setError(err instanceof Error ? err.message : '生成失败，请重试');
         } finally {

@@ -2,10 +2,13 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
 import { getUserId, AppError, errorResponse } from '../../lib/auth';
+import { normalizeGeneratedImagePaths, persistBase64Image } from '../../lib/generated-image-storage';
 import { readServerEnv } from '../../lib/server-env';
 
 const MAX_PROMPT_LENGTH = 2000;
 const DEFAULT_MODEL_URL = 'https://yunwu.ai/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
+const IMAGE_API_TIMEOUT_MS = 45000;
+const MAX_IMAGE_ATTEMPTS = 2;
 
 const payloadSchema = z.object({
     prompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
@@ -73,7 +76,7 @@ async function generateOneImage(args: {
     referenceStrength: number; referenceImage?: { mimeType: string; base64: string };
     imageIndex: number;
 }): Promise<{ base64?: string; mimeType?: string; error?: string }> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < MAX_IMAGE_ATTEMPTS; attempt++) {
         const parts: Array<Record<string, unknown>> = [];
         if (args.referenceImage) {
             parts.push({ inlineData: { mimeType: args.referenceImage.mimeType, data: args.referenceImage.base64 } });
@@ -87,10 +90,13 @@ async function generateOneImage(args: {
             }),
         });
 
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), IMAGE_API_TIMEOUT_MS);
         try {
             const response = await fetch(args.apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
@@ -101,21 +107,26 @@ async function generateOneImage(args: {
             });
 
             if (!response.ok) {
-                if (attempt === 2) return { error: `Image API failed: ${response.status}` };
+                if (attempt === MAX_IMAGE_ATTEMPTS - 1) return { error: `Image API failed: ${response.status}` };
                 continue;
             }
 
             const data = await response.json();
             const imagePart = extractImagePart(data);
             if (!imagePart) {
-                if (attempt === 2) return { error: 'No image data returned' };
+                if (attempt === MAX_IMAGE_ATTEMPTS - 1) return { error: 'No image data returned' };
                 continue;
             }
 
             // Return base64 directly (stored in DB instead of filesystem)
             return { base64: imagePart.data, mimeType: imagePart.mimeType };
         } catch (error) {
-            if (attempt === 2) return { error: error instanceof Error ? error.message : 'Generation failed' };
+            const message = error instanceof Error && error.name === 'AbortError'
+                ? `Image generation timed out after ${Math.round(IMAGE_API_TIMEOUT_MS / 1000)}s`
+                : error instanceof Error ? error.message : 'Generation failed';
+            if (attempt === MAX_IMAGE_ATTEMPTS - 1) return { error: message };
+        } finally {
+            clearTimeout(timeout);
         }
     }
     return { error: 'Generation failed after retries' };
@@ -156,7 +167,22 @@ export async function GET(req: NextRequest) {
         const items = hasMore ? rows.slice(0, limit) : rows;
         const nextCursor = hasMore ? items[items.length - 1]?.id : null;
 
-        return Response.json({ success: true, data: { items, nextCursor } });
+        const normalizedItems = await Promise.all(items.map(async (item) => {
+            const normalized = await normalizeGeneratedImagePaths(item.resultImagePaths);
+            if (normalized.mutated) {
+                await prisma.imageGeneration.update({
+                    where: { id: item.id },
+                    data: { resultImagePaths: normalized.paths },
+                });
+            }
+
+            return {
+                ...item,
+                resultImagePaths: normalized.paths,
+            };
+        }));
+
+        return Response.json({ success: true, data: { items: normalizedItems, nextCursor } });
     } catch (err) {
         return errorResponse(err);
     }
@@ -189,10 +215,11 @@ export async function POST(req: NextRequest) {
             results.push(...chunkResults);
         }
 
-        // Store base64 images as data URIs in resultImagePaths
-        const resultImagePaths = results
-            .filter(r => r.base64 && r.mimeType)
-            .map(r => `data:${r.mimeType};base64,${r.base64}`);
+        const resultImagePaths = await Promise.all(
+            results
+                .filter((result): result is { base64: string; mimeType: string; error?: string } => Boolean(result.base64 && result.mimeType))
+                .map((result) => persistBase64Image(result.base64, result.mimeType)),
+        );
         const errors = results.filter(r => r.error).map(r => r.error!);
 
         const status = resultImagePaths.length === 0 ? 'failed' : errors.length > 0 ? 'partial' : 'success';
@@ -209,7 +236,9 @@ export async function POST(req: NextRequest) {
                 lighting: parsed.lighting,
                 referenceStrength: parsed.referenceStrength,
                 count: parsed.count,
-                referenceImagePath: parsed.referenceImage ? `data:${parsed.referenceImageMime};base64,${parsed.referenceImage}` : null,
+                referenceImagePath: parsed.referenceImage && parsed.referenceImageMime
+                    ? await persistBase64Image(parsed.referenceImage, parsed.referenceImageMime)
+                    : null,
                 resultImagePaths,
                 status,
                 errorMessage: errors.length ? errors.join('\n') : null,

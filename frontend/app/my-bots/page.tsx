@@ -57,6 +57,18 @@ interface CustomBot {
     createdAt: string;
 }
 
+type PendingDocStatus = 'parsing' | 'ready' | 'saving' | 'error';
+
+interface PendingBotDocument {
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    parsedText: string;
+    status: PendingDocStatus;
+    errorMessage?: string;
+}
+
 const API_BASE = '/api';
 
 function getToken(): string | null {
@@ -97,14 +109,20 @@ export default function MyBotsPage() {
     const [systemPrompt, setSystemPrompt] = useState('');
 
     // Document upload
-    const [uploadingDoc, setUploadingDoc] = useState(false);
     const [docs, setDocs] = useState<BotDocument[]>([]);
-    // Pending docs queued during creation (not yet saved to backend)
-    const [pendingDocs, setPendingDocs] = useState<Array<{ fileName: string; fileType: string; fileSize: number; parsedText: string }>>([]);
+    // Pending docs queued during creation or background parsing
+    const [pendingDocs, setPendingDocs] = useState<PendingBotDocument[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Selected icon key
     const [selectedIcon, setSelectedIcon] = useState('bot');
+    const hasPendingDocWork = pendingDocs.some((doc) => doc.status === 'parsing' || doc.status === 'saving');
+    const hasPendingDocError = pendingDocs.some((doc) => doc.status === 'error');
+    const uploadingDoc = pendingDocs.some((doc) => doc.status === 'parsing');
+
+    const updatePendingDoc = useCallback((docId: string, updater: (doc: PendingBotDocument) => PendingBotDocument) => {
+        setPendingDocs((prev) => prev.map((doc) => (doc.id === docId ? updater(doc) : doc)));
+    }, []);
 
     const loadBots = useCallback(async () => {
         try {
@@ -148,6 +166,7 @@ export default function MyBotsPage() {
         setDescription(bot.description);
         setSystemPrompt(bot.systemPrompt);
         setDocs(bot.documents || []);
+        setPendingDocs([]);
         setSelectedIcon(bot.icon || 'bot');
         setShowForm(true);
         setError('');
@@ -156,6 +175,8 @@ export default function MyBotsPage() {
     const handleSave = async () => {
         if (!name.trim()) { setError('请输入智能体名称'); return; }
         if (!systemPrompt.trim()) { setError('请输入系统提示词'); return; }
+        if (hasPendingDocWork) { setError('文档还在解析或上传中，请稍候再保存'); return; }
+        if (hasPendingDocError) { setError('请先移除解析失败的文档，再保存智能体'); return; }
         setSaving(true);
         setError('');
 
@@ -176,11 +197,22 @@ export default function MyBotsPage() {
                 botId = res.data.id;
             }
 
-            // Upload pending docs (queued during creation)
-            for (const doc of pendingDocs) {
-                await apiFetch(`/custom-bots/${botId}/documents`, {
+            const readyPendingDocs = pendingDocs.filter((doc) => doc.status === 'ready');
+            if (!editingBot && readyPendingDocs.length > 0) {
+                setPendingDocs((prev) => prev.map((doc) => (
+                    doc.status === 'ready' ? { ...doc, status: 'saving', errorMessage: undefined } : doc
+                )));
+
+                await apiFetch(`/custom-bots/${botId}/documents/batch`, {
                     method: 'POST',
-                    body: JSON.stringify(doc),
+                    body: JSON.stringify({
+                        documents: readyPendingDocs.map((doc) => ({
+                            fileName: doc.fileName,
+                            fileType: doc.fileType,
+                            fileSize: doc.fileSize,
+                            parsedText: doc.parsedText,
+                        })),
+                    }),
                 });
             }
 
@@ -188,6 +220,9 @@ export default function MyBotsPage() {
             resetForm();
             await loadBots();
         } catch (err) {
+            setPendingDocs((prev) => prev.map((doc) => (
+                doc.status === 'saving' ? { ...doc, status: 'ready' } : doc
+            )));
             setError(err instanceof Error ? err.message : '保存失败');
         } finally {
             setSaving(false);
@@ -211,11 +246,23 @@ export default function MyBotsPage() {
         const totalDocs = docs.length + pendingDocs.length;
         if (totalDocs >= 10) { setError('最多只能上传 10 个文档'); return; }
 
-        setUploadingDoc(true);
         setError('');
 
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+        const pendingDocId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const pendingDocBase: PendingBotDocument = {
+            id: pendingDocId,
+            fileName: file.name,
+            fileType: isImage ? 'image' : ext,
+            fileSize: file.size,
+            parsedText: '',
+            status: 'parsing',
+        };
+
+        setPendingDocs((prev) => [...prev, pendingDocBase]);
+
         try {
-            // Parse the document using existing frontend upload API
             const formData = new FormData();
             formData.append('file', file);
 
@@ -225,9 +272,6 @@ export default function MyBotsPage() {
                 throw new Error(errData.error || '文件解析失败');
             }
             const parseData = await parseRes.json();
-
-            const ext = file.name.split('.').pop()?.toLowerCase() || '';
-            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
             const docData = {
                 fileName: file.name,
                 fileType: isImage ? 'image' : ext,
@@ -236,25 +280,39 @@ export default function MyBotsPage() {
             };
 
             if (editingBot) {
-                // Editing: save to backend immediately
+                updatePendingDoc(pendingDocId, (doc) => ({ ...doc, parsedText: docData.parsedText, status: 'saving', errorMessage: undefined }));
                 const res = await apiFetch(`/custom-bots/${editingBot.id}/documents`, {
                     method: 'POST',
                     body: JSON.stringify(docData),
                 });
+                setPendingDocs((prev) => prev.filter((doc) => doc.id !== pendingDocId));
                 setDocs(prev => [res.data, ...prev]);
             } else {
-                // Creating: queue locally, upload after save
-                setPendingDocs(prev => [...prev, docData]);
+                updatePendingDoc(pendingDocId, (doc) => ({
+                    ...doc,
+                    parsedText: docData.parsedText,
+                    status: 'ready',
+                    errorMessage: undefined,
+                }));
             }
         } catch (err) {
+            updatePendingDoc(pendingDocId, (doc) => ({
+                ...doc,
+                status: 'error',
+                errorMessage: err instanceof Error ? err.message : '文档上传失败',
+            }));
             setError(err instanceof Error ? err.message : '文档上传失败');
         } finally {
-            setUploadingDoc(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
 
     const handleDeleteDoc = async (docId: string) => {
+        if (pendingDocs.some((doc) => doc.id === docId)) {
+            setPendingDocs(prev => prev.filter((doc) => doc.id !== docId));
+            return;
+        }
+
         if (editingBot) {
             // Saved doc - delete from backend
             try {
@@ -263,9 +321,6 @@ export default function MyBotsPage() {
             } catch (err) {
                 alert(err instanceof Error ? err.message : '删除失败');
             }
-        } else {
-            // Pending doc - remove from local queue
-            setPendingDocs(prev => prev.filter((_, i) => `pending-${i}` !== docId));
         }
     };
 
@@ -425,25 +480,41 @@ export default function MyBotsPage() {
                                             </div>
                                         ))}
                                         {/* Pending docs (for creating) */}
-                                        {pendingDocs.map((doc, i) => (
-                                            <div key={`pending-${i}`} className={styles.docItem}>
+                                        {pendingDocs.map((doc) => (
+                                            <div
+                                                key={doc.id}
+                                                className={`${styles.docItem} ${doc.status === 'error' ? styles.docItemError : ''}`}
+                                            >
                                                 {getDocIcon(doc.fileType)}
                                                 <span className={styles.docName}>{doc.fileName}</span>
                                                 <span className={styles.docSize}>{formatFileSize(doc.fileSize)}</span>
-                                                <button onClick={() => handleDeleteDoc(`pending-${i}`)} className={styles.docDeleteBtn}>
+                                                <span className={`${styles.docStatus} ${styles[`docStatus${doc.status[0].toUpperCase()}${doc.status.slice(1)}`]}`}>
+                                                    {doc.status === 'parsing' && <><Loader2 size={12} className="animate-spin" /> 解析中</>}
+                                                    {doc.status === 'ready' && '待创建'}
+                                                    {doc.status === 'saving' && <><Loader2 size={12} className="animate-spin" /> 保存中</>}
+                                                    {doc.status === 'error' && '解析失败'}
+                                                </span>
+                                                <button onClick={() => handleDeleteDoc(doc.id)} className={styles.docDeleteBtn}>
                                                     <X size={14} />
                                                 </button>
                                             </div>
                                         ))}
                                     </div>
 
+                                    {hasPendingDocWork && (
+                                        <p className={styles.queueHint}>文档正在后台解析，期间你可以继续填写名称和提示词。</p>
+                                    )}
+                                    {hasPendingDocError && (
+                                        <p className={styles.queueHintError}>有文档解析失败，请删除失败项后再保存。</p>
+                                    )}
+
                                     <button
                                         className={styles.uploadDocBtn}
                                         onClick={() => fileInputRef.current?.click()}
-                                        disabled={uploadingDoc || (docs.length + pendingDocs.length) >= 10}
+                                        disabled={saving || (docs.length + pendingDocs.length) >= 10}
                                     >
                                         {uploadingDoc ? (
-                                            <><Loader2 size={14} className="animate-spin" /> 上传中...</>
+                                            <><Loader2 size={14} className="animate-spin" /> 正在解析文档...</>
                                         ) : (
                                             <><Upload size={14} /> 上传文档 ({docs.length + pendingDocs.length}/10)</>
                                         )}
@@ -461,8 +532,8 @@ export default function MyBotsPage() {
                                     <button onClick={() => { setShowForm(false); resetForm(); }} className={styles.cancelBtn}>
                                         取消
                                     </button>
-                                    <button onClick={handleSave} className={styles.saveBtn} disabled={saving}>
-                                        {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : <><Save size={14} /> {editingBot ? '保存修改' : '创建智能体'}</>}
+                                    <button onClick={handleSave} className={styles.saveBtn} disabled={saving || hasPendingDocWork}>
+                                        {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : hasPendingDocWork ? <><Loader2 size={14} className="animate-spin" /> 等待文档完成...</> : <><Save size={14} /> {editingBot ? '保存修改' : '创建智能体'}</>}
                                     </button>
                                 </div>
                             </div>

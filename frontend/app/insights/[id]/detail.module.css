@@ -200,6 +200,54 @@
     color: #0f172a;
 }
 
+.imageMessage {
+    display: grid;
+    gap: 14px;
+}
+
+.imagePrompt {
+    border-radius: 16px;
+    padding: 12px 14px;
+    background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+    border: 1px solid rgba(191, 219, 254, 0.9);
+}
+
+.imagePrompt span {
+    display: inline-flex;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #2563eb;
+}
+
+.imagePrompt p {
+    margin: 0;
+    color: #334155;
+    line-height: 1.7;
+}
+
+.imageGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.imageLink {
+    display: block;
+    overflow: hidden;
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: #fff;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.imageThumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+}
+
 .loadingState {
     min-height: 100vh;
     display: flex;

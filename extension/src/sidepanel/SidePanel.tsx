@@ -1,15 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { fetchExtensionBots, fetchSession, saveInsight, streamExtensionChat } from '../shared/api';
+import {
+  fetchExtensionBots,
+  fetchSession,
+  generateExtensionImage,
+  saveInsight,
+  streamExtensionChat,
+} from '../shared/api';
 import { createPageSession } from '../shared/page-session';
 import { RichTextContent } from '../shared/RichTextContent';
 import { getActiveTab, getPageContext, openMainSite, syncAuthFromMainSiteTabs } from '../shared/runtime';
-import { getPageSession, setPageSession } from '../shared/storage';
-import type { ExtensionBot, ExtensionChatMessage, ExtensionSessionData, LocalPageSession, PageContext } from '../shared/types';
+import { getAuthToken, getPageSession, getSessionData, setPageSession, setSiteBaseUrl } from '../shared/storage';
+import type {
+  ExtensionBot,
+  ExtensionChatMessage,
+  ExtensionImageGenerationItem,
+  ExtensionSessionData,
+  LocalPageSession,
+  PageContext,
+} from '../shared/types';
 
 type AuthState = 'checking' | 'ready' | 'missing';
 
 const DEFAULT_BOT_ID = '6';
+const IMAGE_MODE_ASPECT_RATIO = '1:1';
 
 function buildAssistantError(error: unknown): ExtensionChatMessage {
   return {
@@ -19,16 +33,33 @@ function buildAssistantError(error: unknown): ExtensionChatMessage {
   };
 }
 
-function getPageSnippet(pageContext: PageContext | null | undefined): string {
-  if (!pageContext) return '';
+function buildImageAssistantMessage(result: ExtensionImageGenerationItem): ExtensionChatMessage {
+  const imageUrls = Array.isArray(result.resultImagePaths) ? result.resultImagePaths.filter(Boolean) : [];
 
-  const source = pageContext.selectedText
-    || pageContext.metaDescription
-    || pageContext.mainText
-    || pageContext.videoDescription
-    || '';
+  return {
+    role: 'assistant',
+    kind: 'image',
+    content: imageUrls.length > 0 ? `已生成 ${imageUrls.length} 张图片。` : '已生成图片。',
+    imageUrls,
+    imagePrompt: result.prompt,
+    aspectRatio: result.aspectRatio,
+    createdAt: new Date().toISOString(),
+  };
+}
 
-  return source.trim().slice(0, 260);
+function buildChatRequestMessages(messages: ExtensionChatMessage[]): ExtensionChatMessage[] {
+  return messages
+    .filter((message) => message.kind !== 'image')
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt,
+    }));
+}
+
+function readPointsBalance(session: ExtensionSessionData | null): number | null {
+  const value = (session?.user as { pointsBalance?: unknown } | undefined)?.pointsBalance;
+  return typeof value === 'number' ? value : null;
 }
 
 export default function SidePanel() {
@@ -47,6 +78,7 @@ export default function SidePanel() {
   const [chatError, setChatError] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState('');
+  const [imageModeEnabled, setImageModeEnabled] = useState(false);
 
   const selectedBot = useMemo(
     () => bots.find((bot) => bot.botId === pageSession?.botId) || bots.find((bot) => bot.botId === DEFAULT_BOT_ID) || null,
@@ -63,9 +95,9 @@ export default function SidePanel() {
     return Array.from(groupMap.entries());
   }, [bots]);
 
-  const pageSnippet = useMemo(() => getPageSnippet(pageSession?.pageContext), [pageSession?.pageContext]);
   const renderedSummary = summaryLoading && summaryBuffer ? summaryBuffer : pageSession?.summary || '';
   const canSaveInsight = Boolean(pageSession?.summary || pageSession?.messages.length);
+  const pointsBalance = useMemo(() => readPointsBalance(session), [session]);
 
   async function persistSession(nextSession: LocalPageSession) {
     setPageSessionState(nextSession);
@@ -105,7 +137,27 @@ export default function SidePanel() {
   async function refreshAuth() {
     setAuthState('checking');
     try {
-      await syncAuthFromMainSiteTabs();
+      const [storedToken, storedSession] = await Promise.all([
+        getAuthToken(),
+        getSessionData(),
+      ]);
+
+      if (storedToken && storedSession) {
+        await setSiteBaseUrl(storedSession.siteBaseUrl);
+        setSession(storedSession);
+        setAuthState('ready');
+        return;
+      }
+
+      if (!storedToken) {
+        const synced = await syncAuthFromMainSiteTabs();
+        if (!synced) {
+          setSession(null);
+          setAuthState('missing');
+          return;
+        }
+      }
+
       const nextSession = await fetchSession();
       setSession(nextSession);
       setAuthState(nextSession ? 'ready' : 'missing');
@@ -186,6 +238,7 @@ export default function SidePanel() {
       contextSnapshot: pageSession.contextSnapshot,
       hasPendingContext: pageSession.hasPendingContext,
       savedInsightId: pageSession.savedInsightId,
+      messages: pageSession.messages,
     });
 
     await persistSession(resetSession);
@@ -267,11 +320,58 @@ export default function SidePanel() {
   async function handleSend() {
     if (!pageSession || !draft.trim() || streaming || !selectedBot) return;
 
+    const prompt = draft.trim();
     const userMessage: ExtensionChatMessage = {
       role: 'user',
-      content: draft.trim(),
+      content: prompt,
+      kind: imageModeEnabled ? 'image' : 'text',
+      imagePrompt: imageModeEnabled ? prompt : undefined,
+      aspectRatio: imageModeEnabled ? IMAGE_MODE_ASPECT_RATIO : undefined,
       createdAt: new Date().toISOString(),
     };
+
+    setDraft('');
+    setChatError('');
+    setStreamBuffer('');
+    setStreaming(true);
+
+    if (imageModeEnabled) {
+      const requestSession: LocalPageSession = {
+        ...pageSession,
+        messages: [...pageSession.messages, userMessage],
+        updatedAt: new Date().toISOString(),
+      };
+
+      await persistSession(requestSession);
+
+      try {
+        const result = await generateExtensionImage({
+          prompt,
+          aspectRatio: IMAGE_MODE_ASPECT_RATIO,
+          count: 1,
+        });
+
+        if (!result.resultImagePaths?.length) {
+          throw new Error(result.errorMessage || '图片生成失败，请稍后重试。');
+        }
+
+        await persistSession({
+          ...requestSession,
+          messages: [...requestSession.messages, buildImageAssistantMessage(result)],
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        setChatError(error instanceof Error ? error.message : '图片生成失败');
+        await persistSession({
+          ...requestSession,
+          messages: [...requestSession.messages, buildAssistantError(error)],
+          updatedAt: new Date().toISOString(),
+        });
+      } finally {
+        setStreaming(false);
+      }
+      return;
+    }
 
     let workingSession = pageSession;
     let contextToSend: PageContext | undefined;
@@ -294,10 +394,6 @@ export default function SidePanel() {
       updatedAt: new Date().toISOString(),
     };
 
-    setDraft('');
-    setChatError('');
-    setStreamBuffer('');
-    setStreaming(true);
     await persistSession(requestSession);
 
     try {
@@ -306,7 +402,7 @@ export default function SidePanel() {
         {
           botId: requestSession.botId,
           mode: 'chat',
-          messages: requestSession.messages,
+          messages: buildChatRequestMessages(requestSession.messages),
           pageContext: contextToSend,
         },
         (chunk) => {
@@ -315,31 +411,29 @@ export default function SidePanel() {
         },
       );
 
-      const nextSession: LocalPageSession = {
+      await persistSession({
         ...requestSession,
         hasPendingContext: false,
-        messages: [...requestSession.messages, {
-          role: 'assistant',
-          content: assistantText,
-          createdAt: new Date().toISOString(),
-        }],
+        messages: [
+          ...requestSession.messages,
+          {
+            role: 'assistant',
+            content: assistantText,
+            createdAt: new Date().toISOString(),
+          },
+        ],
         updatedAt: new Date().toISOString(),
-      };
-
+      });
       setStreamBuffer('');
-      await persistSession(nextSession);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : '消息发送失败');
       setStreamBuffer('');
-
-      const nextSession: LocalPageSession = {
+      await persistSession({
         ...requestSession,
         hasPendingContext: false,
         messages: [...requestSession.messages, buildAssistantError(error)],
         updatedAt: new Date().toISOString(),
-      };
-
-      await persistSession(nextSession);
+      });
     } finally {
       setStreaming(false);
     }
@@ -372,13 +466,18 @@ export default function SidePanel() {
     }
   }
 
+  const assistantName = selectedBot?.name || '插件助手';
+  const statusText = authState === 'ready'
+    ? `${session?.user.nickname || session?.user.account}${typeof pointsBalance === 'number' ? ` · ${pointsBalance} 积分` : ''}`
+    : '请先在主站登录，再回到侧边栏使用总结、对话和绘图功能。';
+
   return (
     <div className="sidepanel-shell">
       <header className="sidepanel-header">
         <div>
           <div className="eyebrow">浏览器插件</div>
           <h1>网页助手</h1>
-          <p className="header-copy">先总结，再围绕当前网页继续追问。</p>
+          <p className="header-copy">先总结，再围绕当前网页继续追问，必要时也可以直接出图。</p>
         </div>
         <button className="ghost-btn" onClick={() => void loadActivePage()}>
           刷新页面
@@ -391,11 +490,7 @@ export default function SidePanel() {
         </div>
         <div className="status-main">
           <strong>{pageSession?.pageTitle || '当前页面'}</strong>
-          <span>
-            {authState === 'ready'
-              ? `${session?.user.nickname || session?.user.account} · ${session?.user.pointsBalance} 积分`
-              : '请先在主站登录，再回到侧边栏使用总结和对话功能。'}
-          </span>
+          <span>{statusText}</span>
         </div>
       </section>
 
@@ -423,9 +518,7 @@ export default function SidePanel() {
         <div className="section-head">
           <div>
             <div className="panel-title">总结当前页面</div>
-            <div className="panel-subtitle">
-              优先读取正文和字幕，不做音频转写。
-            </div>
+            <div className="panel-subtitle">优先读取正文和字幕，不做音频转写。</div>
           </div>
           <button
             className="primary-btn"
@@ -436,27 +529,13 @@ export default function SidePanel() {
           </button>
         </div>
 
-        <div className="page-card">
-          <div className="meta-row">
-            <span className="meta-chip">{pageSession?.pageContext.domain || '未识别域名'}</span>
-            <span className="meta-chip">{pageSession?.pageContext.hasVideo ? '视频页面' : '普通网页'}</span>
-            {pageSession?.pageContext.hasVideo ? (
-              <span className="meta-chip">字幕来源：{pageSession.pageContext.transcriptSource}</span>
-            ) : null}
-          </div>
-          <div className="page-title">{pageSession?.pageTitle || '当前页面尚未识别'}</div>
-          <div className="page-snippet">
-            {pageSnippet || '当前页面还没有可用的正文片段。你可以先刷新页面识别，或者切回正常网页再试。'}
-          </div>
-        </div>
-
         {renderedSummary ? (
           <div className={`summary-body ${summaryLoading ? 'is-streaming' : ''}`}>
             <RichTextContent content={renderedSummary} />
           </div>
         ) : (
           <div className="empty-block">
-            登录同步成功后，点击“立即总结”，这里会先给出当前页面的核心结论和要点。
+            登录同步成功后，点击“立即总结”，这里会给出当前页面的核心结论和要点。
           </div>
         )}
       </section>
@@ -465,9 +544,7 @@ export default function SidePanel() {
         <div className="section-head">
           <div>
             <div className="panel-title">用当前机器人对话</div>
-            <div className="panel-subtitle">
-              首次提问会自动注入当前页面快照，后续追问默认沿用这份上下文。
-            </div>
+            <div className="panel-subtitle">首次提问会自动注入当前页面快照，后续追问默认沿用这份上下文。</div>
           </div>
         </div>
 
@@ -531,20 +608,44 @@ export default function SidePanel() {
                 key={`${message.role}-${index}-${message.createdAt || ''}`}
                 className={`message-card ${message.role === 'user' ? 'user' : 'assistant'}`}
               >
-                <div className="message-role">{message.role === 'user' ? '你' : selectedBot?.name || '插件助手'}</div>
-                <RichTextContent content={message.content} className="message-rich" />
+                <div className="message-role">{message.role === 'user' ? '你' : assistantName}</div>
+                {message.kind === 'image' && message.imageUrls?.length ? (
+                  <div className="image-message">
+                    {message.content ? <RichTextContent content={message.content} className="message-rich" /> : null}
+                    <div className={`image-grid ${message.imageUrls.length === 1 ? 'single' : ''}`}>
+                      {message.imageUrls.map((imageUrl, imageIndex) => (
+                        <a
+                          key={`${imageUrl}-${imageIndex}`}
+                          href={imageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="image-link"
+                        >
+                          <img
+                            src={imageUrl}
+                            alt={`generated-${imageIndex + 1}`}
+                            className="image-thumb"
+                            loading="lazy"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <RichTextContent content={message.content} className="message-rich" />
+                )}
               </article>
             ))
           ) : (
             <div className="empty-state">
               <strong>还没有开始对话</strong>
-              <span>先做页面总结，或者直接对网页内容提问，侧边栏会自动带上当前页面上下文。</span>
+              <span>先做页面总结、直接提问，或开启绘图模式生成图片。</span>
             </div>
           )}
 
           {streaming && streamBuffer ? (
             <article className="message-card assistant streaming">
-              <div className="message-role">{selectedBot?.name || '插件助手'}</div>
+              <div className="message-role">{assistantName}</div>
               <RichTextContent content={streamBuffer} className="message-rich" />
             </article>
           ) : null}
@@ -552,25 +653,46 @@ export default function SidePanel() {
       </section>
 
       <footer className="composer">
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              void handleSend();
-            }
-          }}
-          placeholder="围绕当前网页继续提问。Enter 发送，Shift+Enter 换行。"
-          disabled={authState !== 'ready' || !pageSession || streaming}
-        />
-        <button
-          className="primary-btn send-btn"
-          onClick={() => void handleSend()}
-          disabled={!draft.trim() || streaming || authState !== 'ready' || !pageSession}
-        >
-          {streaming ? '生成中...' : '发送'}
-        </button>
+        <div className="composer-toolbar">
+          <button
+            type="button"
+            className={`mode-toggle ${imageModeEnabled ? 'active' : ''}`}
+            onClick={() => setImageModeEnabled((current) => !current)}
+            disabled={authState !== 'ready' || streaming}
+          >
+            {imageModeEnabled ? '绘图已开' : '绘图已关'}
+          </button>
+          <span className="composer-hint">
+            {imageModeEnabled
+              ? '开启后会直接调用绘图能力，当前输入会作为出图提示词，默认生成 1 张 1:1 图片。'
+              : '关闭时为普通对话模式。'}
+          </span>
+        </div>
+
+        <div className="composer-main">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void handleSend();
+              }
+            }}
+            placeholder={imageModeEnabled
+              ? '输入想生成的图片描述。Enter 发送，Shift+Enter 换行。'
+              : '围绕当前网页继续提问。Enter 发送，Shift+Enter 换行。'}
+            disabled={authState !== 'ready' || !pageSession || streaming}
+          />
+
+          <button
+            className="primary-btn send-btn"
+            onClick={() => void handleSend()}
+            disabled={!draft.trim() || streaming || authState !== 'ready' || !pageSession}
+          >
+            {streaming ? (imageModeEnabled ? '出图中...' : '生成中...') : (imageModeEnabled ? '生成图片' : '发送')}
+          </button>
+        </div>
       </footer>
     </div>
   );

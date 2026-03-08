@@ -7,8 +7,9 @@ import {
     getConversationBotPayload,
     resolveConversationBotTarget,
 } from '../../lib/server-conversations';
+import { normalizeConversationMessage } from '../../lib/server-conversation-message-normalizer';
 
-function serializeConversationSummary(conversation: {
+async function serializeConversationSummary(conversation: {
     id: string;
     title: string;
     isFavorited: boolean;
@@ -40,10 +41,27 @@ function serializeConversationSummary(conversation: {
         pointsPerUse: number;
         isActive: boolean;
     } | null;
-    messages: Array<{ id: string; role: string; content: string; createdAt: Date }>;
+    messages: Array<{ id: string; role: string; content: string; inputType: string; createdAt: Date }>;
     _count: { messages: number };
 }) {
     const bot = getConversationBotPayload(conversation);
+    const normalizedMessages = await Promise.all(conversation.messages.map(async (message) => ({
+        message,
+        normalized: await normalizeConversationMessage({
+            content: message.content,
+            inputType: message.inputType,
+        }),
+    })));
+    const mutatedUpdates = normalizedMessages
+        .filter((item) => item.normalized.mutated)
+        .map((item) => prisma.message.update({
+            where: { id: item.message.id },
+            data: { content: item.normalized.normalizedContent },
+        }));
+
+    if (mutatedUpdates.length) {
+        await prisma.$transaction(mutatedUpdates);
+    }
 
     return {
         id: conversation.id,
@@ -54,11 +72,16 @@ function serializeConversationSummary(conversation: {
         updatedAt: conversation.updatedAt.toISOString(),
         bot,
         messageCount: conversation._count.messages,
-        messages: conversation.messages.map((message) => ({
+        messages: normalizedMessages.map(({ message, normalized }) => ({
             id: message.id,
             role: message.role,
-            content: message.content,
+            content: normalized.decoded.content,
             createdAt: message.createdAt.toISOString(),
+            inputType: message.inputType,
+            kind: normalized.decoded.kind,
+            imageUrls: normalized.decoded.imageUrls,
+            imagePrompt: normalized.decoded.imagePrompt,
+            aspectRatio: normalized.decoded.aspectRatio,
         })),
     };
 }
@@ -110,7 +133,7 @@ export async function GET(req: NextRequest) {
                     messages: {
                         take: 1,
                         orderBy: { createdAt: 'desc' },
-                        select: { id: true, role: true, content: true, createdAt: true },
+                        select: { id: true, role: true, content: true, inputType: true, createdAt: true },
                     },
                     _count: { select: { messages: true } },
                 },
@@ -124,7 +147,7 @@ export async function GET(req: NextRequest) {
         return Response.json({
             success: true,
             data: {
-                conversations: conversations.map(serializeConversationSummary),
+                conversations: await Promise.all(conversations.map(serializeConversationSummary)),
                 total,
                 page,
                 limit,
@@ -172,13 +195,13 @@ export async function POST(req: NextRequest) {
                 messages: {
                     take: 1,
                     orderBy: { createdAt: 'desc' },
-                    select: { id: true, role: true, content: true, createdAt: true },
+                    select: { id: true, role: true, content: true, inputType: true, createdAt: true },
                 },
                 _count: { select: { messages: true } },
             },
         });
 
-        return Response.json({ success: true, data: serializeConversationSummary(conversation) }, { status: 201 });
+        return Response.json({ success: true, data: await serializeConversationSummary(conversation) }, { status: 201 });
     } catch (error) {
         return errorResponse(error);
     }

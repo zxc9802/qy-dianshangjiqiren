@@ -8,6 +8,10 @@ export interface ConversationMessage {
     role: 'user' | 'assistant';
     content: string;
     timestamp: number;
+    kind?: 'text' | 'image';
+    imageUrls?: string[];
+    imagePrompt?: string;
+    aspectRatio?: string;
 }
 
 export interface Conversation {
@@ -39,13 +43,26 @@ interface ConversationsState {
 }
 
 function normalizeConversationMessage(
-    message: { id: string; role: string; content: string; createdAt?: string },
+    message: {
+        id: string;
+        role: string;
+        content: string;
+        createdAt?: string;
+        kind?: 'text' | 'image';
+        imageUrls?: string[];
+        imagePrompt?: string;
+        aspectRatio?: string;
+    },
 ): ConversationMessage {
     return {
         id: message.id,
         role: message.role === 'user' ? 'user' : 'assistant',
         content: message.content,
         timestamp: message.createdAt ? new Date(message.createdAt).getTime() : Date.now(),
+        kind: message.kind,
+        imageUrls: message.imageUrls,
+        imagePrompt: message.imagePrompt,
+        aspectRatio: message.aspectRatio,
     };
 }
 

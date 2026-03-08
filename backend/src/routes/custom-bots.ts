@@ -150,6 +150,49 @@ router.post('/:id/documents', async (req: AuthRequest, res: Response) => {
     res.json({ success: true, data: document });
 });
 
+router.post('/:id/documents/batch', async (req: AuthRequest, res: Response) => {
+    const botId = String(req.params.id);
+    const existing = await prisma.customBot.findFirst({
+        where: { id: botId, userId: req.userId!, isActive: true },
+        include: { documents: { select: { id: true } } },
+    });
+    if (!existing) throw new AppError('Custom bot not found', 404);
+
+    const rawDocuments = Array.isArray(req.body?.documents) ? req.body.documents : [];
+    if (rawDocuments.length === 0) {
+        res.json({ success: true, data: { count: 0 } });
+        return;
+    }
+
+    if (existing.documents.length + rawDocuments.length > 10) {
+        throw new AppError('A custom bot can have up to 10 documents', 400);
+    }
+
+    const documents = rawDocuments.map((item: unknown) => {
+        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+        const fileName = String(record.fileName || '').trim();
+        const parsedText = String(record.parsedText || '').trim();
+
+        if (!fileName || !parsedText) {
+            throw new AppError('Document content is empty', 400);
+        }
+
+        return {
+            customBotId: botId,
+            fileName,
+            fileType: String(record.fileType || 'unknown'),
+            fileSize: Number(record.fileSize) || 0,
+            parsedText,
+        };
+    });
+
+    await prisma.botDocument.createMany({
+        data: documents,
+    });
+
+    res.json({ success: true, data: { count: documents.length } });
+});
+
 router.delete('/:id/documents/:docId', async (req: AuthRequest, res: Response) => {
     const botId = String(req.params.id);
     const docId = String(req.params.docId);

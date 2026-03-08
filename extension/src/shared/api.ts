@@ -1,6 +1,7 @@
-﻿import type {
+import type {
   ExtensionBot,
   ExtensionChatMessage,
+  ExtensionImageGenerationItem,
   ExtensionSessionData,
   PageContext,
   PageInsightRecord,
@@ -191,4 +192,26 @@ export async function saveInsight(payload: {
   }
 
   return result.data as PageInsightRecord;
+}
+
+export async function generateExtensionImage(payload: {
+  prompt: string;
+  aspectRatio?: string;
+  count?: number;
+}): Promise<ExtensionImageGenerationItem> {
+  const response = await authorizedFetch('/api/image-generations', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt: payload.prompt,
+      aspectRatio: payload.aspectRatio || '1:1',
+      count: payload.count || 1,
+    }),
+  });
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error || result.message || 'Image generation failed.');
+  }
+
+  return result.data as ExtensionImageGenerationItem;
 }

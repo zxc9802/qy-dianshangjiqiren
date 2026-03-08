@@ -22,6 +22,10 @@ const chatMessageSchema = z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
     createdAt: z.string().optional(),
+    kind: z.enum(['text', 'image']).optional(),
+    imageUrls: z.array(z.string()).optional(),
+    imagePrompt: z.string().optional(),
+    aspectRatio: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {

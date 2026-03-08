@@ -165,11 +165,11 @@ select {
 }
 
 .page-card {
+  display: none;
   border-radius: 20px;
   padding: 16px;
   background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
   border: 1px solid #d8e7ff;
-  display: grid;
   gap: 12px;
 }
 
@@ -288,6 +288,37 @@ select {
   color: #0f172a;
 }
 
+.image-message {
+  display: grid;
+  gap: 12px;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.image-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.image-link {
+  display: block;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.image-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
 .empty-block {
   border-radius: 18px;
   padding: 16px;
@@ -307,9 +338,51 @@ select {
 }
 
 .composer {
+  display: grid;
+  gap: 12px;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.composer-main {
   display: flex;
   gap: 12px;
   align-items: flex-end;
+}
+
+.mode-toggle {
+  border-radius: 999px;
+  padding: 8px 14px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.mode-toggle.active {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #1d4ed8;
+}
+
+.mode-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.composer-hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .composer textarea {
@@ -430,10 +503,15 @@ select {
   .section-head,
   .row,
   .saved-banner,
-  .composer,
+  .composer-toolbar,
+  .composer-main,
   .status-bar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .image-grid {
+    grid-template-columns: 1fr;
   }
 
   .message-card {

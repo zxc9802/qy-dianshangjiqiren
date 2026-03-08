@@ -176,10 +176,46 @@ export default function InsightDetailPage() {
                                 <div className={styles.messageRole}>
                                     {message.role === 'user' ? '用户' : '插件助手'}
                                 </div>
-                                <div
-                                    className={`${styles.messageContent} ${styles.richText}`}
-                                    dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
-                                />
+                                {message.kind === 'image' && message.imageUrls?.length ? (
+                                    <div className={styles.imageMessage}>
+                                        {message.content ? (
+                                            <div
+                                                className={`${styles.messageContent} ${styles.richText}`}
+                                                dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
+                                            />
+                                        ) : null}
+                                        {message.imagePrompt ? (
+                                            <div className={styles.imagePrompt}>
+                                                <span>绘图提示词</span>
+                                                <p>{message.imagePrompt}</p>
+                                            </div>
+                                        ) : null}
+                                        <div className={styles.imageGrid}>
+                                            {message.imageUrls.map((imageUrl, imageIndex) => (
+                                                <a
+                                                    key={`${imageUrl}-${imageIndex}`}
+                                                    href={imageUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className={styles.imageLink}
+                                                >
+                                                    {/* eslint-disable-next-line @next/next/no-img-element -- data URI previews should render directly without Next image optimization */}
+                                                    <img
+                                                        src={imageUrl}
+                                                        alt={`generated-${imageIndex + 1}`}
+                                                        className={styles.imageThumb}
+                                                        loading="lazy"
+                                                    />
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div
+                                        className={`${styles.messageContent} ${styles.richText}`}
+                                        dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
+                                    />
+                                )}
                             </article>
                         ))
                     )}

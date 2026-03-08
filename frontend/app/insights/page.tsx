@@ -20,6 +20,27 @@ function getInsightPreview(insight: PageInsightInfo): string {
         || '暂无摘要内容。';
 }
 
+function getInsightCardPreview(insight: PageInsightInfo): string {
+    const fallbackPreview = getInsightPreview(insight);
+
+    if (insight.summary) {
+        return insight.summary;
+    }
+
+    const assistantMessage = insight.chatTranscript.find((item) => item.role === 'assistant');
+    if (!assistantMessage) {
+        return fallbackPreview;
+    }
+
+    if (assistantMessage.kind === 'image') {
+        return assistantMessage.imagePrompt
+            ? `绘图提示词：${assistantMessage.imagePrompt}`
+            : assistantMessage.content || fallbackPreview;
+    }
+
+    return assistantMessage.content || fallbackPreview;
+}
+
 export default function InsightsPage() {
     const router = useRouter();
     const { user, isAuthenticated, isLoading, loadUser } = useAuthStore();
@@ -131,7 +152,7 @@ export default function InsightsPage() {
 
                         <div
                             className={styles.summary}
-                            dangerouslySetInnerHTML={{ __html: formatMessage(getInsightPreview(insight)) }}
+                            dangerouslySetInnerHTML={{ __html: formatMessage(getInsightCardPreview(insight)) }}
                         />
 
                         <div className={styles.footer}>
