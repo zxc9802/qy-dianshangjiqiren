@@ -71,6 +71,16 @@ interface PendingBotDocument {
 
 const API_BASE = '/api';
 
+class RequestError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = 'RequestError';
+        this.status = status;
+    }
+}
+
 function getToken(): string | null {
     if (typeof window === 'undefined') return null;
     return localStorage.getItem('token');
@@ -88,7 +98,7 @@ async function apiFetch(path: string, opts: RequestInit = {}) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ message: '请求失败' }));
-        throw new Error(err.message || '请求失败');
+        throw new RequestError(err.message || '请求失败', res.status);
     }
     return res.json();
 }
@@ -143,6 +153,37 @@ export default function MyBotsPage() {
         }
         loadBots();
     }, [user, router, loadBots]);
+
+    const savePendingDocuments = useCallback(async (botId: string, documentsToSave: PendingBotDocument[]) => {
+        if (documentsToSave.length === 0) return;
+
+        const payload = documentsToSave.map((doc) => ({
+            fileName: doc.fileName,
+            fileType: doc.fileType,
+            fileSize: doc.fileSize,
+            parsedText: doc.parsedText,
+        }));
+
+        try {
+            await apiFetch(`/custom-bots/${botId}/documents/batch`, {
+                method: 'POST',
+                body: JSON.stringify({ documents: payload }),
+            });
+            return;
+        } catch (error) {
+            // Compatibility fallback for backend instances that haven't deployed the batch route yet.
+            if (!(error instanceof RequestError) || (error.status !== 404 && error.status !== 405)) {
+                throw error;
+            }
+        }
+
+        for (const document of payload) {
+            await apiFetch(`/custom-bots/${botId}/documents`, {
+                method: 'POST',
+                body: JSON.stringify(document),
+            });
+        }
+    }, []);
 
     const resetForm = () => {
         setName('');
@@ -203,17 +244,7 @@ export default function MyBotsPage() {
                     doc.status === 'ready' ? { ...doc, status: 'saving', errorMessage: undefined } : doc
                 )));
 
-                await apiFetch(`/custom-bots/${botId}/documents/batch`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        documents: readyPendingDocs.map((doc) => ({
-                            fileName: doc.fileName,
-                            fileType: doc.fileType,
-                            fileSize: doc.fileSize,
-                            parsedText: doc.parsedText,
-                        })),
-                    }),
-                });
+                await savePendingDocuments(botId, readyPendingDocs);
             }
 
             setShowForm(false);
