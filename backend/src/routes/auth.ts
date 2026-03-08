@@ -5,25 +5,14 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/error';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { generateCode, sendVerificationEmail } from '../utils/email';
 
 const router = Router();
 
 const emailSchema = z.string().email('Please enter a valid email address.');
 
-const sendCodeSchema = z.object({
-  email: emailSchema,
-});
-
-const verifyCodeSchema = z.object({
-  email: emailSchema,
-  code: z.string().length(6, 'Verification code must be 6 characters.'),
-});
-
 const registerSchema = z.object({
   email: emailSchema,
   password: z.string().min(6, 'Password must be at least 6 characters.'),
-  code: z.string().length(6, 'Verification code must be 6 characters.'),
   nickname: z.string().optional(),
   inviteCode: z.string().optional(),
 });
@@ -46,68 +35,8 @@ function signToken(userId: string): string {
   );
 }
 
-router.post('/send-code', async (req: Request, res: Response) => {
-  const { email } = sendCodeSchema.parse(req.body);
-
-  const recent = await prisma.verificationCode.findFirst({
-    where: {
-      email,
-      createdAt: { gt: new Date(Date.now() - 60_000) },
-    },
-  });
-
-  if (recent) {
-    throw new AppError('Verification code was sent too recently. Please try again in 60 seconds.', 429);
-  }
-
-  const code = generateCode();
-  const expiresAt = new Date(Date.now() + 5 * 60_000);
-
-  await prisma.verificationCode.create({
-    data: { email, code, expiresAt },
-  });
-
-  await sendVerificationEmail(email, code);
-
-  res.json({ success: true, message: 'Verification code sent.' });
-});
-
-router.post('/verify-code', async (req: Request, res: Response) => {
-  const { email, code } = verifyCodeSchema.parse(req.body);
-
-  const record = await prisma.verificationCode.findFirst({
-    where: {
-      email,
-      code,
-      used: false,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (!record) {
-    throw new AppError('Verification code is invalid or expired.', 400);
-  }
-
-  res.json({ success: true, message: 'Verification code verified.' });
-});
-
 router.post('/register', async (req: Request, res: Response) => {
   const data = registerSchema.parse(req.body);
-
-  const codeRecord = await prisma.verificationCode.findFirst({
-    where: {
-      email: data.email,
-      code: data.code,
-      used: false,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (!codeRecord) {
-    throw new AppError('Verification code is invalid or expired.', 400);
-  }
 
   const existing = await prisma.user.findUnique({ where: { email: data.email } });
   if (existing) {
@@ -122,11 +51,6 @@ router.post('/register', async (req: Request, res: Response) => {
       isVerified: true,
       nickname: data.nickname || `User${data.email.split('@')[0].slice(0, 6)}` ,
     },
-  });
-
-  await prisma.verificationCode.update({
-    where: { id: codeRecord.id },
-    data: { used: true },
   });
 
   const token = signToken(user.id);
