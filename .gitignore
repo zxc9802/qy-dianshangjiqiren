@@ -6,3 +6,4 @@ node_modules/
 .DS_Store
 backend/storage/
 backend/dist/
+frontend/public/generated-images/

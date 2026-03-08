@@ -13,7 +13,31 @@ export class ApiError extends Error {
 }
 
 export function resolveImageAssetUrl(input: string): string {
-    return input || '';
+    if (!input) return '';
+
+    if (input.startsWith('/api/image-assets/') || input.startsWith('/api/generated-images/')) {
+        return input;
+    }
+
+    if (input.startsWith('/generated-images/')) {
+        return `/api/generated-images/${input.slice('/generated-images/'.length)}`;
+    }
+
+    if (/^https?:\/\//i.test(input)) {
+        try {
+            const url = new URL(input);
+            if (url.pathname.startsWith('/api/image-assets/')) {
+                return `${url.pathname}${url.search}`;
+            }
+            if (url.pathname.startsWith('/generated-images/')) {
+                return `/api/generated-images/${url.pathname.slice('/generated-images/'.length)}${url.search}`;
+            }
+        } catch {
+            return input;
+        }
+    }
+
+    return input;
 }
 
 function getToken(): string | null {
