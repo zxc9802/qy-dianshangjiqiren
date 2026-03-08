@@ -113,9 +113,6 @@ export const api = {
     login: (body: { account: string; password: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=login', { method: 'POST', body: JSON.stringify(body) }),
 
-    activate: (body: { account: string; password: string; inviteCode: string; nickname?: string; groupName?: string }) =>
-        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=activate', { method: 'POST', body: JSON.stringify(body) }),
-
     getMe: () => request<{ success: boolean; data: UserInfo }>('/auth/me'),
 
     updateProfile: (body: { nickname: string }) =>

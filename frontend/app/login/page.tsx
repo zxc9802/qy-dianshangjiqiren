@@ -7,7 +7,7 @@ import { ApiError } from '../lib/api';
 import { useAuthStore } from '../stores/auth';
 import styles from './login.module.css';
 
-type AuthMode = 'login' | 'register' | 'activate';
+type AuthMode = 'login' | 'register';
 
 export default function LoginPage() {
     const [mode, setMode] = useState<AuthMode>('login');
@@ -20,7 +20,7 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
 
     const router = useRouter();
-    const { login, register, activate } = useAuthStore();
+    const { login, register } = useAuthStore();
 
     const setModeAndResetError = (nextMode: AuthMode) => {
         setMode(nextMode);
@@ -28,9 +28,6 @@ export default function LoginPage() {
     };
 
     const isRegister = mode === 'register';
-    const isActivate = mode === 'activate';
-    const showInviteCode = isRegister || isActivate;
-    const showProfileFields = isRegister || isActivate;
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -40,29 +37,27 @@ export default function LoginPage() {
         try {
             if (mode === 'login') {
                 await login(account, password);
-            } else if (mode === 'register') {
-                await register(account, password, inviteCode, nickname, groupName);
             } else {
-                await activate(account, password, inviteCode, nickname, groupName);
+                await register(account, password, inviteCode, nickname, groupName);
             }
 
             router.push('/');
         } catch (err) {
             if (err instanceof ApiError) {
                 if (err.code === 'INVITE_REQUIRED') {
-                    setMode('activate');
-                    setError('该账号尚未获得成员权限，请填写邀请码、姓名和组别完成激活。');
+                    setMode('register');
+                    setError('该账号尚未完成成员开通，请填写邀请码、姓名和组别后继续注册。');
                 } else if (err.code === 'ACCOUNT_EXISTS_USE_ACTIVATE') {
-                    setMode('activate');
-                    setError('该账号已存在，但还没有完成成员激活。请填写邀请码、姓名和组别后继续。');
+                    setMode('register');
+                    setError('该账号已存在但尚未开通权限，请使用原账号和密码填写邀请码后继续注册。');
                 } else if (err.code === 'INVITE_CODE_INVALID') {
                     setError('邀请码无效或已被使用。');
                 } else if (err.code === 'PROFILE_NAME_REQUIRED') {
-                    setMode('activate');
-                    setError('激活成员账号前必须填写姓名。');
+                    setMode('register');
+                    setError('注册时必须填写姓名。');
                 } else if (err.code === 'PROFILE_GROUP_REQUIRED') {
-                    setMode('activate');
-                    setError('激活成员账号前必须填写组别。');
+                    setMode('register');
+                    setError('注册时必须填写组别。');
                 } else {
                     setError(err.message);
                 }
@@ -80,7 +75,7 @@ export default function LoginPage() {
                 <div className={styles.brandContent}>
                     <div className={styles.brandLogo}><Bot size={40} /></div>
                     <h1 className={styles.brandTitle}>电商 AI 智能平台</h1>
-                    <p className={styles.brandSub}>企业内部使用，请先登录账号，再通过邀请码完成成员准入与权限激活。</p>
+                    <p className={styles.brandSub}>企业内部使用，新成员通过邀请码完成注册并同步开通成员权限。</p>
                     <div className={styles.features}>
                         <span className={styles.featureTag}>34 个预设机器人</span>
                         <span className={styles.featureTag}>支持自定义工作流</span>
@@ -106,13 +101,6 @@ export default function LoginPage() {
                         >
                             注册
                         </button>
-                        <button
-                            type="button"
-                            className={`${styles.tab} ${mode === 'activate' ? styles.tabActive : ''}`}
-                            onClick={() => setModeAndResetError('activate')}
-                        >
-                            激活成员
-                        </button>
                     </div>
 
                     <form onSubmit={handleSubmit} className={styles.form}>
@@ -128,7 +116,7 @@ export default function LoginPage() {
                             />
                         </div>
 
-                        {showProfileFields && (
+                        {isRegister && (
                             <>
                                 <div className={styles.field}>
                                     <label className={styles.label}>姓名</label>
@@ -170,7 +158,7 @@ export default function LoginPage() {
                             />
                         </div>
 
-                        {showInviteCode && (
+                        {isRegister && (
                             <div className={styles.field}>
                                 <label className={styles.label}>邀请码</label>
                                 <input
@@ -184,20 +172,20 @@ export default function LoginPage() {
                             </div>
                         )}
 
-                        {showInviteCode && (
+                        {isRegister && (
                             <p className={styles.switchHint}>
-                                邀请码为一次性凭证。成员注册和激活都需要填写邀请码，并补全姓名与组别。
+                                邀请码为一次性凭证。注册时请填写邀请码，并补全姓名与组别。
                             </p>
                         )}
 
                         {error ? <p className={styles.error}>{error}</p> : null}
 
                         <button type="submit" className={styles.submitBtn} disabled={loading}>
-                            {loading ? '提交中...' : mode === 'login' ? '登录' : mode === 'register' ? '注册并进入' : '激活成员权限'}
+                            {loading ? '提交中...' : mode === 'login' ? '登录' : '注册并进入'}
                         </button>
 
                         <p className={styles.switchHint}>
-                            {mode === 'login' ? '还没有账号？' : mode === 'register' ? '已经有账号？' : '返回普通登录？'}
+                            {mode === 'login' ? '还没有账号？' : '已经有账号？'}
                             <button
                                 type="button"
                                 className={styles.switchBtn}

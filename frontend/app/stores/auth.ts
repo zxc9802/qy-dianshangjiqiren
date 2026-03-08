@@ -10,7 +10,6 @@ interface AuthState {
 
     login: (account: string, password: string) => Promise<void>;
     register: (account: string, password: string, inviteCode: string, nickname: string, groupName: string) => Promise<void>;
-    activate: (account: string, password: string, inviteCode: string, nickname?: string, groupName?: string) => Promise<void>;
     logout: () => void;
     loadUser: () => Promise<void>;
 }
@@ -43,19 +42,6 @@ export const useAuthStore = create<AuthState>((set) => ({
             await runLocalDataMigration(user.id);
         } catch (error) {
             console.error('[Migration] Failed after register', error);
-        }
-        set({ user, token, isAuthenticated: true });
-    },
-
-    activate: async (account, password, inviteCode, nickname, groupName) => {
-        const res = await api.activate({ account, password, inviteCode, nickname, groupName });
-        const { token, user } = res.data;
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-        try {
-            await runLocalDataMigration(user.id);
-        } catch (error) {
-            console.error('[Migration] Failed after activate', error);
         }
         set({ user, token, isAuthenticated: true });
     },

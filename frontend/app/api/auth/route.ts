@@ -160,6 +160,7 @@ async function handleRegister(body: unknown) {
             select: {
                 id: true,
                 email: true,
+                passwordHash: true,
                 nickname: true,
                 groupName: true,
                 avatar: true,
@@ -171,7 +172,31 @@ async function handleRegister(body: unknown) {
 
         if (existing) {
             if (existing.role !== 'admin' && !existing.accessGrantedAt) {
-                throw new AppError('Account exists but still needs activation.', 409, 'ACCOUNT_EXISTS_USE_ACTIVATE');
+                const valid = await bcrypt.compare(data.password, existing.passwordHash);
+                if (!valid) {
+                    throw new AppError('Incorrect password.', 400);
+                }
+
+                await consumeInviteCode(tx, inviteCode, existing.id);
+
+                return tx.user.update({
+                    where: { id: existing.id },
+                    data: {
+                        accessGrantedAt: new Date(),
+                        isVerified: true,
+                        nickname: normalizeProfileValue(data.nickname),
+                        groupName: normalizeProfileValue(data.groupName),
+                    },
+                    select: {
+                        id: true,
+                        email: true,
+                        nickname: true,
+                        groupName: true,
+                        avatar: true,
+                        role: true,
+                        createdAt: true,
+                    },
+                });
             }
             throw new AppError('Account already exists.', 409);
         }
