@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "postinstall": "prisma generate",
+    "admin:sync": "node scripts/sync-admin.cjs",
     "lint": "eslint"
   },
   "dependencies": {
