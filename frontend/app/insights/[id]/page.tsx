@@ -62,7 +62,7 @@ export default function InsightDetailPage() {
         return (
             <div className={styles.loadingState}>
                 <Loader2 className={styles.spinner} size={20} />
-                <span>加载洞察详情中...</span>
+                <span>正在加载洞察详情...</span>
             </div>
         );
     }
@@ -70,7 +70,7 @@ export default function InsightDetailPage() {
     if (error || !insight) {
         return (
             <div className={styles.loadingState}>
-                <p>{error || '未找到洞察记录。'}</p>
+                <p>{error || '未找到这条网页洞察记录。'}</p>
                 <Link href="/insights" className={styles.backLink}>
                     <ArrowLeft size={16} />
                     返回列表
@@ -99,17 +99,20 @@ export default function InsightDetailPage() {
             </header>
 
             <section className={styles.grid}>
-                <article className={styles.card}>
+                <article className={`${styles.card} ${styles.summaryCard}`}>
                     <h2>摘要</h2>
+                    <p className={styles.summaryLead}>
+                        这里保留了对页面内容的浓缩总结，方便快速回看主题、核心观点和可执行信息。
+                    </p>
                     <div
-                        className={`${styles.paragraph} ${styles.richText}`}
+                        className={`${styles.paragraph} ${styles.richText} ${styles.summaryContent}`}
                         dangerouslySetInnerHTML={{
-                            __html: formatMessage(insight.summary || '这条记录没有单独保存摘要，可以直接查看下方对话内容。'),
+                            __html: formatMessage(insight.summary || '这条记录没有单独保存摘要，可以直接查看下方的对话记录。'),
                         }}
                     />
                 </article>
 
-                <article className={styles.card}>
+                <article className={`${styles.card} ${styles.metaCard}`}>
                     <h2>页面信息</h2>
                     <dl className={styles.metaList}>
                         <div>
@@ -122,7 +125,7 @@ export default function InsightDetailPage() {
                         </div>
                         <div>
                             <dt>字幕来源</dt>
-                            <dd>{insight.pageContext.transcriptSource}</dd>
+                            <dd>{insight.pageContext.transcriptSource || 'none'}</dd>
                         </div>
                         <div>
                             <dt>原始链接</dt>
@@ -132,38 +135,13 @@ export default function InsightDetailPage() {
                 </article>
             </section>
 
-            <section className={styles.card}>
-                <h2>网页上下文快照</h2>
-                <div className={styles.snapshotGrid}>
+            <section className={`${styles.card} ${styles.messagesCard}`}>
+                <div className={styles.sectionHead}>
                     <div>
-                        <h3>页面简介</h3>
-                        <p className={styles.paragraph}>{insight.pageContext.metaDescription || '无'}</p>
-                    </div>
-                    <div>
-                        <h3>视频标题</h3>
-                        <p className={styles.paragraph}>{insight.pageContext.videoTitle || '无'}</p>
-                    </div>
-                    <div>
-                        <h3>视频说明</h3>
-                        <p className={styles.paragraph}>{insight.pageContext.videoDescription || '无'}</p>
-                    </div>
-                    <div>
-                        <h3>用户选中文本</h3>
-                        <p className={styles.paragraph}>{insight.pageContext.selectedText || '无'}</p>
-                    </div>
-                    <div className={styles.fullWidth}>
-                        <h3>字幕内容</h3>
-                        <pre className={styles.preBlock}>{insight.pageContext.captionsText || '无'}</pre>
-                    </div>
-                    <div className={styles.fullWidth}>
-                        <h3>页面正文摘录</h3>
-                        <pre className={styles.preBlock}>{insight.pageContext.mainText || '无'}</pre>
+                        <h2>对话记录</h2>
+                        <p className={styles.sectionHint}>保留插件总结时的完整交流过程，方便复盘当时的提问和回答。</p>
                     </div>
                 </div>
-            </section>
-
-            <section className={styles.card}>
-                <h2>对话记录</h2>
                 <div className={styles.messages}>
                     {insight.chatTranscript.length === 0 ? (
                         <p className={styles.paragraph}>没有保存对话内容。</p>
