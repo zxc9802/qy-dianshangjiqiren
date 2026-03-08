@@ -12,6 +12,28 @@ export class ApiError extends Error {
     }
 }
 
+function isPrivateIpv4Host(hostname: string): boolean {
+    const parts = hostname.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+        return false;
+    }
+
+    if (parts[0] === 10) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    return false;
+}
+
+function isInternalAssetHost(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === 'localhost' || normalized.endsWith('.internal') || normalized.endsWith('.local')) {
+        return true;
+    }
+    return isPrivateIpv4Host(normalized);
+}
+
 export function resolveImageAssetUrl(input: string): string {
     if (!input) return '';
 
@@ -27,9 +49,15 @@ export function resolveImageAssetUrl(input: string): string {
         try {
             const url = new URL(input);
             if (url.pathname.startsWith('/api/image-assets/')) {
+                if (!isInternalAssetHost(url.hostname)) {
+                    return input;
+                }
                 return `${url.pathname}${url.search}`;
             }
             if (url.pathname.startsWith('/generated-images/')) {
+                if (!isInternalAssetHost(url.hostname)) {
+                    return input;
+                }
                 return `/api/generated-images/${url.pathname.slice('/generated-images/'.length)}${url.search}`;
             }
         } catch {

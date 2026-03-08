@@ -17,6 +17,7 @@ import customBotRoutes from './routes/custom-bots';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IMAGE_ASSET_CACHE_MAX_AGE = '365d';
 
 function getAllowedOrigins(): string[] {
     const configured = [process.env.FRONTEND_URL, process.env.FRONTEND_URLS]
@@ -53,8 +54,14 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use('/api/image-assets', express.static(path.join(process.cwd(), 'storage')));
-app.use('/api/bot-avatars', express.static(path.join(process.cwd(), 'uploads', 'bot-avatars')));
+app.use('/api/image-assets', express.static(path.join(process.cwd(), 'storage'), {
+    maxAge: IMAGE_ASSET_CACHE_MAX_AGE,
+    immutable: true,
+}));
+app.use('/api/bot-avatars', express.static(path.join(process.cwd(), 'uploads', 'bot-avatars'), {
+    maxAge: IMAGE_ASSET_CACHE_MAX_AGE,
+    immutable: true,
+}));
 
 // Health check
 app.get('/api/health', (_req, res) => {

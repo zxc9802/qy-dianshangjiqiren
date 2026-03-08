@@ -6,6 +6,28 @@ const LEGACY_FRONTEND_IMAGE_PREFIX = '/generated-images/';
 const FRONTEND_IMAGE_PROXY_PREFIX = '/api/image-assets/';
 const FRONTEND_LEGACY_IMAGE_PROXY_PREFIX = '/api/generated-images/';
 
+function isPrivateIpv4Host(hostname: string): boolean {
+    const parts = hostname.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+        return false;
+    }
+
+    if (parts[0] === 10) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    return false;
+}
+
+function isInternalAssetHost(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === 'localhost' || normalized.endsWith('.internal') || normalized.endsWith('.local')) {
+        return true;
+    }
+    return isPrivateIpv4Host(normalized);
+}
+
 function buildTargetUrl(req: NextRequest, pathSegments: string[] = []): string {
     const backendUrl = readBackendUrl();
     const suffix = pathSegments.length > 0 ? `/${pathSegments.join('/')}` : '';
@@ -43,9 +65,15 @@ function toFrontendServedAssetUrl(value: string): string {
     try {
         const url = new URL(value);
         if (url.pathname.startsWith(BACKEND_IMAGE_API_PREFIX)) {
+            if (!isInternalAssetHost(url.hostname)) {
+                return value;
+            }
             return `${FRONTEND_IMAGE_PROXY_PREFIX}${url.pathname.slice(BACKEND_IMAGE_API_PREFIX.length)}${url.search}`;
         }
         if (url.pathname.startsWith(LEGACY_FRONTEND_IMAGE_PREFIX)) {
+            if (!isInternalAssetHost(url.hostname)) {
+                return value;
+            }
             return `${FRONTEND_LEGACY_IMAGE_PROXY_PREFIX}${url.pathname.slice(LEGACY_FRONTEND_IMAGE_PREFIX.length)}${url.search}`;
         }
         return value;
