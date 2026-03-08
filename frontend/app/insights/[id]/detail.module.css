@@ -92,6 +92,28 @@
     line-height: 1.8;
 }
 
+.richText {
+    word-break: break-word;
+}
+
+.richText strong {
+    color: #0f172a;
+    font-weight: 800;
+}
+
+.richText table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    background: #fff;
+}
+
+.richText td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 10px;
+    vertical-align: top;
+}
+
 .metaList {
     margin: 0;
     display: grid;
@@ -172,7 +194,7 @@
 }
 
 .messageContent {
-    white-space: pre-wrap;
+    white-space: normal;
     word-break: break-word;
     line-height: 1.8;
     color: #0f172a;

@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import styles from './detail.module.css';
 import { api, type PageInsightInfo } from '../../lib/api';
+import { formatMessage } from '../../lib/formatMessage';
 import { useAuthStore } from '../../stores/auth';
 
 function formatTime(value: string): string {
@@ -33,8 +34,7 @@ export default function InsightDetailPage() {
         }
 
         let cancelled = false;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setLoading(true);
+
         api.getInsight(params.id)
             .then((response) => {
                 if (!cancelled) {
@@ -101,9 +101,12 @@ export default function InsightDetailPage() {
             <section className={styles.grid}>
                 <article className={styles.card}>
                     <h2>摘要</h2>
-                    <p className={styles.paragraph}>
-                        {insight.summary || '这条记录没有单独保存摘要，可直接查看下方对话内容。'}
-                    </p>
+                    <div
+                        className={`${styles.paragraph} ${styles.richText}`}
+                        dangerouslySetInnerHTML={{
+                            __html: formatMessage(insight.summary || '这条记录没有单独保存摘要，可以直接查看下方对话内容。'),
+                        }}
+                    />
                 </article>
 
                 <article className={styles.card}>
@@ -173,7 +176,10 @@ export default function InsightDetailPage() {
                                 <div className={styles.messageRole}>
                                     {message.role === 'user' ? '用户' : '插件助手'}
                                 </div>
-                                <div className={styles.messageContent}>{message.content}</div>
+                                <div
+                                    className={`${styles.messageContent} ${styles.richText}`}
+                                    dangerouslySetInnerHTML={{ __html: formatMessage(message.content) }}
+                                />
                             </article>
                         ))
                     )}

@@ -105,12 +105,12 @@ export function formatMessage(text: string): string {
             continue;
         }
 
-        const unorderedMatch = line.match(/^[-*+•]\s+(.+)$/);
+        const unorderedMatch = line.match(/^[-*+\u2022]\s+(.+)$/);
         if (unorderedMatch) {
             flushBreaks(2);
             const content = formatInline(unorderedMatch[1]);
             if (content) {
-                parts.push(`• ${content}`);
+                parts.push(`&#8226; ${content}`);
                 pendingBreaks = 1;
             }
             continue;

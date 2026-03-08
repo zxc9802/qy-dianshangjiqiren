@@ -6,11 +6,18 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, ExternalLink, FileText, Globe, Loader2 } from 'lucide-react';
 import styles from './insights.module.css';
 import { api, type PageInsightInfo } from '../lib/api';
+import { formatMessage } from '../lib/formatMessage';
 import { useAuthStore } from '../stores/auth';
 
 function formatTime(value: string): string {
     const date = new Date(value);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getInsightPreview(insight: PageInsightInfo): string {
+    return insight.summary
+        || insight.chatTranscript.find((item) => item.role === 'assistant')?.content
+        || '暂无摘要内容。';
 }
 
 export default function InsightsPage() {
@@ -32,8 +39,7 @@ export default function InsightsPage() {
         }
 
         let cancelled = false;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setLoading(true);
+
         api.getInsights({ limit: 50 })
             .then((response) => {
                 if (!cancelled) {
@@ -76,7 +82,7 @@ export default function InsightsPage() {
                     </Link>
                     <h1 className={styles.title}>网页洞察</h1>
                     <p className={styles.subtitle}>
-                        {user?.nickname || '当前用户'} 在插件里保存的网页摘要与对话存档。
+                        {user?.nickname || '当前用户'} 在插件里保存的网页总结和对话记录。
                     </p>
                 </div>
             </header>
@@ -87,7 +93,7 @@ export default function InsightsPage() {
                 <section className={styles.emptyState}>
                     <FileText size={28} />
                     <h2>还没有保存的网页洞察</h2>
-                    <p>先在浏览器插件里总结页面或与网页内容对话，再点击“保存到主站”。</p>
+                    <p>先在浏览器插件里总结页面或围绕网页提问，再点击“保存到主站”。</p>
                 </section>
             ) : null}
 
@@ -123,13 +129,19 @@ export default function InsightsPage() {
                             <span className={styles.sourceUrl}>{insight.sourceUrl}</span>
                         </div>
 
-                        <p className={styles.summary}>
-                            {insight.summary || insight.chatTranscript.find((item) => item.role === 'assistant')?.content || '暂无摘要内容。'}
-                        </p>
+                        <div
+                            className={styles.summary}
+                            dangerouslySetInnerHTML={{ __html: formatMessage(getInsightPreview(insight)) }}
+                        />
 
                         <div className={styles.footer}>
-                            <span>{insight.pageContext.hasVideo ? '视频页面' : '网页页面'}</span>
-                            <span>{insight.chatTranscript.length} 条消息</span>
+                            <div className={styles.footerMeta}>
+                                <span>{insight.pageContext.hasVideo ? '视频页面' : '普通网页'}</span>
+                                <span>{insight.chatTranscript.length} 条消息</span>
+                            </div>
+                            <Link href={`/insights/${insight.id}`} className={styles.detailButton}>
+                                进入详情
+                            </Link>
                         </div>
                     </article>
                 ))}
