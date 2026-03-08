@@ -49,6 +49,8 @@ async function runAccessControlBootstrap(): Promise<void> {
     const adminPassword = readServerEnv('ADMIN_PASSWORD');
     const adminNickname = readServerEnv('ADMIN_NICKNAME')?.trim();
 
+    await syncAdminAccount(adminAccount, adminPassword, adminNickname);
+
     const existingSetting = await prisma.systemSetting.findUnique({
         where: { key: ACCESS_CONTROL_BOOTSTRAP_KEY },
         select: { key: true },
@@ -57,42 +59,6 @@ async function runAccessControlBootstrap(): Promise<void> {
     if (existingSetting) {
         bootstrapComplete = true;
         return;
-    }
-
-    let adminUser = await prisma.user.findFirst({
-        where: { role: 'admin' },
-        select: { id: true },
-    });
-
-    if (!adminUser && adminAccount && adminPassword) {
-        const existingAccount = await prisma.user.findUnique({
-            where: { email: adminAccount },
-            select: { id: true, nickname: true },
-        });
-
-        if (existingAccount) {
-            adminUser = await prisma.user.update({
-                where: { id: existingAccount.id },
-                data: {
-                    role: 'admin',
-                    isVerified: true,
-                    nickname: existingAccount.nickname || adminNickname || adminAccount,
-                },
-                select: { id: true },
-            });
-        } else {
-            const passwordHash = await bcrypt.hash(adminPassword, 10);
-            adminUser = await prisma.user.create({
-                data: {
-                    email: adminAccount,
-                    passwordHash,
-                    isVerified: true,
-                    role: 'admin',
-                    nickname: adminNickname || adminAccount,
-                },
-                select: { id: true },
-            });
-        }
     }
 
     await prisma.user.updateMany({
@@ -113,6 +79,45 @@ async function runAccessControlBootstrap(): Promise<void> {
     });
 
     bootstrapComplete = true;
+}
+
+async function syncAdminAccount(
+    adminAccount?: string,
+    adminPassword?: string,
+    adminNickname?: string,
+): Promise<void> {
+    if (!adminAccount || !adminPassword) {
+        return;
+    }
+
+    const passwordHash = await bcrypt.hash(adminPassword, 10);
+    const existingAccount = await prisma.user.findUnique({
+        where: { email: adminAccount },
+        select: { id: true, nickname: true },
+    });
+
+    if (existingAccount) {
+        await prisma.user.update({
+            where: { id: existingAccount.id },
+            data: {
+                passwordHash,
+                role: 'admin',
+                isVerified: true,
+                nickname: existingAccount.nickname || adminNickname || adminAccount,
+            },
+        });
+        return;
+    }
+
+    await prisma.user.create({
+        data: {
+            email: adminAccount,
+            passwordHash,
+            isVerified: true,
+            role: 'admin',
+            nickname: adminNickname || adminAccount,
+        },
+    });
 }
 
 function getBearerToken(req: NextRequest): string {
