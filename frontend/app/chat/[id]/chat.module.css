@@ -733,6 +733,13 @@
     flex-wrap: wrap;
 }
 
+.metaControls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .modeToggle {
     display: inline-flex;
     align-items: center;
@@ -763,6 +770,51 @@
 .modeToggle:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+.modelSwitcher {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-width: 136px;
+    border-radius: 999px;
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-card) 92%, var(--color-primary) 8%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    overflow: hidden;
+}
+
+.modelSelect {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--color-foreground);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 10px 38px 10px 14px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+.modelSelect:focus {
+    border: none;
+    box-shadow: none;
+}
+
+.modelSelect:disabled {
+    cursor: not-allowed;
+    color: var(--color-muted-foreground);
+}
+
+.modelSelectChevron {
+    position: absolute;
+    right: 12px;
+    color: var(--color-muted-foreground);
+    pointer-events: none;
 }
 
 .inputHint {

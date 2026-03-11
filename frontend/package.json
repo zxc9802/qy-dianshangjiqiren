@@ -8,6 +8,7 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "admin:sync": "node scripts/sync-admin.cjs",
+    "knowledge:import-qiya": "node scripts/import-qiya-enterprise-knowledge.mjs",
     "lint": "eslint"
   },
   "dependencies": {

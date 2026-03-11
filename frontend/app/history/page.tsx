@@ -3,24 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../stores/auth';
+import { BUILTIN_BOT_NAME_MAP } from '../lib/builtin-bots';
 import { useConversationsStore, Conversation } from '../stores/conversations';
 import styles from './history.module.css';
 
-const BOT_NAMES: Record<string, string> = {
-    '1': 'KPI教练', '2': 'SOP梳理AI教练', '3': 'OKR教练',
-    '4': '电商商业顾问', '5': '招聘教练', '6': 'AI通用助手',
-    '7': '一键出10图提示词', '8': '天猫爆款趋势拆解', '9': '卖点教练',
-    '10': '天猫主图策划教练', '11': '爆款裂变分析AI教练', '12': '天猫评价教练',
-    '13': '天猫竞争策略教练', '14': '天猫客单价提升教练',
-    '15': '小红书爆文封面拆解', '16': '小红书私域搭建SOP', '17': '小红书爆文拆解复制',
-    '18': '小红书爆款标题', '19': '小红书起号话题', '20': '小红书达人SOP流程',
-    '21': '小红书正文拆解SOP', '22': '小红书笔记评论生成',
-    '23': '毛泽东战略智能体', '24': '乔布斯产品教练', '25': '张一鸣商业教练',
-    '26': '降税模型测算', '27': '股权架构设计', '28': '电商平台专项合规',
-    '29': '薪酬与个税规划', '30': '预警诊断&稽查',
-    '31': 'AI工作流开发需求细化', '32': '调研访谈—高价值场景',
-    '33': '火火提示词调试', '34': 'AI工作流访谈教练',
-};
+const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
 
 type FilterTab = 'all' | 'favorites';
 

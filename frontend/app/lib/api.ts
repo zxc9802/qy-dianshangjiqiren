@@ -174,6 +174,7 @@ export const api = {
         displayContent?: string;
         inputType?: 'text' | 'voice' | 'file' | 'image';
         aspectRatio?: string;
+        responseModel?: 'gemini' | 'gpt-5.4';
     }) => {
         const token = getToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };

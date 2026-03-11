@@ -1,10 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useAuthStore } from './stores/auth';
 import { useConversationsStore } from './stores/conversations';
+import {
+  BUILTIN_BOTS,
+  BUILTIN_CATEGORY_ORDER,
+  GENERIC_CHAT_BOT_ID,
+  QIYA_ENTERPRISE_MANAGEMENT_BOT_ID,
+} from './lib/builtin-bots';
+import {
+  DEFAULT_RESPONSE_MODEL,
+  RESPONSE_MODEL_OPTIONS,
+  RESPONSE_MODEL_STORAGE_PREFIX,
+  type ResponseModel,
+} from './lib/chat-models';
+import { startPcm16kMonoRecorder, type Pcm16Recorder } from './lib/pcmRecorder';
 import styles from './page.module.css';
 import {
   Bot, Search, Sun, Moon, Home, Zap, ImageIcon, User, Trash2,
@@ -13,7 +26,8 @@ import {
   FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
-  Package, BookOpen, Landmark, Menu, Plus,
+  Package, BookOpen, Landmark, Menu, Plus, Sprout, ChevronDown, ChevronRight,
+  Mic, Send, Loader2,
 } from 'lucide-react';
 
 interface BotInfo {
@@ -24,6 +38,9 @@ interface BotInfo {
   iconColor: string;
   description: string;
   pointsPerUse: number;
+  isTrial: boolean;
+  path: string;
+  requiresAuth: boolean;
 }
 
 const WF_TEMPLATES = [
@@ -66,56 +83,111 @@ const WF_TEMPLATES = [
   },
 ];
 
-const IMAGE_TOOL = {
+const IMAGE_TOOL: BotInfo = {
+  id: 'image-generator',
   name: '电商图片生成机器人',
   category: '绘图机器人',
   description: '上传参考图，按参数一键生成 2K 电商图，支持历史复用与二次编辑。',
   icon: <ImageIcon size={22} />,
   iconColor: '#7c3aed',
-  route: '/bot/image-generator',
+  path: '/bot/image-generator',
+  pointsPerUse: 0,
+  isTrial: true,
+  requiresAuth: false,
 };
 
-const MOCK_BOTS: BotInfo[] = [
-  { id: '1', name: 'KPI教练', category: '管理工具', icon: <Target size={22} />, iconColor: '#2563eb', description: '设计可量化 KPI 体系，让团队目标清晰可追踪。', pointsPerUse: 5 },
-  { id: '2', name: 'SOP梳理AI教练', category: '管理工具', icon: <Compass size={22} />, iconColor: '#7c3aed', description: '把经验沉淀成标准流程，提升组织复制效率。', pointsPerUse: 5 },
-  { id: '3', name: 'OKR教练', category: '管理工具', icon: <MapPin size={22} />, iconColor: '#059669', description: '聚焦战略目标，建立上下对齐的目标管理机制。', pointsPerUse: 5 },
-  { id: '4', name: '电商商业顾问', category: '管理工具', icon: <Briefcase size={22} />, iconColor: '#dc2626', description: '多维度分析业务问题，给出可执行的增长建议。', pointsPerUse: 8 },
-  { id: '5', name: '招聘教练', category: '管理工具', icon: <Users size={22} />, iconColor: '#ea580c', description: '从岗位画像到面试评估，优化招聘全流程。', pointsPerUse: 5 },
-  { id: '6', name: 'AI通用助手', category: '管理工具', icon: <Bot size={22} />, iconColor: '#0ea5e9', description: '写作、改写、分析、总结等通用任务处理。', pointsPerUse: 3 },
+const BOT_ICON_MAP: Record<string, ReactNode> = {
+  bot: <Bot size={22} />,
+  target: <Target size={22} />,
+  'list-checks': <Compass size={22} />,
+  goal: <MapPin size={22} />,
+  briefcase: <Briefcase size={22} />,
+  users: <Users size={22} />,
+  image: <Sparkles size={22} />,
+  'trending-up': <TrendingUp size={22} />,
+  zap: <Zap size={22} />,
+  layout: <FrameIcon size={22} />,
+  'git-branch': <GitBranch size={22} />,
+  star: <Star size={22} />,
+  swords: <Swords size={22} />,
+  'dollar-sign': <Coins size={22} />,
+  camera: <Camera size={22} />,
+  link: <Link size={22} />,
+  copy: <FileText size={22} />,
+  type: <PenTool size={22} />,
+  rocket: <Rocket size={22} />,
+  clipboard: <ClipboardList size={22} />,
+  'file-text': <Puzzle size={22} />,
+  'message-circle': <MessageSquare size={22} />,
+  flag: <Flag size={22} />,
+  smartphone: <Smartphone size={22} />,
+  'bar-chart': <BarChart3 size={22} />,
+  calculator: <Calculator size={22} />,
+  'git-merge': <GitBranch size={22} />,
+  shield: <Shield size={22} />,
+  wallet: <Wallet size={22} />,
+  'alert-triangle': <AlertTriangle size={22} />,
+  settings: <Settings size={22} />,
+  search: <SearchIcon size={22} />,
+  terminal: <FlaskConical size={22} />,
+  'git-pull-request': <Brain size={22} />,
+  sprout: <Sprout size={22} />,
+};
 
-  { id: '7', name: '一键出10图提示词', category: '电商工具', icon: <Sparkles size={22} />, iconColor: '#7c3aed', description: '快速生成多套电商出图提示词，覆盖不同场景。', pointsPerUse: 8 },
-  { id: '8', name: '天猫爆款趋势拆解', category: '电商工具', icon: <TrendingUp size={22} />, iconColor: '#2563eb', description: '拆解类目趋势逻辑，发现潜在爆款机会。', pointsPerUse: 8 },
-  { id: '9', name: '卖点教练', category: '电商工具', icon: <Zap size={22} />, iconColor: '#ea580c', description: '提炼核心卖点，形成更强购买转化表达。', pointsPerUse: 5 },
-  { id: '10', name: '天猫主图策划教练', category: '电商工具', icon: <FrameIcon size={22} />, iconColor: '#059669', description: '输出主图结构、视觉层级与点击优化策略。', pointsPerUse: 5 },
-  { id: '11', name: '爆款裂变分析AI教练', category: '电商工具', icon: <GitBranch size={22} />, iconColor: '#dc2626', description: '拆解爆款可复制元素，扩展到更多人群与场景。', pointsPerUse: 8 },
-  { id: '12', name: '天猫评价教练', category: '电商工具', icon: <Star size={22} />, iconColor: '#f59e0b', description: '优化评价内容结构，提升信任与转化。', pointsPerUse: 5 },
-  { id: '13', name: '天猫竞争策略教练', category: '电商工具', icon: <Swords size={22} />, iconColor: '#7c3aed', description: '分析竞品优劣势，制定差异化竞争方案。', pointsPerUse: 8 },
-  { id: '14', name: '天猫客单价提升教练', category: '电商工具', icon: <Coins size={22} />, iconColor: '#059669', description: '通过组合策略与定价设计提高客单价。', pointsPerUse: 5 },
+const BOT_ICON_COLOR_MAP: Record<string, string> = {
+  bot: '#0ea5e9',
+  target: '#2563eb',
+  'list-checks': '#7c3aed',
+  goal: '#059669',
+  briefcase: '#dc2626',
+  users: '#ea580c',
+  image: '#7c3aed',
+  'trending-up': '#2563eb',
+  zap: '#ea580c',
+  layout: '#059669',
+  'git-branch': '#dc2626',
+  star: '#f59e0b',
+  swords: '#7c3aed',
+  'dollar-sign': '#059669',
+  camera: '#dc2626',
+  link: '#2563eb',
+  copy: '#7c3aed',
+  type: '#ea580c',
+  rocket: '#059669',
+  clipboard: '#f59e0b',
+  'file-text': '#2563eb',
+  'message-circle': '#dc2626',
+  flag: '#dc2626',
+  smartphone: '#1e293b',
+  'bar-chart': '#2563eb',
+  calculator: '#059669',
+  'git-merge': '#7c3aed',
+  shield: '#2563eb',
+  wallet: '#ea580c',
+  'alert-triangle': '#f59e0b',
+  settings: '#64748b',
+  search: '#2563eb',
+  terminal: '#059669',
+  'git-pull-request': '#7c3aed',
+  sprout: '#16a34a',
+};
 
-  { id: '15', name: '小红书爆文封面拆解', category: '小红书', icon: <Camera size={22} />, iconColor: '#dc2626', description: '拆解封面构图、配色与文案排版，提炼爆点模板。', pointsPerUse: 5 },
-  { id: '16', name: '小红书私域搭建SOP', category: '小红书', icon: <Link size={22} />, iconColor: '#2563eb', description: '设计合规引流路径，打通公域到私域转化。', pointsPerUse: 8 },
-  { id: '17', name: '小红书爆文拆解复制', category: '小红书', icon: <FileText size={22} />, iconColor: '#7c3aed', description: '逆向拆解爆文，沉淀可复用创作方法。', pointsPerUse: 5 },
-  { id: '18', name: '小红书爆款标题', category: '小红书', icon: <PenTool size={22} />, iconColor: '#ea580c', description: '生成多套高点击标题并给出使用建议。', pointsPerUse: 3 },
-  { id: '19', name: '小红书起号话题', category: '小红书', icon: <Rocket size={22} />, iconColor: '#059669', description: '为新账号制定起号阶段话题与内容方向。', pointsPerUse: 5 },
-  { id: '20', name: '小红书达人SOP流程', category: '小红书', icon: <ClipboardList size={22} />, iconColor: '#f59e0b', description: '规范达人合作流程，从筛选到复盘闭环。', pointsPerUse: 8 },
-  { id: '21', name: '小红书正文拆解SOP', category: '小红书', icon: <Puzzle size={22} />, iconColor: '#2563eb', description: '优化正文结构，提高阅读完成率与互动率。', pointsPerUse: 5 },
-  { id: '22', name: '小红书笔记评论生成', category: '小红书', icon: <MessageSquare size={22} />, iconColor: '#dc2626', description: '批量生成高互动评论，提高内容活跃度。', pointsPerUse: 3 },
+const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
+  .filter((bot) => bot.showOnHomepage !== false)
+  .map((bot) => ({
+  id: bot.routeId,
+  name: bot.name,
+  category: bot.category,
+  icon: BOT_ICON_MAP[bot.icon] || <Bot size={22} />,
+  iconColor: BOT_ICON_COLOR_MAP[bot.icon] || '#2563eb',
+  description: bot.description,
+  pointsPerUse: bot.pointsPerUse,
+  isTrial: bot.homepageTrial ?? true,
+  path: `/chat/${bot.routeId}`,
+  requiresAuth: true,
+}));
 
-  { id: '23', name: '毛泽东战略智能体', category: '企业教练', icon: <Flag size={22} />, iconColor: '#dc2626', description: '以战略视角分析复杂问题，拆解关键矛盾。', pointsPerUse: 10 },
-  { id: '24', name: '乔布斯产品教练', category: '企业教练', icon: <Smartphone size={22} />, iconColor: '#1e293b', description: '围绕用户体验与产品本质优化方案。', pointsPerUse: 10 },
-  { id: '25', name: '张一鸣商业教练', category: '企业教练', icon: <BarChart3 size={22} />, iconColor: '#2563eb', description: '数据驱动决策，建立可验证增长机制。', pointsPerUse: 10 },
-
-  { id: '26', name: '降税模型测算', category: '财税', icon: <Calculator size={22} />, iconColor: '#059669', description: '评估不同方案的税负影响，支持合规优化。', pointsPerUse: 8 },
-  { id: '27', name: '股权架构设计', category: '财税', icon: <GitBranch size={22} />, iconColor: '#7c3aed', description: '设计更稳健的股权结构与控制权安排。', pointsPerUse: 10 },
-  { id: '28', name: '电商平台专项合规', category: '财税', icon: <Shield size={22} />, iconColor: '#2563eb', description: '梳理平台规则与税务合规重点，规避风险。', pointsPerUse: 8 },
-  { id: '29', name: '薪酬与个税规划', category: '财税', icon: <Wallet size={22} />, iconColor: '#ea580c', description: '优化薪酬结构，兼顾员工激励与税务合规。', pointsPerUse: 8 },
-  { id: '30', name: '预警诊断&稽查', category: '财税', icon: <AlertTriangle size={22} />, iconColor: '#f59e0b', description: '提前识别税务风险，完善应对与稽查准备。', pointsPerUse: 10 },
-
-  { id: '31', name: 'AI工作流开发需求细化', category: 'AI陪跑教练', icon: <Settings size={22} />, iconColor: '#64748b', description: '将模糊想法细化为可执行需求文档。', pointsPerUse: 5 },
-  { id: '32', name: '调研访谈-高价值场景', category: 'AI陪跑教练', icon: <SearchIcon size={22} />, iconColor: '#2563eb', description: '通过调研定位 AI 应用高价值场景。', pointsPerUse: 8 },
-  { id: '33', name: '火火提示词调试', category: 'AI陪跑教练', icon: <FlaskConical size={22} />, iconColor: '#059669', description: '快速调试提示词，提升模型输出稳定性。', pointsPerUse: 3 },
-  { id: '34', name: 'AI工作流访谈教练', category: 'AI陪跑教练', icon: <Brain size={22} />, iconColor: '#7c3aed', description: '梳理流程痛点，设计可落地的 AI 改造路径。', pointsPerUse: 5 },
-];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,
@@ -124,20 +196,26 @@ const CATEGORY_ICONS: Record<string, ReactNode> = {
   '企业教练': <Landmark size={18} />,
   '财税': <Briefcase size={18} />,
   'AI陪跑教练': <Bot size={18} />,
+  '绘图机器人': <Puzzle size={18} />,
 };
 
 export default function HomePage() {
   const { user, isAuthenticated, isLoading, loadUser } = useAuthStore();
   const { conversations, favorites, loadConversations, toggleFavorite, removeFavorite, deleteConversation } = useConversationsStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [trialBotsOpen, setTrialBotsOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'history' | 'favorites'>('history');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [generalPrompt, setGeneralPrompt] = useState('');
+  const [generalResponseModel, setGeneralResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
+  const [isGeneralRecording, setIsGeneralRecording] = useState(false);
+  const [isGeneralTranscribing, setIsGeneralTranscribing] = useState(false);
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const generalRecorderRef = useRef<Pcm16Recorder | null>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
   useEffect(() => { loadUser(); }, [loadUser]);
@@ -147,6 +225,25 @@ export default function HomePage() {
       console.error('[Home] Failed to load conversations', error);
     });
   }, [isAuthenticated, loadConversations]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`);
+    if (saved === 'gpt-5.4' || saved === 'gemini') {
+      setGeneralResponseModel(saved);
+      return;
+    }
+    setGeneralResponseModel(DEFAULT_RESPONSE_MODEL);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`, generalResponseModel);
+  }, [generalResponseModel]);
+  useEffect(() => () => {
+    const recorder = generalRecorderRef.current;
+    generalRecorderRef.current = null;
+    if (!recorder) return;
+    void recorder.stop().catch(() => undefined);
+  }, []);
 
   const requireAuth = (path: string) => {
     if (!isAuthenticated) {
@@ -155,6 +252,77 @@ export default function HomePage() {
     }
     router.push(path);
   };
+
+  const ensureAuthenticated = useCallback(() => {
+    if (isAuthenticated) return true;
+    router.push('/login');
+    return false;
+  }, [isAuthenticated, router]);
+
+  const buildGenericChatUrl = useCallback((draft?: string) => {
+    const query = new URLSearchParams();
+    query.set('rm', generalResponseModel);
+    if (draft?.trim()) {
+      query.set('draft', draft.trim());
+    }
+    return `/chat/${GENERIC_CHAT_BOT_ID}?${query.toString()}`;
+  }, [generalResponseModel]);
+
+  const openGenericChat = useCallback((draft?: string) => {
+    if (!ensureAuthenticated()) return;
+    router.push(buildGenericChatUrl(draft));
+  }, [buildGenericChatUrl, ensureAuthenticated, router]);
+
+  const submitGenericChat = useCallback(() => {
+    const text = generalPrompt.trim();
+    if (!ensureAuthenticated()) return;
+    setGeneralPrompt('');
+    openGenericChat(text);
+  }, [ensureAuthenticated, generalPrompt, openGenericChat]);
+
+  const toggleGeneralVoice = useCallback(async () => {
+    if (!ensureAuthenticated()) return;
+
+    if (isGeneralRecording) {
+      setIsGeneralRecording(false);
+      const recorder = generalRecorderRef.current;
+      generalRecorderRef.current = null;
+      if (!recorder) return;
+
+      try {
+        const audioBlob = await recorder.stop();
+        if (audioBlob.size < 1000) {
+          throw new Error('录音时间太短，请重试');
+        }
+
+        setIsGeneralTranscribing(true);
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'homepage-recording.wav');
+
+        const response = await fetch('/api/voice', { method: 'POST', body: formData });
+        const data = await response.json();
+        const transcript = typeof data.text === 'string' ? data.text.trim() : '';
+
+        if (!transcript) {
+          throw new Error(data.error || '语音识别失败');
+        }
+
+        router.push(buildGenericChatUrl(transcript));
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '语音识别失败');
+      } finally {
+        setIsGeneralTranscribing(false);
+      }
+      return;
+    }
+
+    try {
+      generalRecorderRef.current = await startPcm16kMonoRecorder();
+      setIsGeneralRecording(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '无法访问麦克风');
+    }
+  }, [buildGenericChatUrl, ensureAuthenticated, isGeneralRecording, router]);
 
   const launchWorkflow = (tpl: typeof WF_TEMPLATES[0]) => {
     if (!isAuthenticated) { router.push('/login'); return; }
@@ -170,22 +338,25 @@ export default function HomePage() {
     router.push(`/chat/${tpl.steps[0].botId}?wf=1`);
   };
 
-  const categories = useMemo(() => [...new Set(MOCK_BOTS.map((b) => b.category))], []);
-  const filteredBots = MOCK_BOTS.filter((bot) => {
+  const categories = useMemo(
+    () => Array.from(new Set([...BUILTIN_CATEGORY_ORDER, IMAGE_TOOL.category])),
+    [],
+  );
+  const filteredBots = ALL_HOMEPAGE_BOTS.filter((bot) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return bot.name.toLowerCase().includes(q) || bot.description.toLowerCase().includes(q);
   });
 
-  const botsByCategory = categories.map((cat) => ({
+  const buildBotGroups = (bots: BotInfo[]) => categories.map((cat) => ({
     category: cat,
     icon: CATEGORY_ICONS[cat] || <Brain size={18} />,
-    bots: filteredBots.filter((b) => b.category === cat),
+    bots: bots.filter((b) => b.category === cat),
   })).filter((g) => g.bots.length > 0);
 
-  const imageToolMatched = !searchQuery
-    || IMAGE_TOOL.name.toLowerCase().includes(searchQuery.toLowerCase())
-    || IMAGE_TOOL.description.toLowerCase().includes(searchQuery.toLowerCase());
+  const formalBotGroups = buildBotGroups(filteredBots.filter((bot) => !bot.isTrial));
+  const trialBotGroups = buildBotGroups(filteredBots.filter((bot) => bot.isTrial));
+  const trialBotCount = trialBotGroups.reduce((count, group) => count + group.bots.length, 0);
 
   const sidebarConvs = (sidebarTab === 'favorites' ? favorites : conversations)
     .slice().sort((a, b) => b.updatedAt - a.updatedAt);
@@ -203,6 +374,31 @@ export default function HomePage() {
     const last = conv.messages[conv.messages.length - 1];
     return last ? last.content.replace(/\[文件:.*?\]/g, '[文件]').slice(0, 40) : '';
   };
+
+  const openBot = (bot: BotInfo) => {
+    if (bot.requiresAuth) {
+      requireAuth(bot.path);
+      return;
+    }
+    router.push(bot.path);
+  };
+
+  const renderBotCard = (bot: BotInfo, badge?: ReactNode, extraClassName?: string) => (
+    <div
+      key={bot.id}
+      className={[styles.botCard, extraClassName].filter(Boolean).join(' ')}
+      onClick={() => openBot(bot)}
+    >
+      <div className={styles.botIcon} style={{ background: `${bot.iconColor}15`, color: bot.iconColor }}>{bot.icon}</div>
+      <div className={styles.botInfo}>
+        <div className={styles.botHeading}>
+          <h4 className={styles.botName}>{bot.name}</h4>
+          {badge ?? (bot.isTrial ? <span className={`${styles.botBadge} badge badge-orange`}>试用版</span> : null)}
+        </div>
+        <p className={styles.botDesc}>{bot.description}</p>
+      </div>
+    </div>
+  );
 
   if (isLoading) return <div className={styles.loading}><div className={styles.spinner} /></div>;
 
@@ -280,86 +476,192 @@ export default function HomePage() {
                   <span className={styles.sidebarBotName}>{conv.botName || '机器人'}</span>
                   <span className={styles.sidebarTime}>{formatTime(conv.updatedAt)}</span>
                 </div>
-                <p className={styles.sidebarPreview}>{getLastMsg(conv)}</p>
-                <div className={styles.sidebarActions}>
-                  {sidebarTab === 'history' && (
-                    <button
-                      className={styles.sidebarActionBtn}
-                      style={{ color: conv.isFavorite ? '#eab308' : undefined }}
-                      onClick={(e) => { e.stopPropagation(); void toggleFavorite(conv.id); }}
+                <p className={          <section className={styles.generalComposerSection}>
+            <div className={styles.heroGreeting}>
+              <h2 className={styles.heroGreetingTitle}>
+                {isAuthenticated && user?.nickname
+                  ? <><span className={styles.heroGreetingHighlight}>{user.nickname}，你好</span><br />需要我为你做些什么？</>
+                  : <><span className={styles.heroGreetingHighlight}>你好</span><br />需要我为你做些什么？</>}
+              </h2>
+            </div>
+
+            <div className={styles.generalComposerCard}>
+              <textarea
+                value={generalPrompt}
+                onChange={(event) => setGeneralPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    if (generalPrompt.trim()) {
+                      submitGenericChat();
+                    }
+                  }
+                }}
+                className={styles.generalComposerInput}
+                placeholder={isGeneralTranscribing
+                  ? '语音转录中，请稍候...'
+                  : '在这里输入任何问题...'}
+                rows={2}
+              />
+
+              <div className={styles.generalComposerFooter}>
+                <div className={styles.generalComposerActions}>
+                  <button
+                    type="button"
+                    className={styles.generalComposerGhostBtn}
+                    onClick={() => openGenericChat()}
+                  >
+                    <Plus size={16} />
+                    新对话
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.generalComposerGhostBtn}
+                    onClick={() => openGenericChat()}
+                  >
+                    <Bot size={16} />
+                    通用聊天
+                  </button>
+                </div>
+
+                <div className={styles.generalComposerControls}>
+                  <div className={styles.generalComposerModelSwitcher}>
+                    <select
+                      aria-label="通用聊天回答模型"
+                      className={styles.generalComposerModelSelect}
+                      value={generalResponseModel}
+                      onChange={(event) => setGeneralResponseModel(event.target.value as ResponseModel)}
+                      disabled={isGeneralRecording || isGeneralTranscribing}
                     >
-                      <Star size={14} fill={conv.isFavorite ? '#eab308' : 'none'} />
-                    </button>
-                  )}
-                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); if (sidebarTab === 'favorites') { void removeFavorite(conv.id); } else { void deleteConversation(conv.id); } }}><Trash2 size={14} /></button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <main className={styles.main}>
-          <div className={styles.welcome}>
-            <h2>{isAuthenticated ? `欢迎回来，${user?.nickname}` : '欢迎来到电商 AI 智能平台'}</h2>
-            <p className={styles.welcomeSub}>{isAuthenticated ? '今天想先做哪项任务？' : '浏览全部机器人，快速开始你的业务任务。'}</p>
-          </div>
-
-          <div className={styles.workflowCards}>
-            {WF_TEMPLATES.map((wf) => (
-              <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => launchWorkflow(wf)}>
-                <h3 className={styles.wfCardTitle}><Zap size={16} /> {wf.title}</h3>
-                <div className={styles.wfSteps}>
-                  {wf.displaySteps.map((s, i) => <span key={i}>{s}{i < wf.displaySteps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
-                </div>
-                <button className={styles.wfLaunchBtn}>立即启动</button>
-              </div>
-            ))}
-            <div
-              className={styles.wfCard}
-              style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)' }}
-              onClick={() => requireAuth('/my-workflows')}
-            >
-              <h3 className={styles.wfCardTitle}><Plus size={16} /> 自定义工作流</h3>
-              <div className={styles.wfSteps}>
-                <span>从空白画布创建专属工作流</span>
-              </div>
-              <button className={styles.wfLaunchBtn}>开始创建</button>
-            </div>
-          </div>
-
-          {imageToolMatched && (
-            <div className={styles.categorySection}>
-              <h3 className={styles.categoryTitle}><Puzzle size={18} /> {IMAGE_TOOL.category}</h3>
-              <div className={styles.botGrid}>
-                <div className={styles.botCard} onClick={() => router.push(IMAGE_TOOL.route)}>
-                  <div className={styles.botIcon} style={{ background: IMAGE_TOOL.iconColor + '15', color: IMAGE_TOOL.iconColor }}>{IMAGE_TOOL.icon}</div>
-                  <div className={styles.botInfo}>
-                    <h4 className={styles.botName}>{IMAGE_TOOL.name}</h4>
-                    <p className={styles.botDesc}>{IMAGE_TOOL.description}</p>
+                      {RESPONSE_MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} className={styles.generalComposerModelChevron} />
                   </div>
+
+                  <button
+                    type="button"
+                    className={`${styles.generalComposerVoiceBtn} ${isGeneralRecording ? styles.generalComposerVoiceBtnActive : ''}`}
+                    onClick={() => void toggleGeneralVoice()}
+                    disabled={isGeneralTranscribing}
+                    title={isGeneralTranscribing ? '语音转录中...' : isGeneralRecording ? '停止录音' : '语音输入'}
+                  >
+                    {isGeneralTranscribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={styles.generalComposerSendBtn}
+                    onClick={() => {
+                      if (generalPrompt.trim()) {
+                        submitGenericChat();
+                        return;
+                      }
+                      openGenericChat();
+                    }}
+                    disabled={isGeneralRecording || isGeneralTranscribing}
+                  >
+                    <Send size={18} />
+                  </button>
                 </div>
               </div>
-            </div>
-          )}
 
-          {botsByCategory.map((group) => (
+              <p className={styles.generalComposerHint}>
+                {isGeneralRecording
+                  ? '正在录音，再点一次麦克风即可结束并进入通用聊天。'
+                  : isGeneralTranscribing
+                    ? '语音识别中，完成后会直接进入通用聊天。'
+                    : `当前默认回答模型：${generalResponseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}。输入需求、点击发送，或直接开始一段语音。`}
+              </p>
+            </div>
+          </section>oice()}
+                    disabled={isGeneralTranscribing}
+                    title={isGeneralTranscribing ? '语音转录中...' : isGeneralRecording ? '停止录音' : '语音输入'}
+                  >
+                    {isGeneralTranscribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={styles.generalComposerSendBtn}
+                    onClick={() => {
+                      if (generalPrompt.trim()) {
+                        submitGenericChat();
+                        return;
+                      }
+                      openGenericChat();
+                    }}
+                    disabled={isGeneralRecording || isGeneralTranscribing}
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <p className={styles.generalComposerHint}>
+                {isGeneralRecording
+                  ? '正在录音，再点一次麦克风即可结束并进入通用聊天。'
+                  : isGeneralTranscribing
+                    ? '语音识别中，完成后会直接进入通用聊天。'
+                    : `当前默认回答模型：${generalResponseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}。输入需求、点击发送，或直接开始一段语音。`}
+              </p>
+            </div>
+          </section>
+
+          {formalBotGroups.map((group) => (
             <div key={group.category} className={styles.categorySection}>
               <h3 className={styles.categoryTitle}>{group.icon} {group.category}</h3>
               <div className={styles.botGrid}>
-                {group.bots.map((bot) => (
-                  <div key={bot.id} className={styles.botCard} onClick={() => requireAuth(`/chat/${bot.id}`)}>
-                    <div className={styles.botIcon} style={{ background: bot.iconColor + '15', color: bot.iconColor }}>{bot.icon}</div>
-                    <div className={styles.botInfo}>
-                      <h4 className={styles.botName}>{bot.name}</h4>
-                      <p className={styles.botDesc}>{bot.description}</p>
-                    </div>
-                  </div>
+                {group.bots.map((bot) => renderBotCard(
+                  bot,
+                  <span className={`${styles.botBadge} badge badge-green`}>正式版</span>,
+                  bot.id === QIYA_ENTERPRISE_MANAGEMENT_BOT_ID ? styles.enterpriseBotCard : undefined,
                 ))}
               </div>
             </div>
           ))}
 
-          {!imageToolMatched && filteredBots.length === 0 && (
+          {trialBotGroups.length > 0 && (
+            <div className={styles.categorySection}>
+              <button
+                type="button"
+                className={styles.trialToggle}
+                onClick={() => setTrialBotsOpen((open) => !open)}
+                aria-expanded={trialBotsOpen}
+              >
+                <span className={styles.trialToggleText}>
+                  <span className={styles.trialToggleLabel}>
+                    {trialBotsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    试用版机器人
+                  </span>
+                  <span className={styles.trialToggleHint}>
+                    展开后按类型查看全部试用版机器人
+                  </span>
+                </span>
+                <span className={styles.trialToggleMeta}>
+                  {trialBotsOpen ? '收起分类' : `${trialBotCount} 个机器人`}
+                </span>
+              </button>
+
+              {trialBotsOpen ? (
+                <div className={styles.trialPanel}>
+                  {trialBotGroups.map((group) => (
+                    <div key={group.category} className={styles.trialCategorySection}>
+                      <h4 className={styles.trialCategoryTitle}>{group.icon} {group.category}</h4>
+                      <div className={styles.botGrid}>
+                        {group.bots.map((bot) => renderBotCard(bot))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {filteredBots.length === 0 && (
             <div className={styles.empty}><p>没有找到匹配的机器人</p></div>
           )}
         </main>

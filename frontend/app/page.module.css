@@ -477,6 +477,248 @@
   background: rgba(255, 255, 255, 0.35);
 }
 
+/* ===== General Composer ===== */
+.generalComposerSection {
+  display: grid;
+  gap: 18px;
+  margin-bottom: var(--space-xl);
+  padding: 28px;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 42%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 36%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.82));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.08);
+  animation: fadeIn var(--duration-slow) var(--ease-smooth);
+}
+
+.generalComposerIntro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.generalComposerEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.generalComposerTitle {
+  margin: 14px 0 8px;
+  font-size: clamp(26px, 4vw, 40px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+}
+
+.generalComposerSub {
+  margin: 0;
+  max-width: 760px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #475569;
+}
+
+.generalComposerLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-smooth),
+    border-color var(--duration-fast) var(--ease-smooth);
+}
+
+.generalComposerLink:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.28);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.generalComposerCard {
+  display: grid;
+  gap: 16px;
+  padding: 22px 24px 18px;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 16px 34px rgba(15, 23, 42, 0.06);
+}
+
+.generalComposerInput {
+  width: 100%;
+  min-height: 112px;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #0f172a;
+  outline: none;
+}
+
+.generalComposerInput::placeholder {
+  color: #94a3b8;
+}
+
+.generalComposerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.generalComposerActions,
+.generalComposerControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.generalComposerGhostBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-smooth),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.generalComposerGhostBtn:hover {
+  color: #0f172a;
+  transform: translateY(-1px);
+}
+
+.generalComposerModelSwitcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 140px;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  overflow: hidden;
+}
+
+.generalComposerModelSelect {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 10px 38px 10px 14px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.generalComposerModelSelect:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.generalComposerModelSelect:disabled {
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+.generalComposerModelChevron {
+  position: absolute;
+  right: 12px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.generalComposerVoiceBtn,
+.generalComposerSendBtn {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-smooth),
+    background var(--duration-fast) var(--ease-smooth),
+    color var(--duration-fast) var(--ease-smooth);
+}
+
+.generalComposerVoiceBtn {
+  background: rgba(226, 232, 240, 0.72);
+  color: #475569;
+}
+
+.generalComposerVoiceBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(191, 219, 254, 0.72);
+  color: #1d4ed8;
+}
+
+.generalComposerVoiceBtnActive {
+  background: rgba(254, 226, 226, 0.92);
+  color: #dc2626;
+  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.08);
+}
+
+.generalComposerSendBtn {
+  background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
+  color: white;
+  box-shadow: 0 18px 28px rgba(148, 163, 184, 0.22);
+}
+
+.generalComposerSendBtn:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 20px 32px rgba(59, 130, 246, 0.22);
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+}
+
+.generalComposerVoiceBtn:disabled,
+.generalComposerSendBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.generalComposerHint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
 /* ===== Category ===== */
 .categorySection {
   margin-bottom: var(--space-xl);
@@ -489,6 +731,87 @@
   color: var(--color-foreground);
   margin-bottom: var(--space-md);
   padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.enterpriseBotCard {
+  border-color: rgba(22, 163, 74, 0.2);
+  background:
+    linear-gradient(135deg, rgba(22, 163, 74, 0.08), rgba(22, 163, 74, 0) 62%),
+    var(--color-card);
+}
+
+.trialToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-card);
+  transition: all var(--duration-normal) var(--ease-smooth);
+}
+
+.trialToggle:hover {
+  border-color: hsla(var(--color-primary-raw), 0.35);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.trialToggleText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.trialToggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.trialToggleHint {
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  line-height: 1.4;
+}
+
+.trialToggleMeta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.trialPanel {
+  animation: fadeIn var(--duration-normal) var(--ease-smooth);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 14px;
+}
+
+.trialCategorySection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trialCategoryTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -555,11 +878,23 @@
   min-width: 0;
 }
 
+.botHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+
 .botName {
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 3px;
+  margin-bottom: 0;
   color: var(--color-foreground);
+}
+
+.botBadge {
+  flex-shrink: 0;
 }
 
 .botDesc {
@@ -615,9 +950,68 @@
     gap: 10px;
   }
 
+  .generalComposerSection {
+    padding: 18px 16px;
+    border-radius: 24px;
+    gap: 14px;
+  }
+
+  .generalComposerIntro {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .generalComposerTitle {
+    font-size: 26px;
+  }
+
+  .generalComposerCard {
+    padding: 18px 16px 16px;
+    border-radius: 24px;
+  }
+
+  .generalComposerInput {
+    min-height: 88px;
+    font-size: 14px;
+  }
+
+  .generalComposerFooter {
+    align-items: stretch;
+  }
+
+  .generalComposerActions,
+  .generalComposerControls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .generalComposerModelSwitcher {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .generalComposerModelSelect {
+    min-width: 0;
+  }
+
+  .generalComposerVoiceBtn,
+  .generalComposerSendBtn {
+    width: 48px;
+    height: 48px;
+  }
+
   .botGrid {
     grid-template-columns: 1fr 1fr;
     gap: 8px;
+  }
+
+  .trialToggle {
+    align-items: flex-start;
+    padding: 14px;
+  }
+
+  .trialToggleMeta {
+    font-size: 11px;
   }
 
   .botCard {

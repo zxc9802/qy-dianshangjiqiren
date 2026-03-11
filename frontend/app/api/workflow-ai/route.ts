@@ -1,25 +1,10 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '../../lib/prisma';
+import { BUILTIN_BOTS } from '../../lib/builtin-bots';
 import { readServerEnv } from '../../lib/server-env';
 import { getUserId, errorResponse } from '../../lib/auth';
 
-const BOT_LIST = [
-    { id: '1', name: 'KPI教练' }, { id: '2', name: 'SOP梳理AI教练' }, { id: '3', name: 'OKR教练' },
-    { id: '4', name: '电商商业顾问' }, { id: '5', name: '招聘教练' }, { id: '6', name: 'AI通用助手' },
-    { id: '7', name: '一键出10图提示词' }, { id: '8', name: '天猫爆款趋势拆解' }, { id: '9', name: '卖点教练' },
-    { id: '10', name: '天猫主图策划教练' }, { id: '11', name: '爆款裂变分析AI教练' }, { id: '12', name: '天猫评价教练' },
-    { id: '13', name: '天猫竞争策略教练' }, { id: '14', name: '天猫客单价提升教练' },
-    { id: '15', name: '小红书爆文封面拆解' }, { id: '16', name: '小红书私域搭建SOP' },
-    { id: '17', name: '小红书爆文拆解复制' }, { id: '18', name: '小红书爆款标题' },
-    { id: '19', name: '小红书起号话题' }, { id: '20', name: '小红书达人SOP流程' },
-    { id: '21', name: '小红书正文拆解SOP' }, { id: '22', name: '小红书笔记评论生成' },
-    { id: '23', name: '毛泽东战略智能体' }, { id: '24', name: '乔布斯产品教练' },
-    { id: '25', name: '张一鸣商业教练' }, { id: '26', name: '降税模型测算' },
-    { id: '27', name: '股权架构设计' }, { id: '28', name: '电商平台专项合规' },
-    { id: '29', name: '薪酬与个税规划' }, { id: '30', name: '预警诊断&稽查' },
-    { id: '31', name: 'AI工作流开发需求细化' }, { id: '32', name: '调研访谈—高价值场景' },
-    { id: '33', name: '火火提示词调试' }, { id: '34', name: 'AI工作流访谈教练' },
-];
+const BOT_LIST = BUILTIN_BOTS.map((bot) => ({ id: bot.routeId, name: bot.name }));
 
 const SYSTEM_PROMPT = `你是一个电商AI工作流设计师。用户会描述他想自动化的任务，你需要：
 

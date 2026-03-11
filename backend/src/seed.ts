@@ -1,8 +1,28 @@
 import { prisma } from './utils/prisma';
 import { getSystemPromptBySortOrder } from './utils/systemPrompts';
 
+const QIYA_ENTERPRISE_MANAGEMENT_PROMPT = [
+    '你是“起芽成长特助”，定位是职场成长与管理提效智能体。',
+    '你的任务是帮助用户处理升职加薪、SOP、OKR、KPI 制定，以及工作迷茫、成长方向、团队协同与管理提效相关问题。',
+    '回答时保持专业、清晰、务实，优先给出可执行结论、判断依据和落地步骤。',
+    '如果问题涉及规则、方法论或公司管理口径，优先结合内置知识库回答；如果知识库未覆盖，再用通用管理理解补充。',
+    '不要空泛喊口号，也不要大段照抄材料原文。',
+].join('\n');
+
+const GENERIC_CHAT_PROMPT = [
+    '回答规则：',
+    '1. 默认使用中文。',
+    '2. 不使用固定人设口吻，不自称，不做角色扮演。',
+    '3. 当用户目标、背景、限制条件、对象、优先级或交付形式还不清楚时，先提出 1 到 3 个最关键的澄清问题，再继续给方案。',
+    '4. 当信息已经足够时，直接给出结构化、具体、可执行的回答。',
+    '5. 如果用户明确要求不要继续追问，就基于合理假设直接回答，并先列出关键假设。',
+    '6. 回答避免空话，优先给步骤、判断标准、方案对比和下一步建议。',
+].join('\n');
+
 const BOTS = [
     // 管理工具
+    { name: '通用聊天', slug: 'generic-chat', category: '管理工具', icon: 'bot', description: '不预设固定人设，先帮你把目标、限制和交付要求问清，再给可执行方案。', pointsPerUse: 3, sortOrder: 36 },
+    { name: '起芽成长特助', slug: 'qiya-enterprise-management', category: '管理工具', icon: 'sprout', description: '升职加薪问我，不管是SOP,OKR,KPI如何制定，还是工作中有迷茫都可以找我', pointsPerUse: 8, sortOrder: 35 },
     { name: 'KPI教练', slug: 'kpi-coach', category: '管理工具', icon: 'target', description: '帮你设计可量化的KPI考核体系，让团队目标清晰，绩效公平', pointsPerUse: 5, sortOrder: 1 },
     { name: 'SOP梳理AI教练', slug: 'sop-coach', category: '管理工具', icon: 'list-checks', description: '把脑子里的经验变成纸上的标准流程，新人也能快速上手', pointsPerUse: 5, sortOrder: 2 },
     { name: 'OKR教练', slug: 'okr-coach', category: '管理工具', icon: 'goal', description: '聚焦战略目标，用OKR方法论让团队上下对齐', pointsPerUse: 5, sortOrder: 3 },
@@ -50,10 +70,14 @@ const BOTS = [
 ];
 
 async function seed() {
-    console.log('Seeding 34 bots...');
+    console.log('Seeding 36 bots...');
 
     for (const bot of BOTS) {
-        const systemPrompt = getSystemPromptBySortOrder(bot.sortOrder, `你是${bot.name}，请给出专业、结构化、可执行的建议。`);
+        const systemPrompt = bot.sortOrder === 35
+            ? QIYA_ENTERPRISE_MANAGEMENT_PROMPT
+            : bot.sortOrder === 36
+                ? GENERIC_CHAT_PROMPT
+                : getSystemPromptBySortOrder(bot.sortOrder, `你是${bot.name}，请给出专业、结构化、可执行的建议。`);
         await prisma.bot.upsert({
             where: { slug: bot.slug },
             update: { ...bot, systemPrompt },
@@ -72,7 +96,7 @@ async function seed() {
         });
     }
 
-    console.log('Seed complete: 34 bots + 3 test redeem codes');
+    console.log('Seed complete: 36 bots + 3 test redeem codes');
 }
 
 seed()

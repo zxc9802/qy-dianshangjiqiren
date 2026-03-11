@@ -1,15 +1,18 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
-import { readServerEnv } from '../../../../lib/server-env';
 import { getUserId, AppError, errorResponse } from '../../../../lib/auth';
 import {
     buildConversationImageSummary,
     encodeConversationImageMessage,
     isConversationImageTurn,
 } from '../../../../lib/conversation-message-codec';
+import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
+import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
+import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../../../lib/yunwu-openai-chat';
+import { streamYunwuGeminiChat } from '../../../../lib/yunwu-gemini-chat';
 import { generateImageViaBackend } from '../../../image-generations/proxy';
 
 const GLOBAL_RULES = `
@@ -51,24 +54,16 @@ function extractSuggestions(text: string): { suggestions: string[]; cleanRespons
     return { suggestions, cleanResponse };
 }
 
-function normalizeStreamUrl(rawUrl?: string): string {
-    let url = (rawUrl || 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:streamGenerateContent').trim();
-    url = url.replace(':generateContent', ':streamGenerateContent');
-    if (!/[?&]alt=sse(?:&|$)/.test(url)) {
-        url += url.includes('?') ? '&alt=sse' : '?alt=sse';
-    }
-    return url;
-}
-
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
         const userId = await getUserId(req);
         const { id: conversationId } = await params;
-        const { content, displayContent, inputType, aspectRatio } = z.object({
+        const { content, displayContent, inputType, aspectRatio, responseModel } = z.object({
             content: z.string().min(1),
             displayContent: z.string().optional(),
             inputType: z.enum(['text', 'voice', 'file', 'image']).default('text'),
             aspectRatio: z.string().min(3).max(10).optional(),
+            responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
         }).parse(await req.json());
 
         const conversation = await prisma.conversation.findFirst({
@@ -118,10 +113,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             const basePrompt = isPlaceholderPrompt(conversation.bot.systemPrompt)
                 ? getSystemPromptBySortOrder(conversation.bot.sortOrder, fallbackPrompt)
                 : conversation.bot.systemPrompt;
+            const knowledgePrompt = buildPromptWithBuiltinKnowledge(
+                bot.routeId,
+                basePrompt,
+                [
+                    ...conversation.messages.map((message) => ({
+                        role: message.role,
+                        content: message.content,
+                    })),
+                    { role: 'user', content },
+                ],
+            );
             const rules = conversation.bot.sortOrder >= 15 && conversation.bot.sortOrder <= 22
                 ? XHS_GLOBAL_RULES
                 : GLOBAL_RULES;
-            systemPrompt = `${basePrompt}\n\n${rules}`.trim();
+            systemPrompt = `${knowledgePrompt}\n\n${rules}`.trim();
         }
 
         await prisma.message.create({
@@ -133,16 +139,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
         });
 
-        const apiMessages = conversation.messages
+        const apiMessages: OpenAIChatMessage[] = conversation.messages
             .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
             .map((message) => ({
-                role: message.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: message.content }],
+                role: message.role === 'assistant' ? 'assistant' : 'user',
+                content: message.content,
             }));
-        apiMessages.push({ role: 'user', parts: [{ text: content }] });
-
-        const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
-        const apiKey = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY');
+        apiMessages.push({ role: 'user', content });
         const encoder = new TextEncoder();
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
 
@@ -232,69 +235,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         return;
                     }
 
-                    const upstream = await fetch(apiUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${apiKey}`,
-                        },
-                        body: JSON.stringify({
-                            contents: apiMessages,
-                            systemInstruction: { parts: [{ text: systemPrompt }] },
-                            generationConfig: { temperature: 0.8, topP: 0.95, maxOutputTokens: 8192 },
-                        }),
-                    });
+                    const handleStreamText = (text: string) => {
+                        if (!text) return;
 
-                    if (!upstream.ok || !upstream.body) {
-                        throw new Error(`AI API error: ${upstream.status}`);
-                    }
+                        fullResponse += text;
+                        const visibleResponse = stripSuggestionBlock(fullResponse);
+                        if (visibleResponse.length <= streamedVisibleLength) return;
 
-                    const reader = upstream.body.getReader();
-                    const decoder = new TextDecoder();
+                        const visibleDelta = visibleResponse.slice(streamedVisibleLength);
+                        streamedVisibleLength = visibleResponse.length;
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
+                    };
 
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-
-                        const chunk = decoder.decode(value, { stream: true });
-                        for (const line of chunk.split('\n')) {
-                            const trimmed = line.trim();
-                            if (!trimmed.startsWith('data:')) continue;
-
-                            const payload = trimmed.slice(5).trim();
-                            if (!payload || payload === '[DONE]') continue;
-
-                            let data: {
-                                candidates?: Array<{
-                                    content?: {
-                                        parts?: Array<{ text?: string }>;
-                                    };
-                                }>;
-                            };
-
-                            try {
-                                data = JSON.parse(payload) as {
-                                    candidates?: Array<{
-                                        content?: {
-                                            parts?: Array<{ text?: string }>;
-                                        };
-                                    }>;
-                                };
-                            } catch {
-                                continue;
-                            }
-
-                            const text = data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text || '').join('') || '';
-                            if (!text) continue;
-
-                            fullResponse += text;
-                            const visibleResponse = stripSuggestionBlock(fullResponse);
-                            if (visibleResponse.length <= streamedVisibleLength) continue;
-
-                            const visibleDelta = visibleResponse.slice(streamedVisibleLength);
-                            streamedVisibleLength = visibleResponse.length;
-                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
-                        }
+                    if (responseModel === 'gpt-5.4') {
+                        await streamYunwuOpenAIChat({
+                            systemPrompt,
+                            messages: apiMessages,
+                            temperature: 0.8,
+                            maxTokens: 8192,
+                            onText: handleStreamText,
+                        });
+                    } else {
+                        await streamYunwuGeminiChat({
+                            systemPrompt,
+                            messages: apiMessages.map((message) => ({
+                                role: message.role,
+                                content: typeof message.content === 'string' ? message.content : '',
+                            })),
+                            temperature: 0.8,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                            onText: handleStreamText,
+                        });
                     }
 
                     const { suggestions, cleanResponse } = extractSuggestions(fullResponse);

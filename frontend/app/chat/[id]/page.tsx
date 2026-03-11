@@ -5,6 +5,13 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
 import { api } from '../../lib/api';
+import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID } from '../../lib/builtin-bots';
+import {
+    DEFAULT_RESPONSE_MODEL,
+    RESPONSE_MODEL_OPTIONS,
+    RESPONSE_MODEL_STORAGE_PREFIX,
+    type ResponseModel,
+} from '../../lib/chat-models';
 import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
@@ -42,42 +49,7 @@ interface WfState {
     selectedMessages: Record<number, string[]>;
 }
 
-const BOT_NAMES: Record<string, string> = {
-    '1': 'KPI教练',
-    '2': 'SOP梳理AI教练',
-    '3': 'OKR教练',
-    '4': '电商商业顾问',
-    '5': '招聘教练',
-    '6': 'AI通用助手',
-    '7': '一键出10图提示词',
-    '8': '天猫爆款趋势拆解',
-    '9': '卖点教练',
-    '10': '天猫主图策划教练',
-    '11': '爆款裂变分析AI教练',
-    '12': '天猫评价教练',
-    '13': '天猫竞争策略教练',
-    '14': '天猫客单价提升教练',
-    '15': '小红书爆文封面拆解',
-    '16': '小红书私域搭建SOP',
-    '17': '小红书爆文拆解复制',
-    '18': '小红书爆款标题',
-    '19': '小红书起号话题',
-    '20': '小红书达人SOP流程',
-    '21': '小红书正文拆解SOP',
-    '22': '小红书笔记评论生成',
-    '23': '毛泽东战略智能体',
-    '24': '乔布斯产品教练',
-    '25': '张一鸣商业教练',
-    '26': '降税模型测算',
-    '27': '股权架构设计',
-    '28': '电商平台专项合规',
-    '29': '薪酬与个税规划',
-    '30': '预警诊断与稽查',
-    '31': 'AI工作流开发需求细化',
-    '32': '调研访谈-高价值场景',
-    '33': '火火提示词调优',
-    '34': 'AI工作流访谈教练',
-};
+const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
 
 function buildRoute(botId: string, params: { cid?: string | null; wf?: string | null; name?: string | null }) {
     const query = new URLSearchParams();
@@ -122,8 +94,18 @@ export default function ChatPage() {
     const conversationId = searchParams.get('cid');
     const workflowFlag = searchParams.get('wf');
     const urlName = searchParams.get('name');
+    const launcherDraft = searchParams.get('draft')?.trim() || '';
+    const requestedResponseModel = searchParams.get('rm') === 'gpt-5.4'
+        ? 'gpt-5.4'
+        : searchParams.get('rm') === 'gemini'
+            ? 'gemini'
+            : null;
+    const builtinBot = BUILTIN_BOT_MAP[botId];
     const fallbackBotName = BOT_NAMES[botId] || urlName || 'AI助手';
-    const fallbackWelcome = '你好，我是' + fallbackBotName + '，说说你的需求。';
+    const fallbackWelcome = builtinBot?.welcome
+        || (botId === GENERIC_CHAT_BOT_ID
+            ? '先告诉我你想解决什么。我会先把关键要求问清，再给你方案。'
+            : `你好，我是${fallbackBotName}，说说你的需求。`);
 
     const {
         conversations,
@@ -143,6 +125,7 @@ export default function ChatPage() {
     const [messages, setMessages] = useState<MessageItem[]>([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
     const [inputText, setInputText] = useState('');
     const [imageModeEnabled, setImageModeEnabled] = useState(false);
+    const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
     const [isStreaming, setIsStreaming] = useState(false);
     const [streamingText, setStreamingText] = useState('');
     const [imageStatusText, setImageStatusText] = useState('');
@@ -150,6 +133,7 @@ export default function ChatPage() {
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const skipHydrationConversationIdRef = useRef<string | null>(null);
+    const launcherDraftKeyRef = useRef<string | null>(null);
     const streamingFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
 
@@ -194,6 +178,25 @@ export default function ChatPage() {
     useEffect(() => {
         setSelectedMsgIds(new Set());
     }, [botId, conversationId]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (requestedResponseModel) {
+            setResponseModel(requestedResponseModel);
+            return;
+        }
+        const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`);
+        if (saved === 'gpt-5.4' || saved === 'gemini') {
+            setResponseModel(saved);
+            return;
+        }
+        setResponseModel(DEFAULT_RESPONSE_MODEL);
+    }, [botId, requestedResponseModel]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`, responseModel);
+    }, [botId, responseModel]);
 
     useEffect(() => {
         if (!conversationId) {
@@ -398,6 +401,7 @@ export default function ChatPage() {
                 displayContent: displayText,
                 inputType: isImageRequest ? 'image' : hasFiles ? 'file' : 'text',
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
+                responseModel,
             });
 
             if (!response.ok) {
@@ -535,7 +539,32 @@ export default function ChatPage() {
         }
     };
 
+    useEffect(() => {
+        if (!launcherDraft) {
+            launcherDraftKeyRef.current = null;
+            return;
+        }
+        if (conversationId || isLoadingConversation || isStreaming) return;
+        if (requestedResponseModel && responseModel !== requestedResponseModel) return;
+
+        const draftKey = `${botId}:${responseModel}:${launcherDraft}`;
+        if (launcherDraftKeyRef.current === draftKey) return;
+
+        launcherDraftKeyRef.current = draftKey;
+        void sendMessage(launcherDraft);
+    }, [
+        botId,
+        conversationId,
+        isLoadingConversation,
+        isStreaming,
+        launcherDraft,
+        requestedResponseModel,
+        responseModel,
+        sendMessage,
+    ]);
+
     const startNewConversation = () => {
+        launcherDraftKeyRef.current = null;
         clearAttachments();
         setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
         setInputText('');
@@ -1057,21 +1086,39 @@ export default function ChatPage() {
                     </div>
                 )}
                 <div className={styles.inputMeta}>
-                    <button
-                        type="button"
-                        className={`${styles.modeToggle} ${imageModeEnabled ? styles.modeToggleActive : ''}`}
-                        onClick={toggleImageMode}
-                        disabled={isStreaming || isUploading || isTranscribing}
-                    >
-                        <ImageIcon size={16} />
-                        {imageModeEnabled ? '绘图已开' : '绘图已关'}
-                    </button>
+                    <div className={styles.metaControls}>
+                        <button
+                            type="button"
+                            className={`${styles.modeToggle} ${imageModeEnabled ? styles.modeToggleActive : ''}`}
+                            onClick={toggleImageMode}
+                            disabled={isStreaming || isUploading || isTranscribing}
+                        >
+                            <ImageIcon size={16} />
+                            {imageModeEnabled ? '绘图已开' : '绘图已关'}
+                        </button>
+                        <div className={styles.modelSwitcher}>
+                            <select
+                                aria-label="回答模型"
+                                className={styles.modelSelect}
+                                value={responseModel}
+                                onChange={(event) => setResponseModel(event.target.value as ResponseModel)}
+                                disabled={isStreaming || isUploading || isTranscribing}
+                            >
+                                {RESPONSE_MODEL_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <ChevronDown size={16} className={styles.modelSelectChevron} />
+                        </div>
+                    </div>
                     <span className={styles.inputHint}>
                         {isStreaming && imageModeEnabled
                             ? (imageStatusText || '正在生成图片，通常需要 10 到 40 秒。')
                             : imageModeEnabled
-                            ? '当前输入会直接调用绘图能力，默认生成 1 张 1:1 图片。'
-                            : '关闭时为普通聊天模式。'}
+                            ? '当前输入会直接调用绘图能力，回答模型切换不会影响绘图结果。'
+                            : `当前回答模型：${responseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}，可实时切换。`}
                     </span>
                 </div>
                 <div className={styles.inputWrapper}>

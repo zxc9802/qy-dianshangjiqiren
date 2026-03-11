@@ -6,6 +6,8 @@ const router = Router();
 router.use(authMiddleware);
 
 const BOT_LIST = [
+    { id: '36', name: '通用聊天' },
+    { id: '35', name: '起芽成长特助' },
     { id: '1', name: 'KPI教练' }, { id: '2', name: 'SOP梳理AI教练' }, { id: '3', name: 'OKR教练' },
     { id: '4', name: '电商商业顾问' }, { id: '5', name: '招聘教练' }, { id: '6', name: 'AI通用助手' },
     { id: '7', name: '一键出10图提示词' }, { id: '8', name: '天猫爆款趋势拆解' }, { id: '9', name: '卖点教练' },
