@@ -26,7 +26,7 @@ import {
   FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
-  Package, BookOpen, Landmark, Menu, Plus, Sprout, ChevronDown, ChevronRight,
+  Package, BookOpen, Landmark, Menu, Sprout, ChevronDown, ChevronRight,
   Mic, Send, Loader2,
 } from 'lucide-react';
 
@@ -476,7 +476,26 @@ export default function HomePage() {
                   <span className={styles.sidebarBotName}>{conv.botName || '机器人'}</span>
                   <span className={styles.sidebarTime}>{formatTime(conv.updatedAt)}</span>
                 </div>
-                <p className={          <section className={styles.generalComposerSection}>
+                <p className={styles.sidebarPreview}>{getLastMsg(conv)}</p>
+                <div className={styles.sidebarActions}>
+                  {sidebarTab === 'history' && (
+                    <button
+                      className={styles.sidebarActionBtn}
+                      style={{ color: conv.isFavorite ? '#eab308' : undefined }}
+                      onClick={(e) => { e.stopPropagation(); void toggleFavorite(conv.id); }}
+                    >
+                      <Star size={14} fill={conv.isFavorite ? '#eab308' : 'none'} />
+                    </button>
+                  )}
+                  <button className={styles.sidebarActionBtn} onClick={(e) => { e.stopPropagation(); if (sidebarTab === 'favorites') { void removeFavorite(conv.id); } else { void deleteConversation(conv.id); } }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <main className={styles.main}>
+          <section className={styles.generalComposerSection}>
             <div className={styles.heroGreeting}>
               <h2 className={styles.heroGreetingTitle}>
                 {isAuthenticated && user?.nickname
@@ -505,25 +524,6 @@ export default function HomePage() {
               />
 
               <div className={styles.generalComposerFooter}>
-                <div className={styles.generalComposerActions}>
-                  <button
-                    type="button"
-                    className={styles.generalComposerGhostBtn}
-                    onClick={() => openGenericChat()}
-                  >
-                    <Plus size={16} />
-                    新对话
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.generalComposerGhostBtn}
-                    onClick={() => openGenericChat()}
-                  >
-                    <Bot size={16} />
-                    通用聊天
-                  </button>
-                </div>
-
                 <div className={styles.generalComposerControls}>
                   <div className={styles.generalComposerModelSwitcher}>
                     <select
@@ -568,46 +568,6 @@ export default function HomePage() {
                   </button>
                 </div>
               </div>
-
-              <p className={styles.generalComposerHint}>
-                {isGeneralRecording
-                  ? '正在录音，再点一次麦克风即可结束并进入通用聊天。'
-                  : isGeneralTranscribing
-                    ? '语音识别中，完成后会直接进入通用聊天。'
-                    : `当前默认回答模型：${generalResponseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}。输入需求、点击发送，或直接开始一段语音。`}
-              </p>
-            </div>
-          </section>oice()}
-                    disabled={isGeneralTranscribing}
-                    title={isGeneralTranscribing ? '语音转录中...' : isGeneralRecording ? '停止录音' : '语音输入'}
-                  >
-                    {isGeneralTranscribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={styles.generalComposerSendBtn}
-                    onClick={() => {
-                      if (generalPrompt.trim()) {
-                        submitGenericChat();
-                        return;
-                      }
-                      openGenericChat();
-                    }}
-                    disabled={isGeneralRecording || isGeneralTranscribing}
-                  >
-                    <Send size={18} />
-                  </button>
-                </div>
-              </div>
-
-              <p className={styles.generalComposerHint}>
-                {isGeneralRecording
-                  ? '正在录音，再点一次麦克风即可结束并进入通用聊天。'
-                  : isGeneralTranscribing
-                    ? '语音识别中，完成后会直接进入通用聊天。'
-                    : `当前默认回答模型：${generalResponseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}。输入需求、点击发送，或直接开始一段语音。`}
-              </p>
             </div>
           </section>
 
