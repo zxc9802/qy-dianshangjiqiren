@@ -15,7 +15,6 @@ const MAX_PROMPT_LENGTH = 2000;
 const MAX_REFERENCE_SIZE = 10 * 1024 * 1024;
 const STORAGE_ROOT = path.join(process.cwd(), 'storage');
 const GENERATED_DIR = path.join(STORAGE_ROOT, 'generated');
-const REFERENCES_DIR = path.join(STORAGE_ROOT, 'references');
 const IMAGE_API_PREFIX = '/api/image-assets/';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const DEFAULT_MODEL_URL = 'https://yunwu.ai/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
@@ -88,7 +87,6 @@ function extFromMime(mimeType: string): string {
 
 async function ensureStorageDirs() {
     await fs.mkdir(GENERATED_DIR, { recursive: true });
-    await fs.mkdir(REFERENCES_DIR, { recursive: true });
 }
 
 function toImageAssetPath(relativePath: string): string {
@@ -335,16 +333,9 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
     await ensureStorageDirs();
     const apiUrl = buildImageApiUrl();
 
-    let referenceImagePath: string | null = null;
     let referenceImageInput: { mimeType: string; base64: string } | undefined;
 
     if (req.file) {
-        const ext = extFromMime(req.file.mimetype);
-        const fileName = `${Date.now()}-${randomUUID()}.${ext}`;
-        const relative = path.join('references', fileName);
-        const absolute = path.join(STORAGE_ROOT, relative);
-        await fs.writeFile(absolute, req.file.buffer);
-        referenceImagePath = toImageAssetPath(relative);
         referenceImageInput = {
             mimeType: req.file.mimetype,
             base64: req.file.buffer.toString('base64'),
@@ -396,7 +387,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
             lighting: parsed.lighting,
             referenceStrength: parsed.referenceStrength,
             count: parsed.count,
-            referenceImagePath,
+            referenceImagePath: null,
             resultImagePaths,
             status,
             errorMessage: errors.length ? errors.join('\n') : null,
@@ -407,7 +398,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
         success: true,
         data: {
             ...saved,
-            referenceImagePath: toPublicAssetUrl(req, referenceImagePath),
+            referenceImagePath: null,
             resultImagePaths: normalizeResultPaths(req, resultImagePaths),
         },
     });
