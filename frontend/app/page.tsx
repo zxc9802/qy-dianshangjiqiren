@@ -26,7 +26,7 @@ import {
   FileText, PenTool, Rocket, ClipboardList, Puzzle, MessageSquare,
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
-  Package, BookOpen, Landmark, Menu, Sprout, ChevronDown, ChevronRight,
+  Package, BookOpen, Landmark, Menu, Plus, Sprout, ChevronDown, ChevronRight,
   Mic, Send, Loader2,
 } from 'lucide-react';
 
@@ -495,6 +495,29 @@ export default function HomePage() {
         </aside>
 
         <main className={styles.main}>
+          <div className={styles.workflowCards}>
+            {WF_TEMPLATES.map((wf) => (
+              <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => launchWorkflow(wf)}>
+                <h3 className={styles.wfCardTitle}><Zap size={16} /> {wf.title}</h3>
+                <div className={styles.wfSteps}>
+                  {wf.displaySteps.map((s, i) => <span key={i}>{s}{i < wf.displaySteps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
+                </div>
+                <button className={styles.wfLaunchBtn}>立即启动</button>
+              </div>
+            ))}
+            <div
+              className={styles.wfCard}
+              style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)' }}
+              onClick={() => requireAuth('/my-workflows')}
+            >
+              <h3 className={styles.wfCardTitle}><Plus size={16} /> 自定义工作流</h3>
+              <div className={styles.wfSteps}>
+                <span>从空白画布创建专属工作流</span>
+              </div>
+              <button className={styles.wfLaunchBtn}>开始创建</button>
+            </div>
+          </div>
+
           <section className={styles.generalComposerSection}>
             <div className={styles.heroGreeting}>
               <h2 className={styles.heroGreetingTitle}>
