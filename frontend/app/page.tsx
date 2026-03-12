@@ -27,7 +27,7 @@ import {
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
   Package, BookOpen, Landmark, Menu, Plus, Sprout, ChevronDown, ChevronRight,
-  Mic, Send, Loader2,
+  Mic, Send, Loader2, Video,
 } from 'lucide-react';
 
 interface BotInfo {
@@ -91,6 +91,19 @@ const IMAGE_TOOL: BotInfo = {
   icon: <ImageIcon size={22} />,
   iconColor: '#7c3aed',
   path: '/bot/image-generator',
+  pointsPerUse: 0,
+  isTrial: true,
+  requiresAuth: false,
+};
+
+const VIDEO_TOOL: BotInfo = {
+  id: 'video-generator',
+  name: '视频生成实验室',
+  category: '视频实验室',
+  description: '切换 Yunwu 各类视频接口，查看烟测可用性，配置参数并提交任务。',
+  icon: <Video size={22} />,
+  iconColor: '#0f766e',
+  path: '/bot/video-generator',
   pointsPerUse: 0,
   isTrial: true,
   requiresAuth: false,
@@ -187,7 +200,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   requiresAuth: true,
 }));
 
-const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, VIDEO_TOOL];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,
@@ -197,6 +210,7 @@ const CATEGORY_ICONS: Record<string, ReactNode> = {
   '财税': <Briefcase size={18} />,
   'AI陪跑教练': <Bot size={18} />,
   '绘图机器人': <Puzzle size={18} />,
+  '视频实验室': <Video size={18} />,
 };
 
 export default function HomePage() {
@@ -339,7 +353,7 @@ export default function HomePage() {
   };
 
   const categories = useMemo(
-    () => Array.from(new Set([...BUILTIN_CATEGORY_ORDER, IMAGE_TOOL.category])),
+    () => Array.from(new Set([...BUILTIN_CATEGORY_ORDER, IMAGE_TOOL.category, VIDEO_TOOL.category])),
     [],
   );
   const filteredBots = ALL_HOMEPAGE_BOTS.filter((bot) => {

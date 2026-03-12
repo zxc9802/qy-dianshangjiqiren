@@ -39,7 +39,9 @@ function escapeHtml(value: string): string {
 }
 
 function renderMarkdown(md: string): string {
-    const html = escapeHtml(md)
+    const safeLineBreakToken = '__SAFE_LINE_BREAK__';
+    const html = escapeHtml(md.replace(/<br\s*\/?>/gi, safeLineBreakToken))
+        .replace(new RegExp(safeLineBreakToken, 'g'), '<br>')
         .replace(/^#{1,6}\s*/gm, '')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code>$1</code>')

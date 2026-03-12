@@ -22,7 +22,7 @@ import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, loadTempVideo } from '../../../../lib/server-chat-video';
-import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../../../lib/yunwu-openai-chat';
+import { requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../../../lib/yunwu-openai-chat';
 import {
     streamYunwuGeminiChat,
     type GeminiChatMessage,
@@ -308,6 +308,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 ? XHS_GLOBAL_RULES
                 : GLOBAL_RULES;
             systemPrompt = `${knowledgePrompt}\n\n${rules}`.trim();
+
+            // Inject knowledge documents uploaded by admin for this preset bot
+            const presetDocs = await prisma.presetBotDocument.findMany({
+                where: { botId: conversation.bot.id },
+                select: { fileName: true, parsedText: true },
+                orderBy: { createdAt: 'asc' },
+            });
+            if (presetDocs.length > 0) {
+                const presetKnowledge = presetDocs
+                    .map((doc) => `### ${doc.fileName}\n${doc.parsedText}`)
+                    .join('\n\n---\n\n');
+                systemPrompt = `${systemPrompt}\n\n# 管理员知识库\n以下是管理员上传的参考资料，请在回答时参考：\n\n${presetKnowledge}`;
+            }
         }
 
         const userMessage = await prisma.message.create({
@@ -339,8 +352,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 content: buildStoredMessagePromptText(message),
             }));
 
-        const encoder = new TextEncoder();
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
+
+        if (inputType !== 'image' && responseModel === 'gpt-5.4') {
+            const fullResponse = await requestYunwuOpenAIChat({
+                systemPrompt,
+                messages: [
+                    ...historyMessages,
+                    { role: 'user', content: currentPromptText },
+                ],
+                temperature: 0.8,
+                maxTokens: 8192,
+            });
+
+            const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
+
+            await prisma.$transaction(async (tx) => {
+                await tx.message.create({
+                    data: {
+                        conversationId,
+                        role: 'assistant',
+                        content: cleanResponse,
+                        suggestions: suggestions.length ? JSON.stringify(suggestions) : null,
+                    },
+                });
+
+                await tx.conversation.update({
+                    where: { id: conversationId },
+                    data: {
+                        title: shouldSetInitialTitle
+                            ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
+                            : conversation.title,
+                        updatedAt: new Date(),
+                    },
+                });
+            });
+
+            await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
+
+            return Response.json({
+                success: true,
+                data: {
+                    kind: 'text',
+                    content: cleanResponse,
+                    suggestions,
+                },
+            });
+        }
+
+        const encoder = new TextEncoder();
 
         const stream = new ReadableStream({
             async start(controller) {
@@ -428,12 +488,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         return;
                     }
 
-                    const handleStreamText = (textChunk: string) => {
-                        if (!textChunk) {
-                            return;
-                        }
-
-                        fullResponse += textChunk;
+                    const flushVisibleText = () => {
                         const visibleResponse = stripSuggestionBlock(fullResponse);
                         if (visibleResponse.length <= streamedVisibleLength) {
                             return;
@@ -444,33 +499,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                     };
 
-                    if (responseModel === 'gpt-5.4') {
-                        await streamYunwuOpenAIChat({
-                            systemPrompt,
-                            messages: [
-                                ...historyMessages,
-                                { role: 'user', content: currentPromptText },
-                            ],
-                            temperature: 0.8,
-                            maxTokens: 8192,
-                            onText: handleStreamText,
-                        });
-                    } else {
-                        const geminiMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
-                            role: message.role,
-                            content: typeof message.content === 'string' ? message.content : '',
-                        }));
-                        geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
+                    const geminiMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
+                        role: message.role,
+                        content: typeof message.content === 'string' ? message.content : '',
+                    }));
+                    geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
 
-                        await streamYunwuGeminiChat({
-                            systemPrompt,
-                            messages: geminiMessages,
-                            temperature: 0.8,
-                            topP: 0.95,
-                            maxOutputTokens: 8192,
-                            onText: handleStreamText,
-                        });
-                    }
+                    await streamYunwuGeminiChat({
+                        systemPrompt,
+                        messages: geminiMessages,
+                        temperature: 0.8,
+                        topP: 0.95,
+                        maxOutputTokens: 8192,
+                        onText: (textChunk) => {
+                            if (!textChunk) {
+                                return;
+                            }
+
+                            fullResponse += textChunk;
+                            flushVisibleText();
+                        },
+                    });
 
                     const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
 

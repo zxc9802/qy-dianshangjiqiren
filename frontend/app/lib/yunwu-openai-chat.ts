@@ -18,12 +18,22 @@ type OpenAIRequestMessage = {
     content: string | OpenAIContentPart[];
 };
 
-type StreamOptions = {
+type OpenAIChatOptions = {
     systemPrompt: string;
     messages: OpenAIChatMessage[];
-    onText: (text: string) => void;
     temperature?: number;
     maxTokens?: number;
+};
+
+type StreamOptions = OpenAIChatOptions & {
+    onText: (text: string) => void;
+};
+
+type OpenAIResponsePayload = {
+    choices?: Array<{
+        delta?: { content?: unknown };
+        message?: { content?: unknown };
+    }>;
 };
 
 export function getYunwuOpenAIChatConfig(): {
@@ -74,6 +84,23 @@ function normalizeMessages(systemPrompt: string, messages: OpenAIChatMessage[]):
         { role: 'system', content: systemPrompt.trim() },
         ...normalizedMessages,
     ];
+}
+
+function buildRequestBody(
+    model: string,
+    systemPrompt: string,
+    messages: OpenAIChatMessage[],
+    temperature: number,
+    maxTokens: number,
+    stream: boolean,
+) {
+    return {
+        model,
+        stream,
+        temperature,
+        max_tokens: maxTokens,
+        messages: normalizeMessages(systemPrompt, messages),
+    };
 }
 
 function extractTextsFromContent(content: unknown): string[] {
@@ -135,6 +162,49 @@ export function extractOpenAIStreamTexts(payload: string): string[] {
     }
 }
 
+export async function requestYunwuOpenAIChat({
+    systemPrompt,
+    messages,
+    temperature = 0.8,
+    maxTokens = 8192,
+}: OpenAIChatOptions): Promise<string> {
+    const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
+
+    const upstream = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+            buildRequestBody(model, systemPrompt, messages, temperature, maxTokens, false),
+        ),
+    });
+
+    const rawResponse = await upstream.text().catch(() => upstream.statusText);
+    if (!upstream.ok) {
+        throw new AppError(`Upstream chat request failed: ${rawResponse || upstream.statusText}`, upstream.status);
+    }
+
+    let data: OpenAIResponsePayload;
+    try {
+        data = JSON.parse(rawResponse) as OpenAIResponsePayload;
+    } catch {
+        throw new AppError(`Upstream chat request failed: ${rawResponse || 'Invalid JSON response'}`, 502);
+    }
+
+    if (!data.choices?.length) {
+        throw new AppError('Upstream chat response missing choices', 502);
+    }
+
+    const content = data.choices[0]?.message?.content;
+    if (typeof content === 'undefined' || content === null) {
+        throw new AppError('Upstream chat response missing message content', 502);
+    }
+
+    return extractTextsFromContent(content).join('');
+}
+
 export async function streamYunwuOpenAIChat({
     systemPrompt,
     messages,
@@ -143,7 +213,6 @@ export async function streamYunwuOpenAIChat({
     maxTokens = 8192,
 }: StreamOptions): Promise<void> {
     const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
-    const requestMessages = normalizeMessages(systemPrompt, messages);
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
@@ -151,13 +220,9 @@ export async function streamYunwuOpenAIChat({
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            model,
-            stream: true,
-            temperature,
-            max_tokens: maxTokens,
-            messages: requestMessages,
-        }),
+        body: JSON.stringify(
+            buildRequestBody(model, systemPrompt, messages, temperature, maxTokens, true),
+        ),
     });
 
     if (!upstream.ok || !upstream.body) {

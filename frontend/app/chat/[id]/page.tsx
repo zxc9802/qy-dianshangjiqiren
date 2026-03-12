@@ -1,10 +1,12 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
 import { api, type AttachmentInfo, type ChatAttachmentPayload } from '../../lib/api';
+import { useAuthStore } from '../../stores/auth';
+import AdminBotPanel from '../../components/AdminBotPanel';
 import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID } from '../../lib/builtin-bots';
 import {
     buildMessageDisplayContent,
@@ -23,7 +25,7 @@ import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
     ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
-    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon, Video,
+    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon, Video, Settings,
 } from 'lucide-react';
 
 interface MessageAttachment extends Omit<AttachmentInfo, 'id' | 'fileType' | 'fileUrl' | 'kind'> {
@@ -185,6 +187,10 @@ export default function ChatPage() {
     const [isTranscribing, setIsTranscribing] = useState(false);
     const recorderRef = useRef<Pcm16Recorder | null>(null);
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+    const { user } = useAuthStore();
+    const isAdmin = user?.role === 'admin';
+    const adminBotKind: 'builtin' | 'custom' = botId.startsWith('custom-') ? 'custom' : 'builtin';
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -957,6 +963,12 @@ export default function ChatPage() {
                     </button>
                 </div>
                 <div className={styles.headerRight}>
+                    {isAdmin && (
+                        <button onClick={() => setAdminPanelOpen(true)} className={styles.historyBtn} title="管理员设置">
+                            <Settings size={14} />
+                            管理
+                        </button>
+                    )}
                     <button onClick={generateReport} className={styles.historyBtn} disabled={isGeneratingReport || isStreaming}>
                         {isGeneratingReport ? (
                             <>
@@ -1347,18 +1359,29 @@ export default function ChatPage() {
                     </button>
                 </div>
             </div>
+            {isAdmin && (
+                <AdminBotPanel
+                    botId={botId}
+                    botKind={adminBotKind}
+                    isOpen={adminPanelOpen}
+                    onClose={() => setAdminPanelOpen(false)}
+                />
+            )}
         </div>
     );
 }
 
 function formatMessage(text: string): string {
+    const safeLineBreakToken = '__SAFE_LINE_BREAK__';
     let formatted = text;
 
     formatted = formatted.replace(/```json[\s\S]*?\{"suggestions":\[\s\S]*?\}[\s\S]*?```/g, '');
     formatted = formatted.replace(/^#{1,6}\s*/gm, '');
     formatted = formatted.replace(/\n{3,}/g, '\n\n');
     formatted = formatted.replace(/\n\n+(\|)/g, '\n$1');
+    formatted = formatted.replace(/<br\s*\/?>/gi, safeLineBreakToken);
     formatted = formatted.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    formatted = formatted.replace(new RegExp(safeLineBreakToken, 'g'), '<br>');
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/^[\*\-\u2022]\s+/gm, '• ');
     formatted = formatted.replace(/^(\d+[\.\)\u3001])\s+/gm, '$1 ');

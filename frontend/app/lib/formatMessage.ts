@@ -5,6 +5,14 @@ function escapeHtml(value: string): string {
         .replace(/>/g, '&gt;');
 }
 
+const SAFE_LINE_BREAK_PATTERN = /<br\s*\/?>/gi;
+const SAFE_LINE_BREAK_TOKEN = '__SAFE_LINE_BREAK__';
+
+function escapeHtmlPreservingLineBreaks(value: string): string {
+    return escapeHtml(value.replace(SAFE_LINE_BREAK_PATTERN, SAFE_LINE_BREAK_TOKEN))
+        .replace(new RegExp(SAFE_LINE_BREAK_TOKEN, 'g'), '<br>');
+}
+
 function cleanResidualMarkdown(text: string): string {
     return text
         .replace(/\\([*_#`])/g, '$1')
@@ -14,20 +22,19 @@ function cleanResidualMarkdown(text: string): string {
         .trim();
 }
 
-function formatInline(text: string): string {
-    const source = text.replace(/\r/g, '');
+function formatInlineSegment(source: string): string {
     const pattern = /(\*\*|__)(.+?)\1/g;
     let result = '';
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
     while ((match = pattern.exec(source)) !== null) {
-        const before = cleanResidualMarkdown(escapeHtml(source.slice(lastIndex, match.index)));
+        const before = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(source.slice(lastIndex, match.index)));
         if (before) {
             result += before;
         }
 
-        const strongText = cleanResidualMarkdown(escapeHtml(match[2] || ''));
+        const strongText = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(match[2] || ''));
         if (strongText) {
             result += `<strong>${strongText}</strong>`;
         }
@@ -35,12 +42,16 @@ function formatInline(text: string): string {
         lastIndex = match.index + match[0].length;
     }
 
-    const trailing = cleanResidualMarkdown(escapeHtml(source.slice(lastIndex)));
+    const trailing = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(source.slice(lastIndex)));
     if (trailing) {
         result += trailing;
     }
 
     return result;
+}
+
+function formatInline(text: string): string {
+    return formatInlineSegment(text.replace(/\r/g, ''));
 }
 
 export function formatMessage(text: string): string {

@@ -161,6 +161,17 @@ export default function FullPlanPage() {
                     throw new Error('接口请求失败');
                 }
 
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const payload = await response.json() as { data?: { content?: string } };
+                    const fullText = typeof payload.data?.content === 'string' ? payload.data.content : '';
+                    prevResult = fullText;
+                    setSteps((current) => current.map((step, currentIndex) => (
+                        currentIndex === index ? { ...step, status: 'done', result: fullText } : step
+                    )));
+                    continue;
+                }
+
                 const reader = response.body?.getReader();
                 const decoder = new TextDecoder();
                 let fullText = '';

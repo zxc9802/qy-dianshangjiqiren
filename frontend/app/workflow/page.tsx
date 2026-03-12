@@ -121,6 +121,18 @@ export default function WorkflowPage() {
 
                 if (!res.ok) throw new Error('API error');
 
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const payload = await res.json() as { data?: { content?: string } };
+                    const fullText = typeof payload.data?.content === 'string' ? payload.data.content : '';
+                    const cleaned = fullText.replace(/```json[\s\S]*?```/g, '').trim();
+                    stepResults[i].content = cleaned;
+                    stepResults[i].status = 'done';
+                    prevOutput = cleaned;
+                    setResults([...stepResults]);
+                    continue;
+                }
+
                 const reader = res.body!.getReader();
                 const decoder = new TextDecoder();
                 let fullText = '';

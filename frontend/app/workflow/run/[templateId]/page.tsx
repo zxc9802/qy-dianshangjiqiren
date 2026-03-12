@@ -65,6 +65,16 @@ ${stepsContent}
         }),
       });
       if (!res.ok) throw new Error('error');
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const payload = await res.json() as { data?: { content?: string } };
+        setReportText(typeof payload.data?.content === 'string' ? payload.data.content : '');
+        setDone(true);
+        setIsGenerating(false);
+        return;
+      }
+
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let full = '';

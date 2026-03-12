@@ -143,6 +143,37 @@ export const api = {
     revokeInviteCodeUsage: (inviteCodeId: string) =>
         request<{ success: boolean }>(`/admin/invite-codes/${inviteCodeId}/revoke`, { method: 'POST' }),
 
+    // Admin bot management
+    adminGetBot: (id: string, kind: 'builtin' | 'custom') =>
+        request<{ success: boolean; data: AdminBotDetail }>(`/admin/bots/${id}?kind=${kind}`),
+
+    adminUpdateBot: (id: string, kind: 'builtin' | 'custom', body: { systemPrompt?: string; name?: string; description?: string }) =>
+        request<{ success: boolean; data: { id: string } }>(`/admin/bots/${id}?kind=${kind}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+    adminGetBotDocuments: (botId: string, kind: 'builtin' | 'custom') =>
+        request<{ success: boolean; data: AdminBotDocumentInfo[] }>(`/admin/bots/${botId}/documents?kind=${kind}`),
+
+    adminUploadBotDocument: (botId: string, kind: 'builtin' | 'custom', doc: { fileName: string; fileType: string; fileSize: number; parsedText: string }) =>
+        request<{ success: boolean; data: AdminBotDocumentInfo }>(`/admin/bots/${botId}/documents?kind=${kind}`, { method: 'POST', body: JSON.stringify(doc) }),
+
+    adminDeleteBotDocument: (botId: string, docId: string, kind: 'builtin' | 'custom') =>
+        request<{ success: boolean }>(`/admin/bots/${botId}/documents/${docId}?kind=${kind}`, { method: 'DELETE' }),
+
+    adminGetDocumentContent: (botId: string, docId: string, kind: 'builtin' | 'custom') =>
+        request<{ success: boolean; data: AdminBotDocumentInfo & { parsedText: string } }>(`/admin/bots/${botId}/documents/${docId}?kind=${kind}`),
+
+    adminUpdateDocument: (botId: string, docId: string, kind: 'builtin' | 'custom', body: { parsedText?: string; fileName?: string }) =>
+        request<{ success: boolean; data: AdminBotDocumentInfo }>(`/admin/bots/${botId}/documents/${docId}?kind=${kind}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+    adminGetBuiltinKnowledge: (sourceId: string) =>
+        request<{ success: boolean; data: { sourceId: string; title: string; charCount: number; chunkCount: number; parsedText: string } }>(`/admin/builtin-knowledge/${sourceId}`),
+
+    adminUpdateBuiltinKnowledge: (sourceId: string, body: { title?: string; parsedText?: string }) =>
+        request<{ success: boolean; data: { sourceId: string; title: string; charCount: number; chunkCount: number } }>(`/admin/builtin-knowledge/${sourceId}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+    adminDeleteBuiltinKnowledge: (sourceId: string) =>
+        request<{ success: boolean }>(`/admin/builtin-knowledge/${sourceId}`, { method: 'DELETE' }),
+
     // Bots
     getBots: (params?: { category?: string; search?: string }) => {
         const qs = new URLSearchParams(params as Record<string, string>).toString();
@@ -214,6 +245,21 @@ export const api = {
 
     deleteImageGeneration: (id: string) =>
         request<{ success: boolean }>(`/image-generations/${id}`, { method: 'DELETE' }),
+
+    // Video generations
+    getVideoGenerationModels: () =>
+        request<{ success: boolean; data: VideoGenerationModelResponse }>('/video-generations/models'),
+
+    generateVideo: (body: VideoGenerationRequest) =>
+        request<{ success: boolean; data: VideoGenerationTaskResponse }>('/video-generations/generate', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
+    getVideoGenerationStatus: (params: { familyId: string; taskId: string }) => {
+        const qs = new URLSearchParams(params).toString();
+        return request<{ success: boolean; data: VideoGenerationStatusResponse }>(`/video-generations/status?${qs}`);
+    },
 
     // Image prompt custom tags
     getImagePromptTags: () =>
@@ -423,6 +469,83 @@ export interface ImageGenerationListResponse {
     nextCursor: string | null;
 }
 
+export type VideoFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'url-list' | 'json';
+
+export interface VideoFieldOption {
+    label: string;
+    value: string;
+}
+
+export interface VideoFieldDefinition {
+    key: string;
+    label: string;
+    type: VideoFieldType;
+    required?: boolean;
+    placeholder?: string;
+    description?: string;
+    defaultValue?: string | number | boolean;
+    options?: VideoFieldOption[];
+    min?: number;
+    max?: number;
+    step?: number;
+    rows?: number;
+}
+
+export type VideoVerificationState = 'working' | 'blocked' | 'partial' | 'submission_only';
+export type VideoSupportState = 'supported' | 'not_listed';
+
+export interface VideoGenerationFamily {
+    id: string;
+    label: string;
+    description: string;
+    createPath: string;
+    queryPathTemplate?: string;
+    supportNotes: string;
+    fields: VideoFieldDefinition[];
+    supportState: VideoSupportState;
+    supportedModels: string[];
+    verification: {
+        state: VideoVerificationState;
+        summary: string;
+        testedAt: string;
+    };
+}
+
+export interface VideoGenerationModelResponse {
+    rawModels: string[];
+    families: VideoGenerationFamily[];
+}
+
+export interface VideoGenerationRequest {
+    familyId: string;
+    inputs: Record<string, unknown>;
+}
+
+export interface VideoUpstreamPayload {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    data: unknown;
+}
+
+export interface VideoGenerationTaskResponse {
+    familyId: string;
+    taskId: string;
+    create: VideoUpstreamPayload;
+    latest: VideoUpstreamPayload | null;
+    latestError: string | null;
+    status: string | null;
+    videoUrl: string | null;
+}
+
+export interface VideoGenerationStatusResponse {
+    familyId: string;
+    taskId: string;
+    query: VideoUpstreamPayload;
+    status: string | null;
+    videoUrl: string | null;
+}
+
 export interface ImagePromptTagItem {
     id: string;
     userId: string;
@@ -564,3 +687,24 @@ export interface InviteCodeUsageInfo {
     } | null;
 }
 
+
+export interface AdminBotDetail {
+    id: string;
+    name: string;
+    kind: 'builtin' | 'custom';
+    systemPrompt: string;
+    description: string;
+    icon: string;
+    category?: string;
+    documents: AdminBotDocumentInfo[];
+}
+
+export interface AdminBotDocumentInfo {
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    createdAt: string;
+    isBuiltin?: boolean;
+    chunkCount?: number;
+}

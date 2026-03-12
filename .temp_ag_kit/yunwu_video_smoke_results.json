@@ -1,0 +1,539 @@
+[
+  {
+    "test": "unified-veo3.1-fast",
+    "create": {
+      "name": "unified-veo3.1-fast",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/v1/video/create",
+      "ms": 2027,
+      "data": {
+        "id": "veo3.1-fast:1773298204-vlNUT3Nxdu",
+        "status": "pending",
+        "status_update_time": 1773298204893
+      }
+    },
+    "taskId": "veo3.1-fast:1773298204-vlNUT3Nxdu",
+    "query": {
+      "name": "unified-veo3.1-fast-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/v1/video/query?id=veo3.1-fast%3A1773298204-vlNUT3Nxdu",
+      "ms": 341,
+      "data": {
+        "id": "veo3.1-fast:1773298204-vlNUT3Nxdu",
+        "model": "veo3.1-fast",
+        "status": "pending",
+        "video_url": null,
+        "enhanced_prompt": null,
+        "status_update_time": 1773298204893
+      }
+    }
+  },
+  {
+    "test": "unified-grok-video-3-10s",
+    "create": {
+      "name": "unified-grok-video-3-10s",
+      "ok": false,
+      "status": 0,
+      "url": "https://yunwu.ai/v1/video/create",
+      "ms": 35022,
+      "error": "timeout:unified-grok-video-3-10s"
+    },
+    "taskId": null,
+    "query": null
+  },
+  {
+    "test": "openai-sora-2",
+    "create": {
+      "name": "openai-sora-2",
+      "ok": false,
+      "status": 500,
+      "url": "https://yunwu.ai/v1/videos",
+      "ms": 10016,
+      "data": {
+        "code": "do_request_failed",
+        "message": "do request failed: Post \"http://proxy.ten-clock.com:5000/v1/videos\": dial tcp 104.194.9.201:5000: connect: connection timed out",
+        "data": null
+      }
+    },
+    "taskId": null,
+    "query": null
+  },
+  {
+    "test": "hailuo-02",
+    "create": {
+      "name": "hailuo-02",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/minimax/v1/video_generation",
+      "ms": 1606,
+      "data": {
+        "task_id": "375788019269725",
+        "status": "Preparing",
+        "base_resp": {
+          "status_code": 0,
+          "status_msg": "success"
+        }
+      }
+    },
+    "taskId": "375788019269725",
+    "query": {
+      "name": "hailuo-02-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/minimax/v1/query/video_generation?task_id=375788019269725",
+      "ms": 1202,
+      "data": {
+        "status": "Preparing",
+        "task_id": "375788019269725",
+        "base_resp": {
+          "status_msg": "success",
+          "status_code": 0
+        }
+      }
+    }
+  },
+  {
+    "test": "runway-gen4-turbo",
+    "create": {
+      "name": "runway-gen4-turbo",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/runwayml/v1/image_to_video",
+      "ms": 3046,
+      "data": {
+        "id": "24c36a03-864c-4385-b05f-640882c04b23",
+        "status": "submitted"
+      }
+    },
+    "taskId": "24c36a03-864c-4385-b05f-640882c04b23",
+    "query": {
+      "name": "runway-gen4-turbo-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/runwayml/v1/tasks/24c36a03-864c-4385-b05f-640882c04b23",
+      "ms": 1192,
+      "data": {
+        "id": "24c36a03-864c-4385-b05f-640882c04b23"
+      }
+    }
+  },
+  {
+    "test": "kling-text2video",
+    "create": {
+      "name": "kling-text2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/kling/v1/videos/text2video",
+      "ms": 2216,
+      "data": {
+        "code": 0,
+        "message": "SUCCEED",
+        "request_id": "a9c03c89-cfad-4a29-bcb7-f3744faacc95",
+        "data": {
+          "task_id": "860963709240754247",
+          "task_status": "submitted",
+          "task_info": {},
+          "created_at": 1773298262997,
+          "updated_at": 1773298262997
+        }
+      }
+    },
+    "taskId": "860963709240754247",
+    "query": {
+      "name": "kling-text2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/kling/v1/videos/text2video/860963709240754247",
+      "ms": 340,
+      "data": {
+        "code": 0,
+        "data": {
+          "task_id": "860963709240754247",
+          "task_info": {},
+          "created_at": 1773298262997,
+          "updated_at": 1773298262997,
+          "task_status": "submitted"
+        },
+        "mode": "std",
+        "message": "SUCCEED",
+        "model_name": "kling-v1",
+        "request_id": "a9c03c89-cfad-4a29-bcb7-f3744faacc95"
+      }
+    }
+  },
+  {
+    "test": "kling-image2video",
+    "create": {
+      "name": "kling-image2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/kling/v1/videos/image2video",
+      "ms": 729,
+      "data": {
+        "code": 0,
+        "message": "SUCCEED",
+        "request_id": "4ec83fdc-855a-489a-bdb8-550b535f3d21",
+        "data": {
+          "task_id": "860963719504359485",
+          "task_status": "submitted",
+          "task_info": {},
+          "created_at": 1773298265446,
+          "updated_at": 1773298265446
+        }
+      }
+    },
+    "taskId": "860963719504359485",
+    "query": {
+      "name": "kling-image2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/kling/v1/videos/image2video/860963719504359485",
+      "ms": 335,
+      "data": {
+        "code": 0,
+        "data": {
+          "task_id": "860963719504359485",
+          "task_info": {},
+          "created_at": 1773298265446,
+          "updated_at": 1773298265446,
+          "task_status": "submitted"
+        },
+        "mode": "std",
+        "message": "SUCCEED",
+        "model_name": "kling-v1",
+        "request_id": "4ec83fdc-855a-489a-bdb8-550b535f3d21"
+      }
+    }
+  },
+  {
+    "test": "vidu-text2video",
+    "create": {
+      "name": "vidu-text2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/text2video",
+      "ms": 1722,
+      "data": {
+        "task_id": "929569979118964736",
+        "type": "text2video",
+        "state": "created",
+        "model": "viduq2",
+        "style": "general",
+        "prompt": "A cute cat runs in a sunny garden.",
+        "images": [],
+        "duration": 5,
+        "seed": 227504015,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "movement_amplitude": "auto",
+        "created_at": "2026-03-12T06:51:08.750215795Z",
+        "credits": 35,
+        "payload": "",
+        "cus_priority": 0,
+        "off_peak": false,
+        "watermark": false,
+        "is_rec": false,
+        "wm_position": "unspecified",
+        "wm_url": "",
+        "meta_data": "",
+        "client_request_id": "",
+        "audio_type": "all"
+      }
+    },
+    "taskId": "929569979118964736",
+    "query": {
+      "name": "vidu-text2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/tasks/929569979118964736/creations",
+      "ms": 341,
+      "data": {
+        "seed": 227504015,
+        "type": "text2video",
+        "model": "viduq2",
+        "state": "created",
+        "style": "general",
+        "images": [],
+        "is_rec": false,
+        "prompt": "A cute cat runs in a sunny garden.",
+        "wm_url": "",
+        "credits": 35,
+        "payload": "",
+        "task_id": "929569979118964736",
+        "duration": 5,
+        "off_peak": false,
+        "meta_data": "",
+        "watermark": false,
+        "audio_type": "all",
+        "created_at": "2026-03-12T06:51:08.750215795Z",
+        "resolution": "720p",
+        "wm_position": "unspecified",
+        "aspect_ratio": "16:9",
+        "cus_priority": 0,
+        "client_request_id": "",
+        "movement_amplitude": "auto"
+      }
+    }
+  },
+  {
+    "test": "vidu-img2video",
+    "create": {
+      "name": "vidu-img2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/img2video",
+      "ms": 766,
+      "data": {
+        "task_id": "929569988887498752",
+        "type": "img2video",
+        "state": "created",
+        "model": "viduq2-turbo",
+        "style": "general",
+        "prompt": "Camera slowly zooms in.",
+        "images": [
+          "https://ark-project.tos-cn-beijing.volces.com/doc_image/seedream4_5_imageToimage.png"
+        ],
+        "duration": 2,
+        "seed": 1224942593,
+        "aspect_ratio": "",
+        "resolution": "720p",
+        "movement_amplitude": "auto",
+        "created_at": "2026-03-12T06:51:11.075297713Z",
+        "credits": 10,
+        "payload": "",
+        "cus_priority": 0,
+        "off_peak": false,
+        "watermark": false,
+        "is_rec": false,
+        "wm_position": "unspecified",
+        "wm_url": "",
+        "meta_data": "",
+        "client_request_id": "",
+        "audio_type": "all"
+      }
+    },
+    "taskId": "929569988887498752",
+    "query": {
+      "name": "vidu-img2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/tasks/929569988887498752/creations",
+      "ms": 396,
+      "data": {
+        "seed": 1224942593,
+        "type": "img2video",
+        "model": "viduq2-turbo",
+        "state": "created",
+        "style": "general",
+        "images": [
+          "https://ark-project.tos-cn-beijing.volces.com/doc_image/seedream4_5_imageToimage.png"
+        ],
+        "is_rec": false,
+        "prompt": "Camera slowly zooms in.",
+        "wm_url": "",
+        "credits": 10,
+        "payload": "",
+        "task_id": "929569988887498752",
+        "duration": 2,
+        "off_peak": false,
+        "meta_data": "",
+        "watermark": false,
+        "audio_type": "all",
+        "created_at": "2026-03-12T06:51:11.075297713Z",
+        "resolution": "720p",
+        "wm_position": "unspecified",
+        "aspect_ratio": "",
+        "cus_priority": 0,
+        "client_request_id": "",
+        "movement_amplitude": "auto"
+      }
+    }
+  },
+  {
+    "test": "vidu-reference2video",
+    "create": {
+      "name": "vidu-reference2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/reference2video",
+      "ms": 1946,
+      "data": {
+        "task_id": "929570003731120128",
+        "type": "character2video",
+        "state": "created",
+        "model": "viduq2",
+        "style": "general",
+        "prompt": "A cute @cat runs across the grass.",
+        "images": [
+          "https://ark-project.tos-cn-beijing.volces.com/doc_image/seedream4_5_imageToimage.png"
+        ],
+        "duration": 5,
+        "seed": 1483332858,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "movement_amplitude": "auto",
+        "created_at": "2026-03-12T06:51:14.617334442Z",
+        "credits": 45,
+        "payload": "",
+        "cus_priority": 0,
+        "off_peak": false,
+        "watermark": false,
+        "is_rec": false,
+        "wm_position": "unspecified",
+        "wm_url": "",
+        "meta_data": "",
+        "client_request_id": "",
+        "audio_type": "all"
+      }
+    },
+    "taskId": "929570003731120128",
+    "query": {
+      "name": "vidu-reference2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/tasks/929570003731120128/creations",
+      "ms": 352,
+      "data": {
+        "seed": 1483332858,
+        "type": "character2video",
+        "model": "viduq2",
+        "state": "created",
+        "style": "general",
+        "images": [
+          "https://ark-project.tos-cn-beijing.volces.com/doc_image/seedream4_5_imageToimage.png"
+        ],
+        "is_rec": false,
+        "prompt": "A cute @cat runs across the grass.",
+        "wm_url": "",
+        "credits": 45,
+        "payload": "",
+        "task_id": "929570003731120128",
+        "duration": 5,
+        "off_peak": false,
+        "meta_data": "",
+        "watermark": false,
+        "audio_type": "all",
+        "created_at": "2026-03-12T06:51:14.617334442Z",
+        "resolution": "720p",
+        "wm_position": "unspecified",
+        "aspect_ratio": "16:9",
+        "cus_priority": 0,
+        "client_request_id": "",
+        "movement_amplitude": "auto"
+      }
+    }
+  },
+  {
+    "test": "vidu-start-end2video",
+    "create": {
+      "name": "vidu-start-end2video",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/start-end2video",
+      "ms": 762,
+      "data": {
+        "task_id": "929570013503868928",
+        "type": "headtailimg2video",
+        "state": "created",
+        "model": "viduq2-turbo",
+        "style": "general",
+        "prompt": "The camera moves from start frame to end frame.",
+        "images": [
+          "https://filesystem.site/cdn/20250612/VfgB5ubjInVt8sG6rzMppxnu7gEfde.png",
+          "https://filesystem.site/cdn/20250612/998IGmUiM2koBGZM3UnZeImbPBNIUL.png"
+        ],
+        "duration": 5,
+        "seed": 993935750,
+        "aspect_ratio": "",
+        "resolution": "720p",
+        "movement_amplitude": "auto",
+        "created_at": "2026-03-12T06:51:16.945726640Z",
+        "credits": 40,
+        "payload": "",
+        "cus_priority": 0,
+        "off_peak": false,
+        "watermark": false,
+        "is_rec": false,
+        "wm_position": "unspecified",
+        "wm_url": "",
+        "meta_data": "",
+        "client_request_id": "",
+        "audio_type": "all"
+      }
+    },
+    "taskId": "929570013503868928",
+    "query": {
+      "name": "vidu-start-end2video-query",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/ent/v2/tasks/929570013503868928/creations",
+      "ms": 332,
+      "data": {
+        "seed": 993935750,
+        "type": "headtailimg2video",
+        "model": "viduq2-turbo",
+        "state": "created",
+        "style": "general",
+        "images": [
+          "https://filesystem.site/cdn/20250612/VfgB5ubjInVt8sG6rzMppxnu7gEfde.png",
+          "https://filesystem.site/cdn/20250612/998IGmUiM2koBGZM3UnZeImbPBNIUL.png"
+        ],
+        "is_rec": false,
+        "prompt": "The camera moves from start frame to end frame.",
+        "wm_url": "",
+        "credits": 40,
+        "payload": "",
+        "task_id": "929570013503868928",
+        "duration": 5,
+        "off_peak": false,
+        "meta_data": "",
+        "watermark": false,
+        "audio_type": "all",
+        "created_at": "2026-03-12T06:51:16.945726640Z",
+        "resolution": "720p",
+        "wm_position": "unspecified",
+        "aspect_ratio": "",
+        "cus_priority": 0,
+        "client_request_id": "",
+        "movement_amplitude": "auto"
+      }
+    }
+  },
+  {
+    "test": "wan2.6-i2v-flash",
+    "create": {
+      "name": "wan2.6-i2v-flash",
+      "ok": false,
+      "status": 429,
+      "url": "https://yunwu.ai/alibailian/api/v1/services/aigc/video-generation/video-synthesis",
+      "ms": 350,
+      "data": {
+        "code": "resolution_not_supported",
+        "message": "resolution_not_supported",
+        "data": null
+      }
+    },
+    "taskId": null,
+    "query": null
+  },
+  {
+    "test": "tencent-aigc-kling",
+    "create": {
+      "name": "tencent-aigc-kling",
+      "ok": true,
+      "status": 200,
+      "url": "https://yunwu.ai/tencent-vod/v1/aigc-video",
+      "ms": 801,
+      "data": {
+        "Response": {
+          "TaskId": "1392336703-AigcVideoTask-9ae83cf68e0d209f2fc321a3381148det",
+          "RequestId": "16f176f1-388a-40ef-8d53-758ba5db5669"
+        }
+      }
+    },
+    "taskId": null,
+    "query": null
+  }
+]

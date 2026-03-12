@@ -6,7 +6,7 @@ import { DEFAULT_RESPONSE_MODEL, type ResponseModel } from '../../lib/chat-model
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
 import { readBackendUrl } from '../../lib/server-env';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
-import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+import { requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
 
 const GLOBAL_RULES = `
 # 全局规则
@@ -93,12 +93,14 @@ async function streamByResponseModel(
             content: item.content,
         }));
 
-        await streamYunwuOpenAIChat({
+        const fullText = await requestYunwuOpenAIChat({
             systemPrompt,
             messages: openAIMessages,
             temperature: 1,
-            onText,
         });
+        if (fullText) {
+            onText(fullText);
+        }
         return;
     }
 
@@ -155,6 +157,25 @@ export async function POST(req: NextRequest) {
             return new Response(JSON.stringify({ error: 'messages is required' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        if (responseModel === 'gpt-5.4') {
+            const openAIMessages: OpenAIChatMessage[] = filteredMessages.map((item) => ({
+                role: item.role === 'assistant' ? 'assistant' : 'user',
+                content: item.content,
+            }));
+            const fullText = await requestYunwuOpenAIChat({
+                systemPrompt: fullSystemPrompt,
+                messages: openAIMessages,
+                temperature: 1,
+            });
+
+            return Response.json({
+                success: true,
+                data: {
+                    content: fullText,
+                },
             });
         }
 

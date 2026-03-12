@@ -167,8 +167,24 @@ model Bot {
   createdAt    DateTime @default(now()) @map("created_at")
 
   conversations Conversation[]
+  documents     PresetBotDocument[]
 
   @@map("bots")
+}
+
+model PresetBotDocument {
+  id         String   @id @default(uuid())
+  botId      String   @map("bot_id")
+  fileName   String   @map("file_name")
+  fileType   String   @map("file_type")
+  fileSize   Int      @map("file_size")
+  parsedText String   @map("parsed_text") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId])
+  @@map("preset_bot_documents")
 }
 
 model Conversation {
