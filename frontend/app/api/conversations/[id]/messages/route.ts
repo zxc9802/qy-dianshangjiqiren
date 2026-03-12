@@ -62,6 +62,31 @@ const attachmentSchema = z.object({
     tempVideoToken: z.string().max(255).optional(),
 });
 
+function isMissingPresetBotDocumentTable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error || '');
+    return /preset_bot_documents/i.test(message)
+        || /presetBotDocument/i.test(message)
+        || /does not exist in the current database/i.test(message)
+        || /P2021/i.test(message);
+}
+
+async function loadPresetBotDocuments(botId: string): Promise<Array<{ fileName: string; parsedText: string }>> {
+    try {
+        return await prisma.presetBotDocument.findMany({
+            where: { botId },
+            select: { fileName: true, parsedText: true },
+            orderBy: { createdAt: 'asc' },
+        });
+    } catch (error) {
+        if (isMissingPresetBotDocumentTable(error)) {
+            console.warn('[Conversations] preset_bot_documents table is missing, skip preset knowledge injection.');
+            return [];
+        }
+
+        throw error;
+    }
+}
+
 function stripSuggestionBlock(text: string): string {
     return stripSharedSuggestionBlock(text);
 }
@@ -294,11 +319,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             systemPrompt = `${knowledgePrompt}\n\n${rules}`.trim();
 
             // Inject knowledge documents uploaded by admin for this preset bot
-            const presetDocs = await prisma.presetBotDocument.findMany({
-                where: { botId: conversation.bot.id },
-                select: { fileName: true, parsedText: true },
-                orderBy: { createdAt: 'asc' },
-            });
+            const presetDocs = await loadPresetBotDocuments(conversation.bot.id);
             if (presetDocs.length > 0) {
                 const presetKnowledge = presetDocs
                     .map((doc) => `### ${doc.fileName}\n${doc.parsedText}`)
