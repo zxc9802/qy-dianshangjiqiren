@@ -172,9 +172,10 @@ export const api = {
     sendConversationMessage: (id: string, body: {
         content: string;
         displayContent?: string;
-        inputType?: 'text' | 'voice' | 'file' | 'image';
+        inputType?: 'text' | 'voice' | 'file' | 'image' | 'video';
         aspectRatio?: string;
         responseModel?: 'gemini' | 'gpt-5.4';
+        attachments?: ChatAttachmentPayload[];
     }) => {
         const token = getToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -331,6 +332,7 @@ export interface ConversationInfo {
         imageUrls?: string[];
         imagePrompt?: string;
         aspectRatio?: string;
+        attachments?: AttachmentInfo[];
     }>;
 }
 
@@ -358,6 +360,32 @@ export interface AttachmentInfo {
     fileUrl: string;
     fileName: string;
     fileSize: number;
+    kind?: 'document' | 'image' | 'video';
+    mimeType?: string;
+    previewUrl?: string;
+    extractedText?: string;
+    durationMs?: number;
+    transcript?: string;
+    frames?: Array<{
+        url: string;
+        timestampMs: number;
+    }>;
+}
+
+export interface ChatAttachmentPayload {
+    kind: 'document' | 'image' | 'video';
+    fileName: string;
+    fileSize: number;
+    mimeType?: string;
+    previewUrl?: string;
+    extractedText: string;
+    durationMs?: number;
+    transcript?: string;
+    tempVideoToken?: string;
+    frames?: Array<{
+        url: string;
+        timestampMs: number;
+    }>;
 }
 
 export interface ImageGenerationRequest {

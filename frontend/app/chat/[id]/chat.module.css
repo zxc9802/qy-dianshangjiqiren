@@ -580,6 +580,101 @@
     gap: 14px;
 }
 
+.attachmentMessage {
+    display: grid;
+    gap: 12px;
+}
+
+.messageAttachmentGroup {
+    display: grid;
+    gap: 10px;
+}
+
+.messageAttachmentCard {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+    border: 1px solid rgba(37, 99, 235, 0.14);
+}
+
+.messageAttachmentVideo {
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+    border-color: rgba(15, 23, 42, 0.08);
+}
+
+.messageAttachmentHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.messageAttachmentBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.1);
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.messageAttachmentVideo .messageAttachmentBadge {
+    background: rgba(15, 23, 42, 0.08);
+    color: #0f172a;
+}
+
+.messageAttachmentMeta {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+}
+
+.messageAttachmentName {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-foreground);
+    word-break: break-word;
+}
+
+.messageAttachmentPreview {
+    width: 100%;
+    max-width: 260px;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+}
+
+.videoFrameGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.videoFrameItem {
+    display: grid;
+    gap: 6px;
+}
+
+.videoFrameThumb {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #dbe4f0;
+}
+
+.videoFrameTime {
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+}
+
 .imagePrompt {
     border-radius: 14px;
     padding: 12px 14px;
@@ -1030,6 +1125,10 @@
     }
 
     .imageGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .videoFrameGrid {
         grid-template-columns: 1fr;
     }
 

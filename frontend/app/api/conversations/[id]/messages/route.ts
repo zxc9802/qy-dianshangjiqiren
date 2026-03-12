@@ -3,6 +3,16 @@ import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
 import { getUserId, AppError, errorResponse } from '../../../../lib/auth';
 import {
+    buildAttachmentContextBlock,
+    buildMessageDisplayContent,
+    buildMessagePromptText,
+    getDefaultAttachmentPrompt,
+    normalizeAttachmentRecord,
+    serializeAttachmentMetadata,
+    stripAttachmentDisplayLabels,
+    type ChatAttachmentUpload,
+} from '../../../../lib/chat-attachments';
+import {
     buildConversationImageSummary,
     encodeConversationImageMessage,
     isConversationImageTurn,
@@ -11,8 +21,13 @@ import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowled
 import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
+import { deleteTempVideo, loadTempVideo } from '../../../../lib/server-chat-video';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../../../lib/yunwu-openai-chat';
-import { streamYunwuGeminiChat } from '../../../../lib/yunwu-gemini-chat';
+import {
+    streamYunwuGeminiChat,
+    type GeminiChatMessage,
+    type GeminiChatPart,
+} from '../../../../lib/yunwu-gemini-chat';
 import { generateImageViaBackend } from '../../../image-generations/proxy';
 
 const GLOBAL_RULES = `
@@ -27,8 +42,23 @@ const GLOBAL_RULES = `
 `;
 
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
-
 const SUGGESTION_BLOCK_PATTERN = /```json[\s\S]*?(\{"suggestions":\s*\[[\s\S]*?\]\})[\s\S]*?```/;
+
+const attachmentSchema = z.object({
+    kind: z.enum(['document', 'image', 'video']),
+    fileName: z.string().min(1).max(255),
+    fileSize: z.number().int().nonnegative().max(100 * 1024 * 1024),
+    mimeType: z.string().max(255).optional(),
+    extractedText: z.string().default(''),
+    previewUrl: z.string().max(2048).optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    transcript: z.string().optional(),
+    frames: z.array(z.object({
+        url: z.string().min(1).max(2048),
+        timestampMs: z.number().int().nonnegative(),
+    })).max(6).optional(),
+    tempVideoToken: z.string().max(255).optional(),
+});
 
 function stripSuggestionBlock(text: string): string {
     return text
@@ -45,7 +75,9 @@ function extractSuggestions(text: string): { suggestions: string[]; cleanRespons
     if (suggestionMatch) {
         try {
             const parsed = JSON.parse(suggestionMatch[1]) as { suggestions?: unknown };
-            suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.filter((item): item is string => typeof item === 'string') : [];
+            suggestions = Array.isArray(parsed.suggestions)
+                ? parsed.suggestions.filter((item): item is string => typeof item === 'string')
+                : [];
         } catch {
             suggestions = [];
         }
@@ -54,17 +86,135 @@ function extractSuggestions(text: string): { suggestions: string[]; cleanRespons
     return { suggestions, cleanResponse };
 }
 
+function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[]): ChatAttachmentUpload[] {
+    return input.map((attachment) => ({
+        kind: attachment.kind,
+        fileName: attachment.fileName,
+        fileSize: attachment.fileSize,
+        mimeType: attachment.mimeType,
+        extractedText: attachment.extractedText.trim(),
+        previewUrl: attachment.previewUrl,
+        durationMs: attachment.durationMs,
+        transcript: attachment.transcript?.trim(),
+        frames: attachment.frames?.map((frame) => ({
+            url: frame.url,
+            timestampMs: frame.timestampMs,
+        })) || [],
+        tempVideoToken: attachment.tempVideoToken,
+    }));
+}
+
+function buildStoredMessagePromptText(message: {
+    content: string;
+    attachments: Array<{
+        fileName: string;
+        fileSize: number;
+        fileType: string;
+        fileUrl: string;
+        parsedText: string | null;
+    }>;
+}): string {
+    const attachments = message.attachments.map((attachment) => normalizeAttachmentRecord(attachment));
+    const baseText = attachments.length
+        ? stripAttachmentDisplayLabels(message.content, attachments)
+        : message.content.trim();
+
+    return attachments.length
+        ? buildMessagePromptText(baseText, attachments)
+        : baseText;
+}
+
+function buildGeminiCurrentTurnKnowledgeText(
+    rawText: string,
+    attachments: ChatAttachmentUpload[],
+): string {
+    if (attachments.length === 0) {
+        return rawText.trim();
+    }
+
+    return rawText.trim() || getDefaultAttachmentPrompt(attachments);
+}
+
+async function buildGeminiCurrentTurnMessage(
+    rawText: string,
+    attachments: ChatAttachmentUpload[],
+): Promise<GeminiChatMessage> {
+    if (attachments.length === 0) {
+        return { role: 'user', content: rawText.trim() };
+    }
+
+    const parts: GeminiChatPart[] = [];
+    const questionText = rawText.trim() || 'Analyze the uploaded attachments and provide a structured answer.';
+
+    for (const attachment of attachments) {
+        if (attachment.kind === 'video' && attachment.tempVideoToken) {
+            const tempVideo = await loadTempVideo(attachment.tempVideoToken);
+            parts.push({
+                text: `User uploaded a video attachment named ${attachment.fileName}. Inspect the video directly and answer from the video itself.`,
+            });
+            parts.push({
+                inlineData: {
+                    mimeType: tempVideo.mimeType || attachment.mimeType || 'video/mp4',
+                    data: tempVideo.buffer.toString('base64'),
+                },
+            });
+            continue;
+        }
+
+        parts.push({
+            text: buildAttachmentContextBlock(attachment),
+        });
+    }
+
+    parts.push({
+        text: `User question:\n${questionText}`,
+    });
+
+    return {
+        role: 'user',
+        content: parts,
+    };
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    let tempVideoTokensToCleanup: string[] = [];
+
     try {
         const userId = await getUserId(req);
         const { id: conversationId } = await params;
-        const { content, displayContent, inputType, aspectRatio, responseModel } = z.object({
-            content: z.string().min(1),
+        const {
+            content,
+            displayContent,
+            inputType,
+            aspectRatio,
+            responseModel,
+            attachments: incomingAttachments,
+        } = z.object({
+            content: z.string().default(''),
             displayContent: z.string().optional(),
-            inputType: z.enum(['text', 'voice', 'file', 'image']).default('text'),
+            inputType: z.enum(['text', 'voice', 'file', 'image', 'video']).default('text'),
             aspectRatio: z.string().min(3).max(10).optional(),
             responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
+            attachments: z.array(attachmentSchema).max(10).default([]),
         }).parse(await req.json());
+
+        const attachments = normalizeIncomingAttachments(incomingAttachments);
+        const hasAttachmentPayload = attachments.length > 0;
+        tempVideoTokensToCleanup = attachments
+            .filter((attachment) => attachment.kind === 'video' && attachment.tempVideoToken)
+            .map((attachment) => attachment.tempVideoToken as string);
+
+        if (!content.trim() && !hasAttachmentPayload && inputType !== 'image') {
+            throw new AppError('content or attachments is required', 400);
+        }
+
+        if (inputType === 'image' && attachments.length > 0) {
+            throw new AppError('Image generation requests do not accept uploaded attachments.', 400);
+        }
+
+        if (attachments.filter((attachment) => attachment.kind === 'video').length > 1) {
+            throw new AppError('Each message currently supports only one uploaded video.', 400);
+        }
 
         const conversation = await prisma.conversation.findFirst({
             where: { id: conversationId, userId },
@@ -78,7 +228,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         },
                     },
                 },
-                messages: { orderBy: { createdAt: 'asc' } },
+                messages: {
+                    orderBy: { createdAt: 'asc' },
+                    include: {
+                        attachments: {
+                            select: {
+                                fileName: true,
+                                fileSize: true,
+                                fileType: true,
+                                fileUrl: true,
+                                parsedText: true,
+                            },
+                        },
+                    },
+                },
             },
         });
 
@@ -87,6 +250,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
 
         const bot = getConversationBotPayload(conversation);
+        const userDisplayContent = typeof displayContent === 'string' && displayContent.trim()
+            ? displayContent.trim()
+            : hasAttachmentPayload
+                ? buildMessageDisplayContent(content, attachments)
+                : content.trim();
+        const currentPromptText = hasAttachmentPayload
+            ? buildMessagePromptText(content, attachments)
+            : content.trim();
+        const geminiCurrentTurnKnowledgeText = buildGeminiCurrentTurnKnowledgeText(content, attachments);
+
         let systemPrompt = '';
 
         if (bot.kind === 'custom') {
@@ -117,11 +290,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 bot.routeId,
                 basePrompt,
                 [
-                    ...conversation.messages.map((message) => ({
-                        role: message.role,
-                        content: message.content,
-                    })),
-                    { role: 'user', content },
+                    ...conversation.messages
+                        .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
+                        .map((message) => ({
+                            role: message.role,
+                            content: buildStoredMessagePromptText(message),
+                        })),
+                    {
+                        role: 'user',
+                        content: responseModel === 'gemini'
+                            ? geminiCurrentTurnKnowledgeText
+                            : currentPromptText,
+                    },
                 ],
             );
             const rules = conversation.bot.sortOrder >= 15 && conversation.bot.sortOrder <= 22
@@ -130,22 +310,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             systemPrompt = `${knowledgePrompt}\n\n${rules}`.trim();
         }
 
-        await prisma.message.create({
+        const userMessage = await prisma.message.create({
             data: {
                 conversationId,
                 role: 'user',
-                content: displayContent || content,
+                content: userDisplayContent,
                 inputType,
             },
         });
 
-        const apiMessages: OpenAIChatMessage[] = conversation.messages
+        if (attachments.length > 0) {
+            await prisma.attachment.createMany({
+                data: attachments.map((attachment) => ({
+                    messageId: userMessage.id,
+                    fileType: attachment.mimeType || attachment.kind,
+                    fileUrl: attachment.previewUrl || attachment.frames?.[0]?.url || '',
+                    fileName: attachment.fileName,
+                    fileSize: attachment.fileSize,
+                    parsedText: serializeAttachmentMetadata(attachment),
+                })),
+            });
+        }
+
+        const historyMessages: OpenAIChatMessage[] = conversation.messages
             .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
             .map((message) => ({
                 role: message.role === 'assistant' ? 'assistant' : 'user',
-                content: message.content,
+                content: buildStoredMessagePromptText(message),
             }));
-        apiMessages.push({ role: 'user', content });
+
         const encoder = new TextEncoder();
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
 
@@ -158,7 +351,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     if (inputType === 'image') {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'status',
-                            content: '正在调用图片模型，通常需要 10 到 40 秒。',
+                            content: 'Generating image. This usually takes 10 to 40 seconds.',
                         })}\n\n`));
 
                         const imageResponse = await generateImageViaBackend(req.headers, {
@@ -172,7 +365,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             throw new Error(
                                 (typeof imagePayload.error === 'string' ? imagePayload.error : '')
                                 || (typeof imagePayload.message === 'string' ? imagePayload.message : '')
-                                || '图片生成失败',
+                                || 'Image generation failed',
                             );
                         }
 
@@ -184,12 +377,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         } | undefined;
 
                         if (!generated?.resultImagePaths?.length) {
-                            throw new Error(generated?.errorMessage || '图片生成失败');
+                            throw new Error(generated?.errorMessage || 'Image generation failed');
                         }
 
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'status',
-                            content: '图片已生成，正在整理结果。',
+                            content: 'Image generated. Finalizing result.',
                         })}\n\n`));
 
                         const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);
@@ -214,7 +407,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                 where: { id: conversationId },
                                 data: {
                                     title: shouldSetInitialTitle
-                                        ? buildConversationTitle(bot.name, [{ role: 'user', content: displayContent || content }])
+                                        ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
                                         : conversation.title,
                                     updatedAt: new Date(),
                                 },
@@ -235,12 +428,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         return;
                     }
 
-                    const handleStreamText = (text: string) => {
-                        if (!text) return;
+                    const handleStreamText = (textChunk: string) => {
+                        if (!textChunk) {
+                            return;
+                        }
 
-                        fullResponse += text;
+                        fullResponse += textChunk;
                         const visibleResponse = stripSuggestionBlock(fullResponse);
-                        if (visibleResponse.length <= streamedVisibleLength) return;
+                        if (visibleResponse.length <= streamedVisibleLength) {
+                            return;
+                        }
 
                         const visibleDelta = visibleResponse.slice(streamedVisibleLength);
                         streamedVisibleLength = visibleResponse.length;
@@ -250,18 +447,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     if (responseModel === 'gpt-5.4') {
                         await streamYunwuOpenAIChat({
                             systemPrompt,
-                            messages: apiMessages,
+                            messages: [
+                                ...historyMessages,
+                                { role: 'user', content: currentPromptText },
+                            ],
                             temperature: 0.8,
                             maxTokens: 8192,
                             onText: handleStreamText,
                         });
                     } else {
+                        const geminiMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
+                            role: message.role,
+                            content: typeof message.content === 'string' ? message.content : '',
+                        }));
+                        geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
+
                         await streamYunwuGeminiChat({
                             systemPrompt,
-                            messages: apiMessages.map((message) => ({
-                                role: message.role,
-                                content: typeof message.content === 'string' ? message.content : '',
-                            })),
+                            messages: geminiMessages,
                             temperature: 0.8,
                             topP: 0.95,
                             maxOutputTokens: 8192,
@@ -285,7 +488,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             where: { id: conversationId },
                             data: {
                                 title: shouldSetInitialTitle
-                                    ? buildConversationTitle(bot.name, [{ role: 'user', content: displayContent || content }])
+                                    ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
                                     : conversation.title,
                                 updatedAt: new Date(),
                             },
@@ -302,6 +505,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         content: error instanceof Error ? error.message : 'Request failed',
                     })}\n\n`));
                 } finally {
+                    await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
                     controller.close();
                 }
             },
@@ -315,6 +519,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
         });
     } catch (error) {
+        await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
         return errorResponse(error);
     }
 }

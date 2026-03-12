@@ -4,8 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
-import { api } from '../../lib/api';
+import { api, type AttachmentInfo, type ChatAttachmentPayload } from '../../lib/api';
 import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID } from '../../lib/builtin-bots';
+import {
+    buildMessageDisplayContent,
+    ChatAttachmentFrame,
+    ChatAttachmentKind,
+    formatDuration,
+    stripAttachmentDisplayLabels,
+} from '../../lib/chat-attachments';
 import {
     DEFAULT_RESPONSE_MODEL,
     RESPONSE_MODEL_OPTIONS,
@@ -16,8 +23,15 @@ import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
     ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
-    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon,
+    Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon, Video,
 } from 'lucide-react';
+
+interface MessageAttachment extends Omit<AttachmentInfo, 'id' | 'fileType' | 'fileUrl' | 'kind'> {
+    id?: string;
+    fileType?: string;
+    fileUrl?: string;
+    kind: ChatAttachmentKind;
+}
 
 interface MessageItem {
     id: string;
@@ -27,14 +41,22 @@ interface MessageItem {
     imageUrls?: string[];
     imagePrompt?: string;
     aspectRatio?: string;
+    attachments?: MessageAttachment[];
 }
 
 interface AttachedFile {
     file: File;
     name: string;
-    content?: string;
+    extractedText?: string;
     previewUrl: string | null;
     isImage: boolean;
+    isVideo: boolean;
+    kind: ChatAttachmentKind;
+    mimeType?: string;
+    durationMs?: number;
+    transcript?: string;
+    frames?: ChatAttachmentFrame[];
+    tempVideoToken?: string;
 }
 
 const MAX_ATTACHMENTS = 10;
@@ -50,6 +72,17 @@ interface WfState {
 }
 
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
+
+function normalizeMessageAttachments(attachments?: AttachmentInfo[]): MessageAttachment[] | undefined {
+    if (!attachments?.length) {
+        return undefined;
+    }
+
+    return attachments.map((attachment) => ({
+        ...attachment,
+        kind: attachment.kind || (attachment.fileType?.startsWith('video/') ? 'video' : attachment.fileType?.startsWith('image/') ? 'image' : 'document'),
+    }));
+}
 
 function buildRoute(botId: string, params: { cid?: string | null; wf?: string | null; name?: string | null }) {
     const query = new URLSearchParams();
@@ -69,6 +102,7 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
         imageUrls: message.imageUrls,
         imagePrompt: message.imagePrompt,
         aspectRatio: message.aspectRatio,
+        attachments: normalizeMessageAttachments(message.attachments),
     }));
 
     if (history.some((message) => message.id === 'welcome')) {
@@ -259,7 +293,17 @@ export default function ChatPage() {
         return base;
     }, [botId, botName]);
     const renderedMessages = useMemo(
-        () => messages.map((message) => ({ ...message, html: formatMessage(stripSuggestionBlock(message.content)) })),
+        () => messages.map((message) => {
+            const textContent = message.attachments?.length
+                ? stripAttachmentDisplayLabels(message.content, message.attachments)
+                : message.content;
+
+            return {
+                ...message,
+                textContent,
+                html: formatMessage(stripSuggestionBlock(textContent)),
+            };
+        }),
         [messages],
     );
     const renderedStreamingText = useMemo(
@@ -272,12 +316,12 @@ export default function ChatPage() {
         setStreamingText(stripSuggestionBlock(pendingStreamingTextRef.current));
     }, []);
 
-    const clearAttachments = () => {
+    const clearAttachments = useCallback(() => {
         attachedFiles.forEach((file) => {
             if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
         });
         setAttachedFiles([]);
-    };
+    }, [attachedFiles]);
 
     const toggleImageMode = () => {
         if (!imageModeEnabled && attachedFiles.length > 0) {
@@ -304,12 +348,29 @@ export default function ChatPage() {
         if (data.error) throw new Error(data.error);
 
         return {
+            kind: (data.kind || 'document') as ChatAttachmentKind,
             fileName: data.fileName as string,
-            content: data.content as string,
-        };
+            fileSize: Number(data.fileSize || file.size),
+            mimeType: typeof data.mimeType === 'string' ? data.mimeType : file.type || undefined,
+            previewUrl: typeof data.previewUrl === 'string' ? data.previewUrl : undefined,
+            extractedText: typeof data.content === 'string' ? data.content : '',
+            durationMs: typeof data.durationMs === 'number' ? data.durationMs : undefined,
+            transcript: typeof data.transcript === 'string' ? data.transcript : undefined,
+            tempVideoToken: typeof data.tempVideoToken === 'string' ? data.tempVideoToken : undefined,
+            frames: Array.isArray(data.frames)
+                ? data.frames
+                    .filter((frame: unknown): frame is { url: string; timestampMs: number } => (
+                        typeof frame === 'object'
+                        && frame !== null
+                        && typeof (frame as { url?: unknown }).url === 'string'
+                        && typeof (frame as { timestampMs?: unknown }).timestampMs === 'number'
+                    ))
+                    .map((frame: { url: string; timestampMs: number }) => ({ url: frame.url, timestampMs: frame.timestampMs }))
+                : [],
+        } satisfies ChatAttachmentPayload;
     };
 
-    const sendMessage = async (rawText: string) => {
+    const sendMessage = useCallback(async (rawText: string) => {
         const isImageRequest = imageModeEnabled;
         const hasFiles = !isImageRequest && attachedFiles.length > 0;
         if ((!rawText.trim() && !hasFiles) || isStreaming || isUploading) return;
@@ -324,7 +385,14 @@ export default function ChatPage() {
                     parsedAttachments.push({
                         ...attachment,
                         name: parsed.fileName,
-                        content: parsed.content,
+                        kind: parsed.kind,
+                        mimeType: parsed.mimeType,
+                        extractedText: parsed.extractedText,
+                        durationMs: parsed.durationMs,
+                        transcript: parsed.transcript,
+                        tempVideoToken: parsed.tempVideoToken,
+                        frames: parsed.frames,
+                        previewUrl: attachment.isImage ? attachment.previewUrl : (parsed.previewUrl || attachment.previewUrl),
                     });
                 }
             } catch (error) {
@@ -335,23 +403,42 @@ export default function ChatPage() {
             }
         }
 
-        let displayText = rawText.trim();
-        let content = rawText.trim();
+        const messageText = rawText.trim();
+        const requestAttachments: ChatAttachmentPayload[] = parsedAttachments.map((attachment) => ({
+            kind: attachment.kind,
+            fileName: attachment.name,
+            fileSize: attachment.file.size,
+            mimeType: attachment.mimeType || attachment.file.type || undefined,
+            previewUrl: attachment.kind === 'video' ? attachment.previewUrl || undefined : undefined,
+            extractedText: attachment.extractedText || '',
+            durationMs: attachment.durationMs,
+            transcript: attachment.transcript,
+            tempVideoToken: attachment.tempVideoToken,
+            frames: attachment.frames,
+        }));
+        const optimisticAttachments: MessageAttachment[] = parsedAttachments.map((attachment) => ({
+            kind: attachment.kind,
+            fileName: attachment.name,
+            fileSize: attachment.file.size,
+            mimeType: attachment.mimeType || attachment.file.type || undefined,
+            previewUrl: attachment.previewUrl || undefined,
+            extractedText: attachment.extractedText || '',
+            durationMs: attachment.durationMs,
+            transcript: attachment.transcript,
+            frames: attachment.frames,
+        }));
 
-        if (parsedAttachments.length > 0) {
-            const labels = parsedAttachments
-                .map((attachment) => (attachment.isImage ? `[图片: ${attachment.name}]` : `[文件: ${attachment.name}]`))
-                .join('\n');
-            const fileContents = parsedAttachments
-                .map((attachment) => `${attachment.isImage ? '图片内容' : '文件内容'} - ${attachment.name}\n${attachment.content || ''}`)
-                .join('\n\n');
-            displayText = displayText ? `${labels}\n${displayText}` : labels;
-            content = `${labels}\n\n${fileContents}${content ? `\n\n用户补充：${content}` : ''}`;
-            clearAttachments();
-        }
+        const displayText = requestAttachments.length > 0
+            ? buildMessageDisplayContent(messageText, requestAttachments)
+            : messageText;
 
+        let content = messageText;
         if (wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1]) {
             content = `上一步输出：\n${wfState.stepOutputs[wfState.currentStep - 1]}\n\n当前用户消息：\n${content}`;
+        }
+
+        if (parsedAttachments.length > 0) {
+            clearAttachments();
         }
 
         const createConversationPromise = !conversationId ? createConversation(botId) : null;
@@ -365,6 +452,7 @@ export default function ChatPage() {
                 kind: isImageRequest ? 'image' : 'text',
                 imagePrompt: isImageRequest ? displayText : undefined,
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
+                attachments: optimisticAttachments,
             },
         ]);
         setInputText('');
@@ -399,9 +487,10 @@ export default function ChatPage() {
             const response = await api.sendConversationMessage(activeConversationId, {
                 content,
                 displayContent: displayText,
-                inputType: isImageRequest ? 'image' : hasFiles ? 'file' : 'text',
+                inputType: isImageRequest ? 'image' : requestAttachments.some((attachment) => attachment.kind === 'video') ? 'video' : hasFiles ? 'file' : 'text',
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
                 responseModel,
+                attachments: requestAttachments,
             });
 
             if (!response.ok) {
@@ -537,7 +626,22 @@ export default function ChatPage() {
                 });
             }
         }
-    };
+    }, [
+        attachedFiles,
+        botId,
+        clearAttachments,
+        conversationId,
+        createConversation,
+        flushStreamingText,
+        imageModeEnabled,
+        isStreaming,
+        isUploading,
+        refreshConversation,
+        responseModel,
+        router,
+        wfState,
+        workflowFlag,
+    ]);
 
     useEffect(() => {
         if (!launcherDraft) {
@@ -593,16 +697,28 @@ export default function ChatPage() {
             }
 
             const availableSlots = MAX_ATTACHMENTS - attachedFiles.length;
-            const nextFiles = files.slice(0, availableSlots).map((file) => {
+            const nextFiles: AttachedFile[] = files.slice(0, availableSlots).map((file) => {
                 const ext = file.name.split('.').pop()?.toLowerCase() || '';
                 const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+                const isVideo = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
                 return {
                     file,
                     name: file.name,
                     previewUrl: isImage ? URL.createObjectURL(file) : null,
                     isImage,
+                    isVideo,
+                    kind: isVideo ? 'video' : isImage ? 'image' : 'document',
                 };
             });
+
+            const existingVideoCount = attachedFiles.filter((file) => file.isVideo).length;
+            const newVideoCount = nextFiles.filter((file) => file.isVideo).length;
+            if (existingVideoCount + newVideoCount > 1) {
+                nextFiles.forEach((file) => {
+                    if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
+                });
+                throw new Error('一次消息最多上传 1 个视频');
+            }
 
             setAttachedFiles((current) => [...current, ...nextFiles]);
 
@@ -953,7 +1069,63 @@ export default function ChatPage() {
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                    <div className={styles.attachmentMessage}>
+                                        {message.attachments?.length ? (
+                                            <div className={styles.messageAttachmentGroup}>
+                                                {message.attachments.map((attachment, attachmentIndex) => (
+                                                    <div
+                                                        key={`${attachment.fileName}-${attachmentIndex}`}
+                                                        className={`${styles.messageAttachmentCard} ${attachment.kind === 'video' ? styles.messageAttachmentVideo : ''}`}
+                                                    >
+                                                        <div className={styles.messageAttachmentHead}>
+                                                            <span className={styles.messageAttachmentBadge}>
+                                                                {attachment.kind === 'video' ? (
+                                                                    <><Video size={14} /> 视频</>
+                                                                ) : attachment.kind === 'image' ? (
+                                                                    <><ImageIcon size={14} /> 图片</>
+                                                                ) : (
+                                                                    <><FileText size={14} /> 文件</>
+                                                                )}
+                                                            </span>
+                                                            {attachment.kind === 'video' && attachment.durationMs ? (
+                                                                <span className={styles.messageAttachmentMeta}>
+                                                                    时长 {formatDuration(attachment.durationMs)}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className={styles.messageAttachmentName}>{attachment.fileName}</div>
+                                                        {attachment.kind === 'video' && attachment.frames?.length ? (
+                                                            <div className={styles.videoFrameGrid}>
+                                                                {attachment.frames.map((frame, frameIndex) => (
+                                                                    <div key={`${frame.url}-${frameIndex}`} className={styles.videoFrameItem}>
+                                                                        {/* eslint-disable-next-line @next/next/no-img-element -- persisted video keyframes are served from local static files */}
+                                                                        <img
+                                                                            src={frame.url}
+                                                                            alt={`${attachment.fileName}-frame-${frameIndex + 1}`}
+                                                                            className={styles.videoFrameThumb}
+                                                                            loading="lazy"
+                                                                        />
+                                                                        <span className={styles.videoFrameTime}>{formatDuration(frame.timestampMs)}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : attachment.kind === 'image' && attachment.previewUrl ? (
+                                                            /* eslint-disable-next-line @next/next/no-img-element -- image attachment previews may come from object URLs or persisted paths */
+                                                            <img
+                                                                src={attachment.previewUrl}
+                                                                alt={attachment.fileName}
+                                                                className={styles.messageAttachmentPreview}
+                                                                loading="lazy"
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : null}
+                                        {message.textContent ? (
+                                            <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                        ) : null}
+                                    </div>
                                 )}
                                 {wfState && message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image' && (
                                     <button
@@ -1077,7 +1249,9 @@ export default function ChatPage() {
                                     /* eslint-disable-next-line @next/next/no-img-element -- local attachment previews rely on temporary object URLs */
                                     <img src={file.previewUrl} alt={file.name} className={styles.attachThumb} />
                                 ) : (
-                                    <span className={styles.attachIcon}><FileText size={18} /></span>
+                                    <span className={styles.attachIcon}>
+                                        {file.isVideo ? <Video size={18} /> : <FileText size={18} />}
+                                    </span>
                                 )}
                                 <span className={styles.attachName}>{file.name}</span>
                                 <button className={styles.attachRemove} onClick={() => removeAttachment(index)}>✕</button>
@@ -1126,7 +1300,7 @@ export default function ChatPage() {
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept=".pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp"
+                        accept=".pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v"
                         onChange={handleFileUpload}
                         style={{ display: 'none' }}
                     />

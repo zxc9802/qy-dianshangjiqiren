@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { api, type ConversationDetail, type ConversationInfo } from '../lib/api';
+import { api, type AttachmentInfo, type ConversationDetail, type ConversationInfo } from '../lib/api';
 
 export interface ConversationMessage {
     id: string;
@@ -12,6 +12,7 @@ export interface ConversationMessage {
     imageUrls?: string[];
     imagePrompt?: string;
     aspectRatio?: string;
+    attachments?: AttachmentInfo[];
 }
 
 export interface Conversation {
@@ -52,6 +53,7 @@ function normalizeConversationMessage(
         imageUrls?: string[];
         imagePrompt?: string;
         aspectRatio?: string;
+        attachments?: AttachmentInfo[];
     },
 ): ConversationMessage {
     return {
@@ -63,6 +65,7 @@ function normalizeConversationMessage(
         imageUrls: message.imageUrls,
         imagePrompt: message.imagePrompt,
         aspectRatio: message.aspectRatio,
+        attachments: message.attachments,
     };
 }
 

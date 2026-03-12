@@ -7,3 +7,5 @@ node_modules/
 backend/storage/
 backend/dist/
 frontend/public/generated-images/
+frontend/public/chat-video-frames/
+frontend/storage/

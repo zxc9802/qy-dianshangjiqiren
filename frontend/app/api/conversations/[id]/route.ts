@@ -1,5 +1,6 @@
-﻿import { NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getUserId, AppError, errorResponse } from '../../../lib/auth';
+import { normalizeAttachmentRecord } from '../../../lib/chat-attachments';
 import { prisma, withPrismaRetry } from '../../../lib/prisma';
 import { getConversationBotPayload } from '../../../lib/server-conversations';
 import { normalizeConversationMessage } from '../../../lib/server-conversation-message-normalizer';
@@ -82,13 +83,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                     imageUrls: normalized.decoded.imageUrls,
                     imagePrompt: normalized.decoded.imagePrompt,
                     aspectRatio: normalized.decoded.aspectRatio,
-                    attachments: message.attachments.map((attachment) => ({
-                        id: attachment.id,
-                        fileType: attachment.fileType,
-                        fileUrl: attachment.fileUrl,
-                        fileName: attachment.fileName,
-                        fileSize: attachment.fileSize,
-                    })),
+                    attachments: message.attachments.map((attachment) => {
+                        const normalizedAttachment = normalizeAttachmentRecord({
+                            fileName: attachment.fileName,
+                            fileSize: attachment.fileSize,
+                            fileType: attachment.fileType,
+                            fileUrl: attachment.fileUrl,
+                            parsedText: attachment.parsedText,
+                        });
+
+                        return {
+                            id: attachment.id,
+                            fileType: attachment.fileType,
+                            fileUrl: attachment.fileUrl,
+                            fileName: attachment.fileName,
+                            fileSize: attachment.fileSize,
+                            kind: normalizedAttachment.kind,
+                            mimeType: normalizedAttachment.mimeType,
+                            previewUrl: normalizedAttachment.previewUrl,
+                            extractedText: normalizedAttachment.extractedText,
+                            durationMs: normalizedAttachment.durationMs,
+                            transcript: normalizedAttachment.transcript,
+                            frames: normalizedAttachment.frames,
+                        };
+                    }),
                 })),
             },
         });

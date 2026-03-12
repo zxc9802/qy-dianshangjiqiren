@@ -5,8 +5,12 @@ const DEFAULT_GEMINI_CHAT_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-p
 
 export type GeminiChatMessage = {
     role: 'user' | 'assistant';
-    content: string;
+    content: string | GeminiChatPart[];
 };
+
+export type GeminiChatPart =
+    | { text: string }
+    | { inlineData: { mimeType: string; data: string } };
 
 type StreamOptions = {
     systemPrompt: string;
@@ -41,11 +45,17 @@ export async function streamYunwuGeminiChat({
 
     const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
     const contents = messages
-        .filter((message) => message.content.trim().length > 0)
-        .map((message) => ({
-            role: message.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: message.content.trim() }],
-        }));
+        .map((message) => {
+            const parts = typeof message.content === 'string'
+                ? (message.content.trim() ? [{ text: message.content.trim() }] : [])
+                : message.content.filter((part) => ('text' in part ? part.text.trim().length > 0 : Boolean(part.inlineData?.data)));
+
+            return {
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts,
+            };
+        })
+        .filter((message) => message.parts.length > 0);
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',

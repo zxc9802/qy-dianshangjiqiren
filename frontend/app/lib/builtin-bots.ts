@@ -1,5 +1,6 @@
 export const QIYA_ENTERPRISE_MANAGEMENT_BOT_ID = '35';
 export const GENERIC_CHAT_BOT_ID = '36';
+export const VIDEO_BREAKDOWN_BOT_ID = '37';
 
 export interface BuiltinBotDefinition {
     routeId: string;
@@ -86,6 +87,27 @@ export const BUILTIN_BOTS: BuiltinBotDefinition[] = [
     { routeId: '32', name: '调研访谈-高价值场景', category: 'AI陪跑教练', icon: 'search', description: '通过调研定位 AI 应用高价值场景。', pointsPerUse: 8, welcome: '你好，你们是做什么业务的？', homepageTrial: true },
     { routeId: '33', name: '火火提示词调试', category: 'AI陪跑教练', icon: 'terminal', description: '快速调试提示词，提升模型输出稳定性。', pointsPerUse: 3, welcome: '你好，把你的提示词发过来看看。', homepageTrial: true },
     { routeId: '34', name: 'AI工作流访谈教练', category: 'AI陪跑教练', icon: 'git-pull-request', description: '梳理流程痛点，设计可落地的 AI 改造路径。', pointsPerUse: 5, welcome: '你好，说说你的业务流程。', homepageTrial: true },
+    {
+        routeId: VIDEO_BREAKDOWN_BOT_ID,
+        name: '视频拆解导演',
+        category: '电商工具',
+        icon: 'camera',
+        description: '以导演、编导和剪辑的专业视角拆解视频结构、镜头语言、节奏和转化设计。',
+        pointsPerUse: 8,
+        welcome: '把视频发给我，我会从选题、开场、镜头、节奏、文案、情绪推进和转化设计几个层面帮你拆解。',
+        homepageTrial: true,
+        systemPromptFallback: [
+            '你是“视频拆解导演”，是一名兼具导演、编导、广告策划、剪辑指导能力的视频分析专家。',
+            '你的核心任务不是泛泛点评，而是像专业创意总监一样，把视频拆成可复用的方法和可执行的优化建议。',
+            '默认优先分析用户上传的视频本体；如果没有视频，再基于脚本、文案、分镜、口播稿或用户描述进行判断。',
+            '分析时重点覆盖：选题与目标受众、开场钩子、脚本结构、镜头语言、景别与机位、转场与字幕、节奏与情绪推进、卖点表达、转化动作、结尾收束。',
+            '如果视频是带货、种草、投流、品牌宣传、剧情、口播、探店、知识分享等类型，要先判断其内容目标，再围绕该目标给结论。',
+            '回答结构尽量稳定：先给整体判断，再给分段拆解，再给亮点、问题、原因和优化建议；能按时间轴拆解时优先按时间轴输出。',
+            '不要只给观后感，不要空泛夸奖。每一条判断都尽量说明为什么成立，以及具体该怎么改。',
+            '当用户要求复刻或优化视频时，要主动总结可复用公式，包括开头模板、镜头组织方式、节奏设计、文案套路和适用场景。',
+            '如果信息不足以做准确判断，先指出缺口，再给基于合理假设的初步拆解方案。',
+        ].join('\n'),
+    },
 ];
 
 export const BUILTIN_BOT_MAP = Object.fromEntries(
