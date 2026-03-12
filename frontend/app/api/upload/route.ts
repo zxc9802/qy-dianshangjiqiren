@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processUploadedVideo } from '../../lib/server-chat-video';
+import { processUploadedVideo, storeUploadedVideo } from '../../lib/server-chat-video';
 import { describeImageWithGemini } from '../../lib/server-gemini-media';
 import { readServerEnv } from '../../lib/server-env';
 
@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
     try {
         const formData = await req.formData();
         const file = formData.get('file');
+        const responseModel = formData.get('responseModel') === 'gpt-5.4' ? 'gpt-5.4' : 'gemini';
 
         if (!(file instanceof File)) {
             return NextResponse.json({ error: '未选择文件' }, { status: 400 });
@@ -96,10 +97,30 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer());
 
         if (VIDEO_EXTS.has(ext)) {
+            if (responseModel === 'gemini') {
+                const stored = await storeUploadedVideo({
+                    buffer,
+                    fileName: file.name,
+                    mimeType,
+                });
+
+                return NextResponse.json({
+                    kind: 'video',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType,
+                    content: '',
+                    frames: [],
+                    tempVideoToken: stored.tempVideoToken,
+                });
+            }
+
             const processed = await processUploadedVideo({
                 buffer,
                 fileName: file.name,
                 mimeType,
+            }, {
+                includeTranscript: false,
             });
 
             return NextResponse.json({

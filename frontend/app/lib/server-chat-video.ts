@@ -35,6 +35,11 @@ export interface ProcessedVideoUpload {
     tempVideoToken: string;
 }
 
+export interface ProcessUploadedVideoOptions {
+    includeFrameDescriptions?: boolean;
+    includeTranscript?: boolean;
+}
+
 export interface TempVideoData {
     buffer: Buffer;
     fileName: string;
@@ -42,11 +47,26 @@ export interface TempVideoData {
     absolutePath: string;
 }
 
+export async function storeUploadedVideo(params: {
+    buffer: Buffer;
+    fileName: string;
+    mimeType: string;
+}): Promise<{ tempVideoToken: string }> {
+    await cleanupStaleTempVideos();
+    const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
+    return { tempVideoToken: temp.token };
+}
+
 export async function processUploadedVideo(params: {
     buffer: Buffer;
     fileName: string;
     mimeType: string;
-}): Promise<ProcessedVideoUpload> {
+}, options: ProcessUploadedVideoOptions = {}): Promise<ProcessedVideoUpload> {
+    const {
+        includeFrameDescriptions = true,
+        includeTranscript = true,
+    } = options;
+
     await cleanupStaleTempVideos();
 
     const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
@@ -57,18 +77,23 @@ export async function processUploadedVideo(params: {
 
     try {
         durationMs = await probeVideoDurationMs(temp.absolutePath).catch(() => undefined);
-        frames = await extractKeyframes(temp.absolutePath, durationMs).catch(() => []);
-        frameDescriptions = await describeFrames(frames).catch(() => []);
-        transcript = await extractTranscript(temp.absolutePath).catch(() => '');
+        if (includeFrameDescriptions) {
+            frames = await extractKeyframes(temp.absolutePath, durationMs).catch(() => []);
+            frameDescriptions = await describeFrames(frames).catch(() => []);
+        }
+        if (includeTranscript) {
+            transcript = await extractTranscript(temp.absolutePath).catch(() => '');
+        }
 
         return {
             extractedText: buildVideoExtractedText({
                 fileName: params.fileName,
                 durationMs,
-                transcript,
+                transcript: includeTranscript ? transcript : '',
+                transcriptAttempted: includeTranscript,
                 frameDescriptions,
             }),
-            transcript,
+            transcript: includeTranscript ? transcript : '',
             durationMs,
             previewUrl: frames[0]?.url,
             frames: frames.map((frame) => ({ url: frame.url, timestampMs: frame.timestampMs })),
@@ -271,6 +296,7 @@ function buildVideoExtractedText(params: {
     fileName: string;
     durationMs?: number;
     transcript: string;
+    transcriptAttempted: boolean;
     frameDescriptions: string[];
 }): string {
     const sections = [`视频文件：${params.fileName}`];
@@ -279,10 +305,12 @@ function buildVideoExtractedText(params: {
         sections.push(`视频时长：${formatDuration(params.durationMs)}`);
     }
 
-    if (params.transcript.trim()) {
-        sections.push(`语音转写：\n${params.transcript.trim()}`);
-    } else {
-        sections.push('语音转写：未提取到可用语音，或视频无明显对白。');
+    if (params.transcriptAttempted) {
+        if (params.transcript.trim()) {
+            sections.push(`语音转写：\n${params.transcript.trim()}`);
+        } else {
+            sections.push('语音转写：未提取到可用语音，或视频无明显对白。');
+        }
     }
 
     if (params.frameDescriptions.length > 0) {

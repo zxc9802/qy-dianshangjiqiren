@@ -345,9 +345,10 @@ export default function ChatPage() {
         }));
     };
 
-    const parseAttachedFile = async (file: File) => {
+    const parseAttachedFile = async (file: File, model: ResponseModel) => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('responseModel', model);
 
         const response = await fetch('/api/upload', { method: 'POST', body: formData });
         const data = await response.json();
@@ -387,7 +388,7 @@ export default function ChatPage() {
             try {
                 parsedAttachments = [];
                 for (const attachment of attachedFiles) {
-                    const parsed = await parseAttachedFile(attachment.file);
+                    const parsed = await parseAttachedFile(attachment.file, responseModel);
                     parsedAttachments.push({
                         ...attachment,
                         name: parsed.fileName,
