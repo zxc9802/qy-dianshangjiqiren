@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { formatMessage } from '../lib/formatMessage';
 import styles from './fullplan.module.css';
 import {
     Search,
@@ -90,21 +91,8 @@ const PLAN_STEPS: Omit<PlanStep, 'status' | 'result'>[] = [
     },
 ];
 
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 function renderStepResultHtml(text: string): string {
-    const sanitized = escapeHtml(text.replace(/```json[\s\S]*?```/g, '').trim());
-    return sanitized
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br/>');
+    return formatMessage(text);
 }
 
 export default function FullPlanPage() {

@@ -21,6 +21,10 @@ import {
     RESPONSE_MODEL_STORAGE_PREFIX,
     type ResponseModel,
 } from '../../lib/chat-models';
+import {
+    formatMessage as formatRichMessage,
+    stripSuggestionBlock as stripRichSuggestionBlock,
+} from '../../lib/formatMessage';
 import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
@@ -115,11 +119,7 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
 }
 
 function stripSuggestionBlock(text: string): string {
-    return text
-        .replace(/```json[\s\S]*?\{"suggestions":\s*\[[\s\S]*?\}[\s\S]*?```/g, '')
-        .replace(/\n?```json[\s\S]*$/g, '')
-        .replace(/\n?\{\s*"suggestions"\s*:\s*\[[\s\S]*$/g, '')
-        .trimEnd();
+    return stripRichSuggestionBlock(text);
 }
 
 export default function ChatPage() {
@@ -465,7 +465,7 @@ export default function ChatPage() {
         setSuggestions([]);
         setIsStreaming(true);
         setStreamingText('');
-        setImageStatusText(isImageRequest ? '正在提交绘图请求...' : '');
+        setImageStatusText(isImageRequest ? '正在提交图片生成请求...' : '');
 
         await new Promise<void>((resolve) => {
             if (typeof window === 'undefined') {
@@ -716,15 +716,6 @@ export default function ChatPage() {
                     kind: isVideo ? 'video' : isImage ? 'image' : 'document',
                 };
             });
-
-            const existingVideoCount = attachedFiles.filter((file) => file.isVideo).length;
-            const newVideoCount = nextFiles.filter((file) => file.isVideo).length;
-            if (existingVideoCount + newVideoCount > 1) {
-                nextFiles.forEach((file) => {
-                    if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
-                });
-                throw new Error('一次消息最多上传 1 个视频');
-            }
 
             setAttachedFiles((current) => [...current, ...nextFiles]);
 
@@ -1372,76 +1363,7 @@ export default function ChatPage() {
 }
 
 function formatMessage(text: string): string {
-    const safeLineBreakToken = '__SAFE_LINE_BREAK__';
-    let formatted = text;
-
-    formatted = formatted.replace(/```json[\s\S]*?\{"suggestions":\[\s\S]*?\}[\s\S]*?```/g, '');
-    formatted = formatted.replace(/^#{1,6}\s*/gm, '');
-    formatted = formatted.replace(/\n{3,}/g, '\n\n');
-    formatted = formatted.replace(/\n\n+(\|)/g, '\n$1');
-    formatted = formatted.replace(/<br\s*\/?>/gi, safeLineBreakToken);
-    formatted = formatted.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    formatted = formatted.replace(new RegExp(safeLineBreakToken, 'g'), '<br>');
-    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    formatted = formatted.replace(/^[\*\-\u2022]\s+/gm, '• ');
-    formatted = formatted.replace(/^(\d+[\.\)\u3001])\s+/gm, '$1 ');
-    formatted = formatted.replace(/^---+$/gm, '');
-
-    const lines = formatted.split('\n');
-    const parts: string[] = [];
-    let inTable = false;
-    let pendingBreaks = 0;
-
-    const flushBreaks = (maxBreaks = 2) => {
-        const count = Math.min(pendingBreaks, maxBreaks);
-        for (let index = 0; index < count; index += 1) {
-            parts.push('<br>');
-        }
-        pendingBreaks = 0;
-    };
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        const isTableLine = trimmed.startsWith('|') && trimmed.includes('|');
-
-        if (isTableLine) {
-            const cells = trimmed.split('|').filter((cell) => cell.trim()).map((cell) => cell.trim());
-            if (cells.every((cell) => /^[-:]+$/.test(cell))) continue;
-
-            if (!inTable) {
-                pendingBreaks = Math.min(pendingBreaks, 1);
-                flushBreaks(1);
-                parts.push('<table>');
-                inTable = true;
-            }
-
-            parts.push('<tr>' + cells.map((cell) => `<td>${cell}</td>`).join('') + '</tr>');
-            continue;
-        }
-
-        if (inTable) {
-            parts.push('</table>');
-            inTable = false;
-            pendingBreaks = Math.max(pendingBreaks, 1);
-        }
-
-        if (!trimmed) {
-            pendingBreaks = Math.min(pendingBreaks + 1, 2);
-            continue;
-        }
-
-        flushBreaks(2);
-        parts.push(line);
-        pendingBreaks = 1;
-    }
-
-    if (inTable) {
-        parts.push('</table>');
-    }
-
-    return parts.join('')
-        .replace(/^(<br>\s*)+/, '')
-        .replace(/(<br>\s*)+$/, '');
+    return formatRichMessage(text);
 }
 
 

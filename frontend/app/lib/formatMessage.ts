@@ -5,8 +5,18 @@ function escapeHtml(value: string): string {
         .replace(/>/g, '&gt;');
 }
 
+function escapeAttribute(value: string): string {
+    return escapeHtml(value)
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 const SAFE_LINE_BREAK_PATTERN = /<br\s*\/?>/gi;
 const SAFE_LINE_BREAK_TOKEN = '__SAFE_LINE_BREAK__';
+
+export interface FormatMessageOptions {
+    tableClassName?: string;
+}
 
 function escapeHtmlPreservingLineBreaks(value: string): string {
     return escapeHtml(value.replace(SAFE_LINE_BREAK_PATTERN, SAFE_LINE_BREAK_TOKEN))
@@ -16,14 +26,12 @@ function escapeHtmlPreservingLineBreaks(value: string): string {
 function cleanResidualMarkdown(text: string): string {
     return text
         .replace(/\\([*_#`])/g, '$1')
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/[*#]+/g, '')
         .replace(/[ \t]{2,}/g, ' ')
         .trim();
 }
 
 function formatInlineSegment(source: string): string {
-    const pattern = /(\*\*|__)(.+?)\1/g;
+    const pattern = /(`[^`]+`|(\*\*|__)(.+?)\2)/g;
     let result = '';
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -34,12 +42,20 @@ function formatInlineSegment(source: string): string {
             result += before;
         }
 
-        const strongText = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(match[2] || ''));
-        if (strongText) {
-            result += `<strong>${strongText}</strong>`;
+        const token = match[0] || '';
+        if (token.startsWith('`')) {
+            const codeText = escapeHtml(token.slice(1, -1));
+            if (codeText) {
+                result += `<code>${codeText}</code>`;
+            }
+        } else {
+            const strongText = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(match[3] || ''));
+            if (strongText) {
+                result += `<strong>${strongText}</strong>`;
+            }
         }
 
-        lastIndex = match.index + match[0].length;
+        lastIndex = match.index + token.length;
     }
 
     const trailing = cleanResidualMarkdown(escapeHtmlPreservingLineBreaks(source.slice(lastIndex)));
@@ -54,17 +70,39 @@ function formatInline(text: string): string {
     return formatInlineSegment(text.replace(/\r/g, ''));
 }
 
-export function formatMessage(text: string): string {
-    const cleaned = text
-        .replace(/```json\s*\{[\s\S]*?"suggestions"[\s\S]*?\}\s*```/g, '')
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/```/g, '')
-        .replace(/\r/g, '');
+function buildTableOpenTag(tableClassName?: string): string {
+    if (!tableClassName) {
+        return '<table>';
+    }
 
+    return `<table class="${escapeAttribute(tableClassName)}">`;
+}
+
+function formatCodeBlock(code: string): string {
+    const escaped = escapeHtml(code.trimEnd());
+    if (!escaped.trim()) {
+        return '';
+    }
+
+    return `<pre><code>${escaped}</code></pre>`;
+}
+
+export function stripSuggestionBlock(text: string): string {
+    return text
+        .replace(/```json\s*\{[\s\S]*?"suggestions"[\s\S]*?\}\s*```/gi, '')
+        .replace(/\n?```json[\s\S]*$/gi, '')
+        .replace(/\n?\{\s*"suggestions"\s*:\s*\[[\s\S]*$/g, '')
+        .trimEnd();
+}
+
+export function formatMessage(text: string, options: FormatMessageOptions = {}): string {
+    const cleaned = stripSuggestionBlock(text.replace(/\r/g, ''));
     const lines = cleaned.split('\n');
     const parts: string[] = [];
     let inTable = false;
+    let inCodeBlock = false;
     let pendingBreaks = 0;
+    let codeLines: string[] = [];
 
     const flushBreaks = (maxBreaks = 2) => {
         const count = Math.min(pendingBreaks, maxBreaks);
@@ -74,7 +112,49 @@ export function formatMessage(text: string): string {
         pendingBreaks = 0;
     };
 
+    const closeTable = () => {
+        if (inTable) {
+            parts.push('</table>');
+            inTable = false;
+            pendingBreaks = Math.max(pendingBreaks, 1);
+        }
+    };
+
+    const closeCodeBlock = () => {
+        if (!inCodeBlock) {
+            return;
+        }
+
+        const html = formatCodeBlock(codeLines.join('\n'));
+        if (html) {
+            parts.push(html);
+            pendingBreaks = 1;
+        }
+        inCodeBlock = false;
+        codeLines = [];
+    };
+
     for (const rawLine of lines) {
+        const trimmedStart = rawLine.trimStart();
+
+        if (trimmedStart.startsWith('```')) {
+            closeTable();
+
+            if (inCodeBlock) {
+                closeCodeBlock();
+            } else {
+                flushBreaks(2);
+                inCodeBlock = true;
+                codeLines = [];
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            codeLines.push(rawLine);
+            continue;
+        }
+
         const line = rawLine.trim();
         const isTableLine = line.startsWith('|') && line.includes('|');
 
@@ -86,7 +166,7 @@ export function formatMessage(text: string): string {
 
             if (!inTable) {
                 flushBreaks(1);
-                parts.push('<table>');
+                parts.push(buildTableOpenTag(options.tableClassName));
                 inTable = true;
             }
 
@@ -94,11 +174,7 @@ export function formatMessage(text: string): string {
             continue;
         }
 
-        if (inTable) {
-            parts.push('</table>');
-            inTable = false;
-            pendingBreaks = Math.max(pendingBreaks, 1);
-        }
+        closeTable();
 
         if (!line || /^---+$/.test(line)) {
             pendingBreaks = Math.min(pendingBreaks + 1, 2);
@@ -111,6 +187,17 @@ export function formatMessage(text: string): string {
             const content = formatInline(headingMatch[1]);
             if (content) {
                 parts.push(`<strong>${content}</strong>`);
+                pendingBreaks = 1;
+            }
+            continue;
+        }
+
+        const quoteMatch = line.match(/^>\s+(.+)$/);
+        if (quoteMatch) {
+            flushBreaks(2);
+            const content = formatInline(quoteMatch[1]);
+            if (content) {
+                parts.push(`<blockquote>${content}</blockquote>`);
                 pendingBreaks = 1;
             }
             continue;
@@ -149,9 +236,8 @@ export function formatMessage(text: string): string {
         pendingBreaks = 1;
     }
 
-    if (inTable) {
-        parts.push('</table>');
-    }
+    closeTable();
+    closeCodeBlock();
 
     return parts.join('')
         .replace(/^(<br>\s*)+/, '')
@@ -159,8 +245,13 @@ export function formatMessage(text: string): string {
 }
 
 export function extractSuggestions(text: string): string[] {
-    const match = text.match(/```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/);
-    if (!match) return [];
+    const match = text.match(/```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/i)
+        || text.match(/(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})/);
+
+    if (!match) {
+        return [];
+    }
+
     try {
         const parsed = JSON.parse(match[1]);
         if (Array.isArray(parsed.suggestions)) {
@@ -169,5 +260,6 @@ export function extractSuggestions(text: string): string[] {
     } catch {
         return [];
     }
+
     return [];
 }

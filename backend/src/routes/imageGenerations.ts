@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import multer, { MulterError } from 'multer';
+import sharp from 'sharp';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/error';
@@ -72,17 +73,6 @@ function buildImageApiUrl(): string {
         url.searchParams.set('key', apiKey);
     }
     return url.toString();
-}
-
-function extFromMime(mimeType: string): string {
-    switch (mimeType) {
-        case 'image/jpeg':
-            return 'jpg';
-        case 'image/webp':
-            return 'webp';
-        default:
-            return 'png';
-    }
 }
 
 async function ensureStorageDirs() {
@@ -171,12 +161,12 @@ function buildPrompt(input: {
 }
 
 async function saveGeneratedImage(inlineImage: { mimeType: string; data: string }): Promise<string> {
-    const ext = extFromMime(inlineImage.mimeType);
-    const fileName = `${Date.now()}-${randomUUID()}.${ext}`;
+    const fileName = `${Date.now()}-${randomUUID()}.webp`;
     const relative = path.join('generated', fileName);
     const absolute = path.join(STORAGE_ROOT, relative);
-    const buffer = Buffer.from(inlineImage.data, 'base64');
-    await fs.writeFile(absolute, buffer);
+    const inputBuffer = Buffer.from(inlineImage.data, 'base64');
+    const outputBuffer = await sharp(inputBuffer).webp({ quality: 88, effort: 4 }).toBuffer();
+    await fs.writeFile(absolute, outputBuffer);
     return toImageAssetPath(relative);
 }
 

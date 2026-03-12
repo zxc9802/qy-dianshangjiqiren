@@ -478,8 +478,38 @@
   font-size: 14px;
   line-height: 1.8;
   color: var(--text-primary, #0f172a);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.reportText table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.reportText td {
+  border: 1px solid var(--border, #e2e8f0);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.reportText pre {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-secondary, #f8fafc);
+  overflow-x: auto;
+}
+
+.reportText code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.reportText blockquote {
+  margin: 12px 0;
+  padding-left: 12px;
+  border-left: 3px solid #2563eb;
+  color: var(--text-secondary, #64748b);
 }
 
 .reportGenerating {

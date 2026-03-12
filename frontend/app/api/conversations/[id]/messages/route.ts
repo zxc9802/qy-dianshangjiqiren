@@ -19,6 +19,10 @@ import {
 } from '../../../../lib/conversation-message-codec';
 import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
 import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
+import {
+    extractSuggestions as extractSharedSuggestions,
+    stripSuggestionBlock as stripSharedSuggestionBlock,
+} from '../../../../lib/formatMessage';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, loadTempVideo } from '../../../../lib/server-chat-video';
@@ -42,8 +46,6 @@ const GLOBAL_RULES = `
 `;
 
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
-const SUGGESTION_BLOCK_PATTERN = /```json[\s\S]*?(\{"suggestions":\s*\[[\s\S]*?\]\})[\s\S]*?```/;
-
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
     fileName: z.string().min(1).max(255),
@@ -61,29 +63,15 @@ const attachmentSchema = z.object({
 });
 
 function stripSuggestionBlock(text: string): string {
-    return text
-        .replace(/```json[\s\S]*?\{"suggestions":\s*\[[\s\S]*?\}[\s\S]*?```/g, '')
-        .replace(/\n?```json[\s\S]*$/g, '')
-        .trimEnd();
+    return stripSharedSuggestionBlock(text);
 }
 
 function extractSuggestions(text: string): { suggestions: string[]; cleanResponse: string } {
-    const suggestionMatch = text.match(SUGGESTION_BLOCK_PATTERN);
-    let suggestions: string[] = [];
     const cleanResponse = stripSuggestionBlock(text).trim();
-
-    if (suggestionMatch) {
-        try {
-            const parsed = JSON.parse(suggestionMatch[1]) as { suggestions?: unknown };
-            suggestions = Array.isArray(parsed.suggestions)
-                ? parsed.suggestions.filter((item): item is string => typeof item === 'string')
-                : [];
-        } catch {
-            suggestions = [];
-        }
-    }
-
-    return { suggestions, cleanResponse };
+    return {
+        suggestions: extractSharedSuggestions(text),
+        cleanResponse,
+    };
 }
 
 function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[]): ChatAttachmentUpload[] {
@@ -210,10 +198,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         if (inputType === 'image' && attachments.length > 0) {
             throw new AppError('Image generation requests do not accept uploaded attachments.', 400);
-        }
-
-        if (attachments.filter((attachment) => attachment.kind === 'video').length > 1) {
-            throw new AppError('Each message currently supports only one uploaded video.', 400);
         }
 
         const conversation = await prisma.conversation.findFirst({
@@ -411,7 +395,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     if (inputType === 'image') {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'status',
-                            content: 'Generating image. This usually takes 10 to 40 seconds.',
+                            content: '正在生成图片，通常需要 10 到 40 秒。',
                         })}\n\n`));
 
                         const imageResponse = await generateImageViaBackend(req.headers, {
@@ -442,7 +426,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'status',
-                            content: 'Image generated. Finalizing result.',
+                            content: '图片已生成，正在整理结果。',
                         })}\n\n`));
 
                         const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);

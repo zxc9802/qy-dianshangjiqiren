@@ -49,10 +49,7 @@ export function resolveImageAssetUrl(input: string): string {
         try {
             const url = new URL(input);
             if (url.pathname.startsWith('/api/image-assets/')) {
-                if (!isInternalAssetHost(url.hostname)) {
-                    return input;
-                }
-                return `${url.pathname}${url.search}`;
+                return input;
             }
             if (url.pathname.startsWith('/generated-images/')) {
                 if (!isInternalAssetHost(url.hostname)) {

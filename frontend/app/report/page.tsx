@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import html2canvas from 'html2canvas';
+import { formatMessage } from '../lib/formatMessage';
 import {
     Loader2,
     Camera,
@@ -29,58 +30,8 @@ interface ReportData {
     chatHistory: { role: string; content: string }[];
 }
 
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 function renderMarkdown(md: string): string {
-    const safeLineBreakToken = '__SAFE_LINE_BREAK__';
-    const html = escapeHtml(md.replace(/<br\s*\/?>/gi, safeLineBreakToken))
-        .replace(new RegExp(safeLineBreakToken, 'g'), '<br>')
-        .replace(/^#{1,6}\s*/gm, '')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/^[\*\-]\s+/gm, '• ');
-
-    const lines = html.split('\n');
-    let inTable = false;
-    const parts: string[] = [];
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('|') && trimmed.includes('|')) {
-            const cells = trimmed.split('|').filter(Boolean).map((cell) => cell.trim());
-            if (cells.every((cell) => /^[-:]+$/.test(cell))) {
-                continue;
-            }
-            if (!inTable) {
-                parts.push('<table class="report-table">');
-                inTable = true;
-            }
-            parts.push(`<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`);
-            continue;
-        }
-
-        if (inTable) {
-            parts.push('</table>');
-            inTable = false;
-        }
-
-        if (trimmed) {
-            parts.push(`<p>${line}</p>`);
-        }
-    }
-
-    if (inTable) {
-        parts.push('</table>');
-    }
-
-    return parts.join('');
+    return formatMessage(md, { tableClassName: 'report-table' });
 }
 
 export default function ReportPage() {

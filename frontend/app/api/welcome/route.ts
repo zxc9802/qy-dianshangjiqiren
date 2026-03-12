@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractSuggestions, stripSuggestionBlock } from '../../lib/formatMessage';
 import { readServerEnv } from '../../lib/server-env';
 
 const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:generateContent';
@@ -60,18 +61,8 @@ export async function POST(req: NextRequest) {
             ?.map((p: { text?: string }) => p.text || '')
             ?.join('') || '你好，请告诉我你的需求。';
 
-        let content = text;
-        let suggestions: string[] = [];
-        const match = content.match(/```json[\s\S]*?(\{"suggestions":\s*\[[\s\S]*?\]\})[\s\S]*?```/);
-        if (match) {
-            try {
-                const parsed = JSON.parse(match[1]);
-                if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
-                content = content.replace(match[0], '').trim();
-            } catch {
-                // ignore suggestions parse errors
-            }
-        }
+        const content = stripSuggestionBlock(text).trim();
+        const suggestions = extractSuggestions(text);
 
         return NextResponse.json({ content, suggestions });
     } catch (err) {

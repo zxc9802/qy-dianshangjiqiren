@@ -3,7 +3,6 @@ import { readBackendUrl } from '../../lib/server-env';
 
 const BACKEND_IMAGE_API_PREFIX = '/api/image-assets/';
 const LEGACY_FRONTEND_IMAGE_PREFIX = '/generated-images/';
-const FRONTEND_IMAGE_PROXY_PREFIX = '/api/image-assets/';
 const FRONTEND_LEGACY_IMAGE_PROXY_PREFIX = '/api/generated-images/';
 
 function isPrivateIpv4Host(hostname: string): boolean {
@@ -51,7 +50,7 @@ function toFrontendServedAssetUrl(value: string): string {
     if (!value) return value;
 
     if (value.startsWith(BACKEND_IMAGE_API_PREFIX)) {
-        return `${FRONTEND_IMAGE_PROXY_PREFIX}${value.slice(BACKEND_IMAGE_API_PREFIX.length)}`;
+        return value;
     }
 
     if (value.startsWith(LEGACY_FRONTEND_IMAGE_PREFIX)) {
@@ -65,10 +64,7 @@ function toFrontendServedAssetUrl(value: string): string {
     try {
         const url = new URL(value);
         if (url.pathname.startsWith(BACKEND_IMAGE_API_PREFIX)) {
-            if (!isInternalAssetHost(url.hostname)) {
-                return value;
-            }
-            return `${FRONTEND_IMAGE_PROXY_PREFIX}${url.pathname.slice(BACKEND_IMAGE_API_PREFIX.length)}${url.search}`;
+            return value;
         }
         if (url.pathname.startsWith(LEGACY_FRONTEND_IMAGE_PREFIX)) {
             if (!isInternalAssetHost(url.hostname)) {
