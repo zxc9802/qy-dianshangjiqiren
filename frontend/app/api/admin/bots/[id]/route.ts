@@ -33,6 +33,14 @@ function getBuiltinKnowledgeDocs(routeId: string) {
     }));
 }
 
+async function getPresetBotUploadedDocs(botId: string) {
+    return prisma.presetBotDocument.findMany({
+        where: { botId },
+        select: { id: true, fileName: true, fileType: true, fileSize: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+    });
+}
+
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
         await getAuthUser(req, { requireAdmin: true });
@@ -70,8 +78,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         const bot = await findPresetBot(id);
         if (!bot) throw new AppError('智能体不存在', 404);
 
-        // Builtin knowledge from JSON file (no DB table for preset bot documents)
-        const documents = getBuiltinKnowledgeDocs(String(bot.sortOrder));
+        const builtinKnowledgeDocs = getBuiltinKnowledgeDocs(String(bot.sortOrder));
+        const uploadedDocs = await getPresetBotUploadedDocs(bot.id);
+        const documents = [...uploadedDocs, ...builtinKnowledgeDocs];
 
         return Response.json({
             success: true,
