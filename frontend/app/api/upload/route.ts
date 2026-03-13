@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processUploadedVideo, storeUploadedVideo } from '../../lib/server-chat-video';
+import { deleteTempVideo, processUploadedVideo } from '../../lib/server-chat-video';
 import { describeImageWithGemini } from '../../lib/server-gemini-media';
 import { readServerEnv } from '../../lib/server-env';
 
@@ -98,20 +98,23 @@ export async function POST(req: NextRequest) {
 
         if (VIDEO_EXTS.has(ext)) {
             if (responseModel === 'gemini') {
-                const stored = await storeUploadedVideo({
+                const processed = await processUploadedVideo({
                     buffer,
                     fileName: file.name,
                     mimeType,
                 });
+
+                await deleteTempVideo(processed.tempVideoToken);
 
                 return NextResponse.json({
                     kind: 'video',
                     fileName: file.name,
                     fileSize: file.size,
                     mimeType,
-                    content: '',
+                    content: processed.extractedText,
+                    durationMs: processed.durationMs,
+                    transcript: processed.transcript,
                     frames: [],
-                    tempVideoToken: stored.tempVideoToken,
                 });
             }
 
