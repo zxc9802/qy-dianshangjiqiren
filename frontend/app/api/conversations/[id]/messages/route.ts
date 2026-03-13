@@ -69,6 +69,24 @@ const attachmentSchema = z.object({
     })).max(6).optional(),
     tempVideoToken: z.string().max(255).optional(),
 });
+const messageRequestSchema = z.object({
+    content: z.string().default(''),
+    displayContent: z.string().optional(),
+    inputType: z.enum(['text', 'voice', 'file', 'image', 'video']).default('text'),
+    aspectRatio: z.string().min(3).max(10).optional(),
+    responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
+    attachments: z.array(attachmentSchema).max(10).default([]),
+});
+
+interface InlineVideoUpload {
+    fileName: string;
+    mimeType: string;
+    data: string;
+}
+
+interface CurrentTurnAttachment extends ChatAttachmentUpload {
+    inlineVideoData?: InlineVideoUpload;
+}
 
 function isMissingPresetBotDocumentTable(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error || '');
@@ -125,6 +143,49 @@ function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[])
     }));
 }
 
+async function parseMessageRequest(req: NextRequest): Promise<z.infer<typeof messageRequestSchema> & {
+    inlineVideoUploads: InlineVideoUpload[];
+}> {
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+        const formData = await req.formData();
+        const rawPayload = formData.get('payload');
+        if (typeof rawPayload !== 'string' || !rawPayload.trim()) {
+            throw new AppError('payload is required', 400);
+        }
+
+        let payload: unknown;
+        try {
+            payload = JSON.parse(rawPayload);
+        } catch {
+            throw new AppError('Invalid payload JSON', 400);
+        }
+
+        const parsed = messageRequestSchema.parse(payload);
+        const inlineVideoUploads = await Promise.all(
+            formData
+                .getAll('videoFiles')
+                .filter((item): item is File => item instanceof File)
+                .map(async (file) => ({
+                    fileName: file.name,
+                    mimeType: file.type || 'video/mp4',
+                    data: Buffer.from(await file.arrayBuffer()).toString('base64'),
+                })),
+        );
+
+        return {
+            ...parsed,
+            inlineVideoUploads,
+        };
+    }
+
+    return {
+        ...messageRequestSchema.parse(await req.json()),
+        inlineVideoUploads: [],
+    };
+}
+
 function buildStoredMessagePromptText(message: {
     content: string;
     attachments: Array<{
@@ -152,7 +213,7 @@ function buildStoredMessagePromptText(message: {
 
 function buildGeminiCurrentTurnKnowledgeText(
     rawText: string,
-    attachments: ChatAttachmentUpload[],
+    attachments: CurrentTurnAttachment[],
 ): string {
     if (attachments.length === 0) {
         return rawText.trim();
@@ -163,7 +224,7 @@ function buildGeminiCurrentTurnKnowledgeText(
 
 async function buildGeminiCurrentTurnMessage(
     rawText: string,
-    attachments: ChatAttachmentUpload[],
+    attachments: CurrentTurnAttachment[],
 ): Promise<GeminiChatMessage> {
     if (attachments.length === 0) {
         return { role: 'user', content: rawText.trim() };
@@ -173,6 +234,19 @@ async function buildGeminiCurrentTurnMessage(
     const questionText = rawText.trim() || 'Analyze the uploaded attachments and provide a structured answer.';
 
     for (const attachment of attachments) {
+        if (attachment.kind === 'video' && attachment.inlineVideoData) {
+            parts.push({
+                text: `User uploaded a video attachment named ${attachment.fileName}. Inspect the video directly and answer from the video itself.`,
+            });
+            parts.push({
+                inlineData: {
+                    mimeType: attachment.inlineVideoData.mimeType || attachment.mimeType || 'video/mp4',
+                    data: attachment.inlineVideoData.data,
+                },
+            });
+            continue;
+        }
+
         if (attachment.kind === 'video' && attachment.tempVideoToken) {
             const tempVideo = await loadTempVideo(attachment.tempVideoToken);
             parts.push({
@@ -244,20 +318,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             aspectRatio,
             responseModel,
             attachments: incomingAttachments,
-        } = z.object({
-            content: z.string().default(''),
-            displayContent: z.string().optional(),
-            inputType: z.enum(['text', 'voice', 'file', 'image', 'video']).default('text'),
-            aspectRatio: z.string().min(3).max(10).optional(),
-            responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
-            attachments: z.array(attachmentSchema).max(10).default([]),
-        }).parse(await req.json());
+            inlineVideoUploads,
+        } = await parseMessageRequest(req);
 
-        const attachments = normalizeIncomingAttachments(incomingAttachments);
+        const normalizedAttachments = normalizeIncomingAttachments(incomingAttachments);
+        let inlineVideoIndex = 0;
+        const attachments: CurrentTurnAttachment[] = normalizedAttachments.map((attachment) => {
+            if (attachment.kind !== 'video') {
+                return attachment;
+            }
+
+            const inlineVideoData = inlineVideoUploads[inlineVideoIndex];
+            inlineVideoIndex += 1;
+
+            if (!inlineVideoData) {
+                return attachment;
+            }
+
+            return {
+                ...attachment,
+                inlineVideoData,
+            };
+        });
         const hasAttachmentPayload = attachments.length > 0;
         tempVideoTokensToCleanup = attachments
             .filter((attachment) => attachment.kind === 'video' && attachment.tempVideoToken)
             .map((attachment) => attachment.tempVideoToken as string);
+        const currentVideoAttachmentCount = attachments.filter((attachment) => attachment.kind === 'video').length;
+        if (responseModel === 'gemini' && currentVideoAttachmentCount > 0 && inlineVideoUploads.length < currentVideoAttachmentCount) {
+            throw new AppError('Gemini 未收到当前视频文件，请重新上传后重试。', 400);
+        }
 
         if (!content.trim() && !hasAttachmentPayload && inputType !== 'image') {
             throw new AppError('content or attachments is required', 400);

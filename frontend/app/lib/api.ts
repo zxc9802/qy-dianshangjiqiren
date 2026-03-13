@@ -204,14 +204,18 @@ export const api = {
         aspectRatio?: string;
         responseModel?: 'gemini' | 'gpt-5.4';
         attachments?: ChatAttachmentPayload[];
-    }) => {
+    } | FormData) => {
         const token = getToken();
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+        const headers: Record<string, string> = {};
+        if (!isFormData) {
+            headers['Content-Type'] = 'application/json';
+        }
         if (token) headers['Authorization'] = `Bearer ${token}`;
         return fetch(`${API_BASE}/conversations/${id}/messages`, {
             method: 'POST',
             headers,
-            body: JSON.stringify(body),
+            body: isFormData ? body : JSON.stringify(body),
         });
     },
 

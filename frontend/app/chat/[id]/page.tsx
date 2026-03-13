@@ -555,6 +555,8 @@ export default function ChatPage() {
             tempVideoToken: attachment.tempVideoToken,
             frames: attachment.frames,
         }));
+        const shouldSendGeminiVideoDirect = responseModel === 'gemini'
+            && requestAttachments.some((attachment) => attachment.kind === 'video');
         const optimisticAttachments: MessageAttachment[] = parsedAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
@@ -623,14 +625,34 @@ export default function ChatPage() {
                 throw new Error('创建会话失败');
             }
 
-            const response = await api.sendConversationMessage(activeConversationId, {
+            const messageInputType: 'text' | 'voice' | 'file' | 'image' | 'video' = isImageRequest
+                ? 'image'
+                : requestAttachments.some((attachment) => attachment.kind === 'video')
+                    ? 'video'
+                    : hasFiles
+                        ? 'file'
+                        : 'text';
+            const messagePayload = {
                 content,
                 displayContent: displayText,
-                inputType: isImageRequest ? 'image' : requestAttachments.some((attachment) => attachment.kind === 'video') ? 'video' : hasFiles ? 'file' : 'text',
+                inputType: messageInputType,
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
                 responseModel,
                 attachments: requestAttachments,
-            });
+            };
+            const requestBody = shouldSendGeminiVideoDirect
+                ? (() => {
+                    const formData = new FormData();
+                    formData.append('payload', JSON.stringify(messagePayload));
+                    parsedAttachments
+                        .filter((attachment) => attachment.kind === 'video')
+                        .forEach((attachment) => {
+                            formData.append('videoFiles', attachment.file, attachment.name);
+                        });
+                    return formData;
+                })()
+                : messagePayload;
+            const response = await api.sendConversationMessage(activeConversationId, requestBody);
             const responseContentType = response.headers.get('content-type') || '';
 
             if (!response.ok) {
