@@ -18,6 +18,7 @@ import {
     isConversationImageTurn,
 } from '../../../../lib/conversation-message-codec';
 import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
+import { VIDEO_BREAKDOWN_BOT_ID } from '../../../../lib/builtin-bots';
 import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
 import {
     extractSuggestions as extractSharedSuggestions,
@@ -26,7 +27,11 @@ import {
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, loadTempVideo } from '../../../../lib/server-chat-video';
-import { requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../../../lib/yunwu-openai-chat';
+import {
+    requestYunwuOpenAIChat,
+    streamYunwuOpenAIChat,
+    type OpenAIChatMessage,
+} from '../../../../lib/yunwu-openai-chat';
 import {
     streamYunwuGeminiChat,
     type GeminiChatMessage,
@@ -46,6 +51,8 @@ const GLOBAL_RULES = `
 `;
 
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
+const STREAM_HEARTBEAT_INTERVAL_MS = 15000;
+const VIDEO_BREAKDOWN_STREAM_STATUS = '正在分析视频内容，请稍候...';
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
     fileName: z.string().min(1).max(255),
@@ -358,8 +365,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             }));
 
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
+        const shouldStreamVideoBreakdownGpt = inputType !== 'image'
+            && responseModel === 'gpt-5.4'
+            && bot.kind === 'builtin'
+            && bot.routeId === VIDEO_BREAKDOWN_BOT_ID
+            && (inputType === 'video' || attachments.some((attachment) => attachment.kind === 'video'));
 
-        if (inputType !== 'image' && responseModel === 'gpt-5.4') {
+        if (inputType !== 'image' && responseModel === 'gpt-5.4' && !shouldStreamVideoBreakdownGpt) {
             const fullResponse = await requestYunwuOpenAIChat({
                 systemPrompt,
                 messages: [
@@ -411,6 +423,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             async start(controller) {
                 let fullResponse = '';
                 let streamedVisibleLength = 0;
+                let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+                const startHeartbeat = () => {
+                    if (!shouldStreamVideoBreakdownGpt || heartbeatTimer) {
+                        return;
+                    }
+
+                    heartbeatTimer = setInterval(() => {
+                        try {
+                            controller.enqueue(encoder.encode(': keep-alive\n\n'));
+                        } catch {
+                            // Ignore heartbeat enqueue errors during shutdown.
+                        }
+                    }, STREAM_HEARTBEAT_INTERVAL_MS);
+                };
+
+                const stopHeartbeat = () => {
+                    if (heartbeatTimer) {
+                        clearInterval(heartbeatTimer);
+                        heartbeatTimer = null;
+                    }
+                };
 
                 try {
                     if (inputType === 'image') {
@@ -504,27 +538,53 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                     };
 
-                    const geminiMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
-                        role: message.role,
-                        content: typeof message.content === 'string' ? message.content : '',
-                    }));
-                    geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
+                    if (shouldStreamVideoBreakdownGpt) {
+                        startHeartbeat();
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'status',
+                            content: VIDEO_BREAKDOWN_STREAM_STATUS,
+                        })}\n\n`));
 
-                    await streamYunwuGeminiChat({
-                        systemPrompt,
-                        messages: geminiMessages,
-                        temperature: 0.8,
-                        topP: 0.95,
-                        maxOutputTokens: 8192,
-                        onText: (textChunk) => {
-                            if (!textChunk) {
-                                return;
-                            }
+                        await streamYunwuOpenAIChat({
+                            systemPrompt,
+                            messages: [
+                                ...historyMessages,
+                                { role: 'user', content: currentPromptText },
+                            ],
+                            temperature: 0.8,
+                            maxTokens: 8192,
+                            onText: (textChunk) => {
+                                if (!textChunk) {
+                                    return;
+                                }
 
-                            fullResponse += textChunk;
-                            flushVisibleText();
-                        },
-                    });
+                                fullResponse += textChunk;
+                                flushVisibleText();
+                            },
+                        });
+                    } else {
+                        const geminiMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
+                            role: message.role,
+                            content: typeof message.content === 'string' ? message.content : '',
+                        }));
+                        geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
+
+                        await streamYunwuGeminiChat({
+                            systemPrompt,
+                            messages: geminiMessages,
+                            temperature: 0.8,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
+                            onText: (textChunk) => {
+                                if (!textChunk) {
+                                    return;
+                                }
+
+                                fullResponse += textChunk;
+                                flushVisibleText();
+                            },
+                        });
+                    }
 
                     const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
 
@@ -559,6 +619,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         content: error instanceof Error ? error.message : 'Request failed',
                     })}\n\n`));
                 } finally {
+                    stopHeartbeat();
                     await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
                     controller.close();
                 }

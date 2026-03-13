@@ -1,5 +1,11 @@
 import { AppError } from './auth';
 import { readServerEnv } from './server-env';
+import {
+    looksLikeHtmlPayload,
+    looksLikeTimeoutPayload,
+    normalizeUpstreamErrorMessage,
+    truncateForLog,
+} from './upstream-error';
 
 const DEFAULT_OPENAI_CHAT_URL = 'https://yunwu.ai/v1/chat/completions';
 const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-5.4';
@@ -35,6 +41,41 @@ type OpenAIResponsePayload = {
         message?: { content?: unknown };
     }>;
 };
+
+function logUnexpectedUpstreamResponse(context: string, status: number, contentType: string, body: string) {
+    console.error(`[OpenAIChat] ${context}`, {
+        status,
+        contentType: contentType || 'unknown',
+        bodyPreview: truncateForLog(body),
+    });
+}
+
+function shouldTreatAsHtmlError(contentType: string, body: string): boolean {
+    if (!body.trim()) {
+        return false;
+    }
+
+    if (contentType.toLowerCase().includes('text/html')) {
+        return true;
+    }
+
+    return looksLikeHtmlPayload(body) || looksLikeTimeoutPayload(body);
+}
+
+function buildUpstreamAppError(params: {
+    context: string;
+    status: number;
+    contentType?: string | null;
+    body: string;
+    fallbackStatus?: number;
+}): AppError {
+    const contentType = params.contentType || '';
+    logUnexpectedUpstreamResponse(params.context, params.status, contentType, params.body);
+    return new AppError(
+        normalizeUpstreamErrorMessage(params.body),
+        params.status >= 400 ? params.status : (params.fallbackStatus || 502),
+    );
+}
 
 export function getYunwuOpenAIChatConfig(): {
     apiKey: string;
@@ -181,16 +222,37 @@ export async function requestYunwuOpenAIChat({
         ),
     });
 
+    const contentType = upstream.headers.get('content-type') || '';
     const rawResponse = await upstream.text().catch(() => upstream.statusText);
     if (!upstream.ok) {
-        throw new AppError(`Upstream chat request failed: ${rawResponse || upstream.statusText}`, upstream.status);
+        throw buildUpstreamAppError({
+            context: 'non-ok completion response',
+            status: upstream.status,
+            contentType,
+            body: rawResponse || upstream.statusText,
+        });
+    }
+
+    if (shouldTreatAsHtmlError(contentType, rawResponse)) {
+        throw buildUpstreamAppError({
+            context: 'unexpected HTML completion response',
+            status: upstream.status,
+            contentType,
+            body: rawResponse,
+        });
     }
 
     let data: OpenAIResponsePayload;
     try {
         data = JSON.parse(rawResponse) as OpenAIResponsePayload;
     } catch {
-        throw new AppError(`Upstream chat request failed: ${rawResponse || 'Invalid JSON response'}`, 502);
+        throw buildUpstreamAppError({
+            context: 'invalid completion JSON payload',
+            status: upstream.status,
+            contentType,
+            body: rawResponse || 'Invalid JSON response',
+            fallbackStatus: 502,
+        });
     }
 
     if (!data.choices?.length) {
@@ -225,18 +287,48 @@ export async function streamYunwuOpenAIChat({
         ),
     });
 
+    const contentType = upstream.headers.get('content-type') || '';
     if (!upstream.ok || !upstream.body) {
         const errorText = await upstream.text().catch(() => upstream.statusText);
-        throw new AppError(`Upstream chat request failed: ${errorText || upstream.statusText}`, upstream.status);
+        throw buildUpstreamAppError({
+            context: 'non-ok streaming response',
+            status: upstream.status,
+            contentType,
+            body: errorText || upstream.statusText,
+        });
+    }
+
+    if (contentType.toLowerCase().includes('text/html')) {
+        const errorText = await upstream.text().catch(() => upstream.statusText);
+        throw buildUpstreamAppError({
+            context: 'unexpected HTML streaming response',
+            status: upstream.status,
+            contentType,
+            body: errorText || upstream.statusText,
+        });
     }
 
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let pending = '';
+    let inspectedFirstChunk = false;
 
     while (true) {
         const { done, value } = await reader.read();
-        pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const chunk = decoder.decode(value || new Uint8Array(), { stream: !done });
+        if (!inspectedFirstChunk) {
+            inspectedFirstChunk = true;
+            if (shouldTreatAsHtmlError(contentType, chunk)) {
+                throw buildUpstreamAppError({
+                    context: 'unexpected HTML streaming response',
+                    status: upstream.status,
+                    contentType,
+                    body: chunk,
+                });
+            }
+        }
+
+        pending += chunk;
 
         const lines = pending.split('\n');
         pending = lines.pop() || '';

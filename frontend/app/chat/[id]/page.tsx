@@ -8,6 +8,7 @@ import { api, type AttachmentInfo, type ChatAttachmentPayload } from '../../lib/
 import { useAuthStore } from '../../stores/auth';
 import AdminBotPanel from '../../components/AdminBotPanel';
 import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID } from '../../lib/builtin-bots';
+import { normalizeUpstreamErrorMessage } from '../../lib/upstream-error';
 import {
     buildMessageDisplayContent,
     ChatAttachmentFrame,
@@ -78,6 +79,41 @@ interface WfState {
 }
 
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
+
+type ConversationMessageResponsePayload = {
+    data?: {
+        kind?: 'text' | 'image';
+        content?: string;
+        suggestions?: string[];
+    };
+    error?: string;
+    message?: string;
+};
+
+function getFriendlyChatErrorMessage(input: unknown): string {
+    return normalizeUpstreamErrorMessage(input, {
+        timeoutMessage: '服务超时，请稍后重试或切换 Gemini。',
+        genericMessage: '服务暂时不可用，请稍后重试。',
+    });
+}
+
+function sanitizeAssistantMessageContent(text: string): string {
+    const looksLikeRenderedErrorPage = text.includes('<!DOCTYPE html')
+        || text.includes('<html')
+        || text.includes('Error code 524')
+        || text.includes('A timeout occurred');
+
+    if (!looksLikeRenderedErrorPage) {
+        return text;
+    }
+
+    const normalized = getFriendlyChatErrorMessage(text);
+    if (normalized === text) {
+        return text;
+    }
+
+    return text.includes('出错') ? `出错了：${normalized}` : normalized;
+}
 
 function normalizeMessageAttachments(attachments?: AttachmentInfo[]): MessageAttachment[] | undefined {
     if (!attachments?.length) {
@@ -300,9 +336,12 @@ export default function ChatPage() {
     }, [botId, botName]);
     const renderedMessages = useMemo(
         () => messages.map((message) => {
-            const textContent = message.attachments?.length
+            const rawTextContent = message.attachments?.length
                 ? stripAttachmentDisplayLabels(message.content, message.attachments)
                 : message.content;
+            const textContent = message.role === 'assistant'
+                ? sanitizeAssistantMessageContent(rawTextContent)
+                : rawTextContent;
 
             return {
                 ...message,
@@ -499,6 +538,7 @@ export default function ChatPage() {
                 responseModel,
                 attachments: requestAttachments,
             });
+            const responseContentType = response.headers.get('content-type') || '';
 
             if (!response.ok) {
                 const payload = response.headers.get('content-type')?.includes('application/json')
@@ -508,6 +548,34 @@ export default function ChatPage() {
                     ? payload
                     : payload?.message || payload?.error || '发送失败';
                 throw new Error(message);
+            }
+
+            if (responseContentType.includes('application/json')) {
+                const payload = await response.json() as ConversationMessageResponsePayload;
+                const payloadSuggestions = Array.isArray(payload.data?.suggestions)
+                    ? payload.data.suggestions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                    : [];
+                const finalText = typeof payload.data?.content === 'string'
+                    ? stripSuggestionBlock(payload.data.content).trim()
+                    : '';
+
+                if (payloadSuggestions.length > 0) {
+                    setSuggestions(payloadSuggestions);
+                }
+
+                if (finalText) {
+                    setMessages((current) => [
+                        ...current,
+                        { id: `assistant-${Date.now()}`, role: 'assistant', content: finalText },
+                    ]);
+                }
+
+                shouldRefreshConversation = true;
+                return;
+            }
+
+            if (responseContentType.includes('text/html')) {
+                throw new Error(await response.text());
             }
 
             const reader = response.body?.getReader();
