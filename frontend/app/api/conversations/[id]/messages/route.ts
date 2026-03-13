@@ -52,6 +52,7 @@ const GLOBAL_RULES = `
 
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
 const STREAM_HEARTBEAT_INTERVAL_MS = 15000;
+const VIDEO_BREAKDOWN_HISTORY_TURNS = 10;
 const VIDEO_BREAKDOWN_STREAM_STATUS = '正在分析视频内容，请稍候...';
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
@@ -133,11 +134,16 @@ function buildStoredMessagePromptText(message: {
         fileUrl: string;
         parsedText: string | null;
     }>;
+}, options?: {
+    excludeVideoAttachments?: boolean;
 }): string {
-    const attachments = message.attachments.map((attachment) => normalizeAttachmentRecord(attachment));
-    const baseText = attachments.length
-        ? stripAttachmentDisplayLabels(message.content, attachments)
+    const allAttachments = message.attachments.map((attachment) => normalizeAttachmentRecord(attachment));
+    const baseText = allAttachments.length
+        ? stripAttachmentDisplayLabels(message.content, allAttachments)
         : message.content.trim();
+    const attachments = options?.excludeVideoAttachments
+        ? allAttachments.filter((attachment) => attachment.kind !== 'video')
+        : allAttachments;
 
     return attachments.length
         ? buildMessagePromptText(baseText, attachments)
@@ -194,6 +200,35 @@ async function buildGeminiCurrentTurnMessage(
         role: 'user',
         content: parts,
     };
+}
+
+function takeRecentUserTurns<T extends { role: string }>(
+    messages: T[],
+    maxUserTurns: number,
+): T[] {
+    if (maxUserTurns <= 0) {
+        return [];
+    }
+
+    let includedUserTurns = 0;
+    let startIndex = messages.length;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        startIndex = index;
+
+        if (messages[index].role === 'user') {
+            includedUserTurns += 1;
+            if (includedUserTurns >= maxUserTurns) {
+                break;
+            }
+        }
+    }
+
+    if (includedUserTurns < maxUserTurns) {
+        return messages;
+    }
+
+    return messages.slice(startIndex);
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -266,6 +301,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
 
         const bot = getConversationBotPayload(conversation);
+        const isVideoBreakdownBot = bot.kind === 'builtin'
+            && bot.routeId === VIDEO_BREAKDOWN_BOT_ID;
+        const excludeHistoricalVideoAttachments = isVideoBreakdownBot;
+        const filteredConversationMessages = conversation.messages
+            .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }));
+        const contextConversationMessages = isVideoBreakdownBot
+            ? takeRecentUserTurns(filteredConversationMessages, VIDEO_BREAKDOWN_HISTORY_TURNS)
+            : filteredConversationMessages;
+        const buildHistoryPromptText = (message: {
+            content: string;
+            attachments: Array<{
+                fileName: string;
+                fileSize: number;
+                fileType: string;
+                fileUrl: string;
+                parsedText: string | null;
+            }>;
+        }): string => buildStoredMessagePromptText(message, {
+            excludeVideoAttachments: excludeHistoricalVideoAttachments,
+        });
         const userDisplayContent = typeof displayContent === 'string' && displayContent.trim()
             ? displayContent.trim()
             : hasAttachmentPayload
@@ -306,11 +361,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 bot.routeId,
                 basePrompt,
                 [
-                    ...conversation.messages
-                        .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
+                    ...contextConversationMessages
                         .map((message) => ({
                             role: message.role,
-                            content: buildStoredMessagePromptText(message),
+                            content: buildHistoryPromptText(message),
                         })),
                     {
                         role: 'user',
@@ -357,11 +411,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             });
         }
 
-        const historyMessages: OpenAIChatMessage[] = conversation.messages
-            .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }))
+        const historyMessages: OpenAIChatMessage[] = contextConversationMessages
             .map((message) => ({
                 role: message.role === 'assistant' ? 'assistant' : 'user',
-                content: buildStoredMessagePromptText(message),
+                content: buildHistoryPromptText(message),
             }));
 
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
