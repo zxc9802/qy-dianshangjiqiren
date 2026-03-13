@@ -347,7 +347,21 @@
     margin: 0 2px;
 }
 
-/* Pin button on messages */
+/* Message action buttons */
+.copyTableWrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.copyTableWrap table {
+    width: 100%;
+    margin: 4px 0 0 0;
+    align-self: stretch;
+}
+
+.copyTableBtn,
 .pinBtn {
     display: inline-flex;
     align-items: center;
@@ -363,18 +377,29 @@
     transition: all 0.15s;
 }
 
+.copyTableBtn {
+    margin-top: 0;
+    padding: 3px 8px;
+    gap: 3px;
+    font-size: 11px;
+    border-radius: 999px;
+}
+
+.copyTableBtn:hover,
 .pinBtn:hover {
     border-color: #2563eb;
     color: #2563eb;
     background: #eff6ff;
 }
 
+.copyTableBtnActive,
 .pinBtnActive {
     border-color: #2563eb;
     color: #fff;
     background: #2563eb;
 }
 
+.copyTableBtnActive:hover,
 .pinBtnActive:hover {
     background: #1d4ed8;
 }
@@ -566,6 +591,7 @@
     vertical-align: top;
 }
 
+.msgContent thead th,
 .msgContent table tr:first-child td {
     font-weight: 600;
     background: var(--color-accent);

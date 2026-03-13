@@ -16,6 +16,10 @@ const SAFE_LINE_BREAK_TOKEN = '__SAFE_LINE_BREAK__';
 
 export interface FormatMessageOptions {
     tableClassName?: string;
+    enableTableCopyButton?: boolean;
+    tableWrapperClassName?: string;
+    tableCopyButtonClassName?: string;
+    tableCopyButtonLabel?: string;
 }
 
 function escapeHtmlPreservingLineBreaks(value: string): string {
@@ -78,6 +82,60 @@ function buildTableOpenTag(tableClassName?: string): string {
     return `<table class="${escapeAttribute(tableClassName)}">`;
 }
 
+function splitTableCells(line: string): string[] {
+    return line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim());
+}
+
+function isTableSeparatorRow(cells: string[]): boolean {
+    return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
+}
+
+function buildClassAttribute(className?: string): string {
+    return className ? ` class="${escapeAttribute(className)}"` : '';
+}
+
+function renderTableRows(rows: string[][], options: FormatMessageOptions): string {
+    if (!rows.length) {
+        return '';
+    }
+
+    let hasHeader = false;
+    let bodyRows = rows;
+
+    if (rows.length >= 2 && isTableSeparatorRow(rows[1])) {
+        hasHeader = true;
+        bodyRows = rows.slice(2);
+    }
+
+    const headerRow = hasHeader ? rows[0] : null;
+    let tableHtml = buildTableOpenTag(options.tableClassName);
+
+    if (headerRow) {
+        tableHtml += `<thead><tr>${headerRow.map((cell) => `<th scope="col">${formatInline(cell)}</th>`).join('')}</tr></thead>`;
+    }
+
+    tableHtml += '<tbody>';
+
+    const rowsToRender = hasHeader ? bodyRows : rows;
+    rowsToRender.forEach((row) => {
+        tableHtml += `<tr>${row.map((cell) => `<td>${formatInline(cell)}</td>`).join('')}</tr>`;
+    });
+
+    tableHtml += '</tbody></table>';
+
+    if (!options.enableTableCopyButton) {
+        return tableHtml;
+    }
+
+    const label = escapeHtml(options.tableCopyButtonLabel || '复制表格');
+    return `<div${buildClassAttribute(options.tableWrapperClassName)} data-copy-table-wrapper="true">${tableHtml}<button type="button"${buildClassAttribute(options.tableCopyButtonClassName)} data-copy-table-button="true">${label}</button></div>`;
+}
+
 function formatCodeBlock(code: string): string {
     const escaped = escapeHtml(code.trimEnd());
     if (!escaped.trim()) {
@@ -95,11 +153,57 @@ export function stripSuggestionBlock(text: string): string {
         .trimEnd();
 }
 
+export function extractMarkdownTables(text: string): string[] {
+    const cleaned = stripSuggestionBlock(text.replace(/\r/g, ''));
+    const lines = cleaned.split('\n');
+    const tables: string[] = [];
+    let currentTable: string[] = [];
+    let inCodeBlock = false;
+
+    const flushTable = () => {
+        if (!currentTable.length) {
+            return;
+        }
+
+        tables.push(currentTable.join('\n').trim());
+        currentTable = [];
+    };
+
+    for (const rawLine of lines) {
+        const trimmedStart = rawLine.trimStart();
+
+        if (trimmedStart.startsWith('```')) {
+            inCodeBlock = !inCodeBlock;
+            flushTable();
+            continue;
+        }
+
+        if (inCodeBlock) {
+            continue;
+        }
+
+        const line = rawLine.trim();
+        const isTableLine = line.startsWith('|') && line.includes('|');
+
+        if (isTableLine) {
+            currentTable.push(line);
+            continue;
+        }
+
+        flushTable();
+    }
+
+    flushTable();
+
+    return tables;
+}
+
 export function formatMessage(text: string, options: FormatMessageOptions = {}): string {
     const cleaned = stripSuggestionBlock(text.replace(/\r/g, ''));
     const lines = cleaned.split('\n');
     const parts: string[] = [];
     let inTable = false;
+    let tableRows: string[][] = [];
     let inCodeBlock = false;
     let pendingBreaks = 0;
     let codeLines: string[] = [];
@@ -114,8 +218,12 @@ export function formatMessage(text: string, options: FormatMessageOptions = {}):
 
     const closeTable = () => {
         if (inTable) {
-            parts.push('</table>');
+            const tableHtml = renderTableRows(tableRows, options);
+            if (tableHtml) {
+                parts.push(tableHtml);
+            }
             inTable = false;
+            tableRows = [];
             pendingBreaks = Math.max(pendingBreaks, 1);
         }
     };
@@ -159,18 +267,13 @@ export function formatMessage(text: string, options: FormatMessageOptions = {}):
         const isTableLine = line.startsWith('|') && line.includes('|');
 
         if (isTableLine) {
-            const cells = line.split('|').filter((cell) => cell.trim()).map((cell) => formatInline(cell.trim()));
-            if (cells.every((cell) => /^[-:]+$/.test(cell))) {
-                continue;
-            }
-
             if (!inTable) {
                 flushBreaks(1);
-                parts.push(buildTableOpenTag(options.tableClassName));
                 inTable = true;
+                tableRows = [];
             }
 
-            parts.push(`<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`);
+            tableRows.push(splitTableCells(line));
             continue;
         }
 

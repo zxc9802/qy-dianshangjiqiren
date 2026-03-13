@@ -51,7 +51,7 @@ interface DraftState {
 }
 
 const DEFAULT_STATE: DraftState = {
-    manualPrompt: '',
+    manualPrompt: '1:1，电商清透，纯白背景，棚拍柔光',
     negativePrompt: '',
     aspectRatio: '1:1',
     stylePreset: STYLE_PRESETS[0],
@@ -95,12 +95,41 @@ function trimPunctuation(input: string): string {
     return input.trim().replace(/[，,。；;、\s]+$/g, '');
 }
 
-function stripTrailingAutoClause(input: string, autoClause: string): string {
-    const value = input.replace(/\r\n/g, '\n').trim();
-    const clause = autoClause.trim();
-    if (!clause) return value;
-    if (!value.endsWith(clause)) return value;
-    return trimPunctuation(value.slice(0, value.length - clause.length));
+function normalizePromptToken(input: string): string {
+    return trimPunctuation(input.replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim());
+}
+
+function splitPromptTokens(input: string): string[] {
+    return input
+        .replace(/\r\n/g, '\n')
+        .split(/[，,；;\n]+/)
+        .map(normalizePromptToken)
+        .filter(Boolean);
+}
+
+function appendPromptTag(prompt: string, tag: string): string {
+    const nextTag = normalizePromptToken(tag);
+    if (!nextTag) return prompt.trim();
+    if (splitPromptTokens(prompt).includes(nextTag)) return prompt.trim();
+    const base = trimPunctuation(prompt);
+    return base ? `${base}，${nextTag}` : nextTag;
+}
+
+function removePromptTag(prompt: string, tag: string): string {
+    const nextTag = normalizePromptToken(tag);
+    if (!nextTag) return prompt.trim();
+    return splitPromptTokens(prompt)
+        .filter((token) => token !== nextTag)
+        .join('，');
+}
+
+function replacePromptTag(prompt: string, currentTag: string, nextTag: string): string {
+    const withoutCurrent = currentTag ? removePromptTag(prompt, currentTag) : prompt;
+    return nextTag ? appendPromptTag(withoutCurrent, nextTag) : trimPunctuation(withoutCurrent);
+}
+
+function ensurePromptContainsTags(prompt: string, tags: string[]): string {
+    return uniqueTags(tags).reduce((result, tag) => appendPromptTag(result, tag), prompt);
 }
 
 function summarizeRecentPrompt(input: string): string {
@@ -125,9 +154,11 @@ function resolveParameterField(tag: string, groupKey: string | undefined, draft:
 
 function applyParameterFieldTag(draft: DraftState, field: ParameterField, value: string): DraftState {
     if (field === 'aspectRatio') {
+        if (draft.aspectRatio === value) return draft;
         return {
             ...draft,
             aspectRatio: value,
+            manualPrompt: replacePromptTag(draft.manualPrompt, draft.aspectRatio, value),
             selectedTags: withAspectRatioTag(draft.selectedTags, value),
         };
     }
@@ -144,6 +175,9 @@ function applyParameterFieldTag(draft: DraftState, field: ParameterField, value:
     return {
         ...draft,
         [field]: resolvedValue,
+        manualPrompt: shouldClear
+            ? removePromptTag(draft.manualPrompt, current)
+            : replacePromptTag(draft.manualPrompt, current, resolvedValue),
         selectedTags: withAspectRatioTag(uniqueTags(withNew), draft.aspectRatio),
     };
 }
@@ -182,7 +216,10 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                     return {
                         ...prev,
                         ...parsed,
-                        manualPrompt: typeof parsed.manualPrompt === 'string' ? parsed.manualPrompt : prev.manualPrompt,
+                        manualPrompt: ensurePromptContainsTags(
+                            typeof parsed.manualPrompt === 'string' ? parsed.manualPrompt : prev.manualPrompt,
+                            withAspectRatioTag(nextTagsRaw, nextAspect),
+                        ),
                         negativePrompt: typeof parsed.negativePrompt === 'string' ? parsed.negativePrompt : prev.negativePrompt,
                         aspectRatio: nextAspect,
                         stylePreset: nextStyle,
@@ -231,22 +268,11 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
         return uniqueTags([...defaults, ...customs, ...ASPECT_RATIOS, ...STYLE_PRESETS, ...BACKGROUNDS, ...LIGHTING_OPTIONS]);
     }, [customTagsByGroup]);
 
-    const autoPromptTokens = useMemo(() => {
-        return uniqueTags(state.selectedTags);
-    }, [state.selectedTags]);
-
-    const autoPromptClause = useMemo(() => autoPromptTokens.join('，'), [autoPromptTokens]);
-
-    const composedPrompt = useMemo(() => {
-        const manual = trimPunctuation(state.manualPrompt);
-        if (manual && autoPromptClause) return `${manual}，${autoPromptClause}`;
-        return manual || autoPromptClause;
-    }, [state.manualPrompt, autoPromptClause]);
+    const finalPrompt = useMemo(() => trimPunctuation(state.manualPrompt), [state.manualPrompt]);
 
     const canGenerate = useMemo(() => {
-        const hasUsefulPrompt = state.manualPrompt.trim().length > 0 || state.selectedTags.length > 0;
-        return hasUsefulPrompt && !isGenerating;
-    }, [state.manualPrompt, state.selectedTags.length, isGenerating]);
+        return finalPrompt.length > 0 && !isGenerating;
+    }, [finalPrompt, isGenerating]);
 
     const persistDraft = () => {
         if (typeof window === 'undefined') return;
@@ -302,19 +328,25 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                 : [...prev.selectedTags, tag];
             return {
                 ...prev,
+                manualPrompt: exists ? removePromptTag(prev.manualPrompt, tag) : appendPromptTag(prev.manualPrompt, tag),
                 selectedTags: withAspectRatioTag(uniqueTags(next), prev.aspectRatio),
             };
         });
     };
 
     const clearSelectedTags = () => {
-        setState((prev) => ({
-            ...prev,
-            stylePreset: '',
-            background: '',
-            lighting: '',
-            selectedTags: withAspectRatioTag([], prev.aspectRatio),
-        }));
+        setState((prev) => {
+            const removableTags = uniqueTags(prev.selectedTags.filter((tag) => tag !== prev.aspectRatio));
+            const nextPrompt = removableTags.reduce((result, tag) => removePromptTag(result, tag), prev.manualPrompt);
+            return {
+                ...prev,
+                manualPrompt: ensurePromptContainsTags(nextPrompt, [prev.aspectRatio]),
+                stylePreset: '',
+                background: '',
+                lighting: '',
+                selectedTags: withAspectRatioTag([], prev.aspectRatio),
+            };
+        });
     };
 
     const onPickReference = (event: ChangeEvent<HTMLInputElement>) => {
@@ -357,7 +389,7 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
         try {
             // Build JSON body (base64 for reference image)
             const body: Record<string, unknown> = {
-                prompt: composedPrompt,
+                prompt: finalPrompt,
                 aspectRatio: state.aspectRatio,
                 referenceStrength: state.referenceStrength,
                 count: state.count,
@@ -393,9 +425,9 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
     };
 
     const copyPrompt = async () => {
-        if (!composedPrompt.trim()) return;
+        if (!finalPrompt) return;
         try {
-            await navigator.clipboard.writeText(composedPrompt);
+            await navigator.clipboard.writeText(finalPrompt);
         } catch {
             // ignore clipboard errors
         }
@@ -450,6 +482,7 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                 }
                 return {
                     ...prev,
+                    manualPrompt: appendPromptTag(prev.manualPrompt, created.label),
                     selectedTags: withAspectRatioTag(uniqueTags([...prev.selectedTags, created.label]), prev.aspectRatio),
                 };
             });
@@ -480,11 +513,13 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                     return {
                         ...prev,
                         [parameterField]: '',
+                        manualPrompt: removePromptTag(prev.manualPrompt, tag.label),
                         selectedTags: withAspectRatioTag(prev.selectedTags.filter((item) => item !== tag.label), prev.aspectRatio),
                     };
                 }
                 return {
                     ...prev,
+                    manualPrompt: removePromptTag(prev.manualPrompt, tag.label),
                     selectedTags: withAspectRatioTag(prev.selectedTags.filter((item) => item !== tag.label), prev.aspectRatio),
                 };
             });
@@ -508,19 +543,19 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
             <div className={styles.panel}>
                 <div className={styles.block}>
                     <div className={styles.blockTitleRow}>
-                        <h3 className={styles.blockTitle}>主提示词</h3>
-                        <button className={styles.linkBtn} onClick={copyPrompt}>复制</button>
+                        <h3 className={styles.blockTitle}>主提示词（可自由编辑）</h3>
+                        <button className={styles.linkBtn} onClick={copyPrompt}>复制提示词</button>
                     </div>
-                    <p className={styles.promptHint}>提示：系统会把参数和标签自动融合成一段提示词。</p>
+                    <p className={styles.promptHint}>提示：点击下方标签后会直接补充到提示词框里，你也可以继续自由编辑。</p>
                     <textarea
                         className={styles.textarea}
                         rows={8}
-                        value={composedPrompt}
+                        value={state.manualPrompt}
                         onChange={(e) => setState((prev) => ({
                             ...prev,
-                            manualPrompt: stripTrailingAutoClause(e.target.value, autoPromptClause),
+                            manualPrompt: e.target.value,
                         }))}
-                        placeholder="请输入你的手动描述，系统会自动和已选标签合并成一段提示词"
+                        placeholder="请输入你想强调的主体、卖点、镜头和风格，也可以点击下方标签补充后再修改"
                     />
                     <textarea
                         className={styles.textarea}
@@ -791,7 +826,7 @@ export default function ImageStudio({ isAuthenticated, onRequireLogin }: ImageSt
                                                     ]);
                                                     return {
                                                         ...prev,
-                                                        manualPrompt: stripTrailingAutoClause(item.prompt, inferredAutoClause),
+                                                        manualPrompt: item.prompt || inferredAutoClause,
                                                         selectedTags: withAspectRatioTag(nextTags, nextAspect),
                                                         negativePrompt: item.negativePrompt || '',
                                                         aspectRatio: nextAspect,

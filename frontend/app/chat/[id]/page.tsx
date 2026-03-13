@@ -68,6 +68,8 @@ interface AttachedFile {
 
 const MAX_ATTACHMENTS = 10;
 const IMAGE_MODE_ASPECT_RATIO = '1:1';
+const TABLE_COPY_LABEL = '复制表格';
+const TABLE_COPIED_LABEL = '已复制表格';
 
 interface WfState {
     workflowId: string;
@@ -208,6 +210,8 @@ export default function ChatPage() {
     const launcherDraftKeyRef = useRef<string | null>(null);
     const streamingFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
+    const tableCopyResetTimerRef = useRef<number | null>(null);
+    const copiedTableButtonRef = useRef<HTMLButtonElement | null>(null);
 
     const [wfState, setWfState] = useState<WfState | null>(null);
     const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
@@ -230,6 +234,17 @@ export default function ChatPage() {
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, []);
+
+    useEffect(() => () => {
+        if (tableCopyResetTimerRef.current !== null) {
+            window.clearTimeout(tableCopyResetTimerRef.current);
+        }
+        if (copiedTableButtonRef.current) {
+            copiedTableButtonRef.current.textContent = TABLE_COPY_LABEL;
+            copiedTableButtonRef.current.classList.remove(styles.copyTableBtnActive);
+            copiedTableButtonRef.current = null;
+        }
     }, []);
 
     useEffect(() => {
@@ -346,13 +361,13 @@ export default function ChatPage() {
             return {
                 ...message,
                 textContent,
-                html: formatMessage(stripSuggestionBlock(textContent)),
+                html: formatMessage(stripSuggestionBlock(textContent), message.role === 'assistant'),
             };
         }),
         [messages],
     );
     const renderedStreamingText = useMemo(
-        () => (streamingText ? formatMessage(streamingText) : ''),
+        () => (streamingText ? formatMessage(streamingText, true) : ''),
         [streamingText],
     );
 
@@ -367,6 +382,84 @@ export default function ChatPage() {
         });
         setAttachedFiles([]);
     }, [attachedFiles]);
+
+    const resetCopiedTableButton = useCallback((button: HTMLButtonElement | null) => {
+        if (!button) {
+            return;
+        }
+
+        button.textContent = TABLE_COPY_LABEL;
+        button.classList.remove(styles.copyTableBtnActive);
+    }, []);
+
+    const serializeTableToPlainText = useCallback((table: HTMLTableElement) => {
+        return Array.from(table.rows)
+            .map((row) => Array.from(row.cells)
+                .map((cell) => cell.innerText.replace(/\r?\n+/g, ' ').trim())
+                .join('\t'))
+            .filter(Boolean)
+            .join('\n');
+    }, []);
+
+    const copyRenderedTable = useCallback(async (button: HTMLButtonElement) => {
+        const wrapper = button.closest('[data-copy-table-wrapper="true"]');
+        const table = wrapper?.querySelector('table');
+        if (!(table instanceof HTMLTableElement)) {
+            return;
+        }
+
+        const plainText = serializeTableToPlainText(table);
+        if (!plainText) {
+            return;
+        }
+
+        try {
+            if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+                await navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html': new Blob([table.outerHTML], { type: 'text/html' }),
+                        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+                    }),
+                ]);
+            } else {
+                await navigator.clipboard.writeText(plainText);
+            }
+
+            if (copiedTableButtonRef.current && copiedTableButtonRef.current !== button) {
+                resetCopiedTableButton(copiedTableButtonRef.current);
+            }
+
+            button.textContent = TABLE_COPIED_LABEL;
+            button.classList.add(styles.copyTableBtnActive);
+            copiedTableButtonRef.current = button;
+
+            if (tableCopyResetTimerRef.current !== null) {
+                window.clearTimeout(tableCopyResetTimerRef.current);
+            }
+
+            tableCopyResetTimerRef.current = window.setTimeout(() => {
+                resetCopiedTableButton(button);
+                if (copiedTableButtonRef.current === button) {
+                    copiedTableButtonRef.current = null;
+                }
+                tableCopyResetTimerRef.current = null;
+            }, 1800);
+        } catch (error) {
+            console.error('[Chat] copy table failed', error);
+        }
+    }, [resetCopiedTableButton, serializeTableToPlainText]);
+
+    const handleMessageContentClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        const target = event.target as HTMLElement | null;
+        const button = target?.closest('[data-copy-table-button="true"]');
+        if (!(button instanceof HTMLButtonElement)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        void copyRenderedTable(button);
+    }, [copyRenderedTable]);
 
     const toggleImageMode = () => {
         if (!imageModeEnabled && attachedFiles.length > 0) {
@@ -1112,7 +1205,7 @@ export default function ChatPage() {
                                 {message.kind === 'image' && message.imageUrls?.length ? (
                                     <div className={styles.imageMessage}>
                                         {message.content ? (
-                                            <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                            <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
                                         ) : null}
                                         {message.imagePrompt ? (
                                             <div className={styles.imagePrompt}>
@@ -1195,7 +1288,7 @@ export default function ChatPage() {
                                             </div>
                                         ) : null}
                                         {message.textContent ? (
-                                            <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                            <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
                                         ) : null}
                                     </div>
                                 )}
@@ -1226,7 +1319,7 @@ export default function ChatPage() {
                         <div className={`${styles.message} ${styles.assistantMsg}`}>
                             <div className={styles.msgBubble}>
                                 {streamingText ? (
-                                    <div className={styles.msgContent} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
+                                    <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
                                 ) : imageModeEnabled ? (
                                     <div className={styles.imagePending}>
                                         <div className={styles.thinking}>
@@ -1431,8 +1524,13 @@ export default function ChatPage() {
     );
 }
 
-function formatMessage(text: string): string {
-    return formatRichMessage(text);
+function formatMessage(text: string, enableTableCopyButton = false): string {
+    return formatRichMessage(text, enableTableCopyButton ? {
+        enableTableCopyButton: true,
+        tableWrapperClassName: styles.copyTableWrap,
+        tableCopyButtonClassName: styles.copyTableBtn,
+        tableCopyButtonLabel: TABLE_COPY_LABEL,
+    } : undefined);
 }
 
 
