@@ -7,7 +7,7 @@ import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecord
 import { api, type AttachmentInfo, type ChatAttachmentPayload } from '../../lib/api';
 import { useAuthStore } from '../../stores/auth';
 import AdminBotPanel from '../../components/AdminBotPanel';
-import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID } from '../../lib/builtin-bots';
+import { BUILTIN_BOT_MAP, BUILTIN_BOT_NAME_MAP, GENERIC_CHAT_BOT_ID, VIDEO_BREAKDOWN_BOT_ID } from '../../lib/builtin-bots';
 import { normalizeUpstreamErrorMessage } from '../../lib/upstream-error';
 import {
     buildMessageDisplayContent,
@@ -22,6 +22,12 @@ import {
     RESPONSE_MODEL_STORAGE_PREFIX,
     type ResponseModel,
 } from '../../lib/chat-models';
+import {
+    getLocalConversationVideo,
+    listLocalConversationVideos,
+    migrateConversationVideoScope,
+    putLocalConversationVideo,
+} from '../../lib/local-conversation-videos';
 import {
     formatMessage as formatRichMessage,
     stripSuggestionBlock as stripRichSuggestionBlock,
@@ -44,6 +50,7 @@ interface MessageItem {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    timestamp: number;
     kind?: 'text' | 'image';
     imageUrls?: string[];
     imagePrompt?: string;
@@ -64,12 +71,42 @@ interface AttachedFile {
     transcript?: string;
     frames?: ChatAttachmentFrame[];
     tempVideoToken?: string;
+    clientVideoId?: string;
+    videoLabel?: string;
+    source?: 'current' | 'history';
+    orderIndex?: number;
 }
 
 const MAX_ATTACHMENTS = 10;
+const MAX_AUTO_REFERENCED_HISTORY_VIDEOS = 2;
+const DRAFT_CONVERSATION_SCOPE_PREFIX = 'draft-video-scope';
 const IMAGE_MODE_ASPECT_RATIO = '1:1';
 const TABLE_COPY_LABEL = '复制表格';
 const TABLE_COPIED_LABEL = '已复制表格';
+
+interface ConversationVideoCatalogItem {
+    clientVideoId: string;
+    videoLabel: string;
+    fileName: string;
+    fileSize: number;
+    mimeType?: string;
+    previewUrl?: string;
+    extractedText: string;
+    durationMs?: number;
+    transcript?: string;
+    frames?: ChatAttachmentFrame[];
+    createdAt: number;
+    orderIndex: number;
+    attachmentId?: string;
+    messageId?: string;
+    isAvailableLocally: boolean;
+}
+
+interface VideoResolutionNotice {
+    type: 'ambiguous' | 'missing';
+    message: string;
+    allowTextFallback: boolean;
+}
 
 interface WfState {
     workflowId: string;
@@ -142,6 +179,7 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
         id: message.id,
         role: message.role,
         content: message.content,
+        timestamp: message.timestamp,
         kind: message.kind,
         imageUrls: message.imageUrls,
         imagePrompt: message.imagePrompt,
@@ -153,11 +191,298 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
         return history;
     }
 
-    return [{ id: 'welcome', role: 'assistant', content: fallback }, ...history];
+    return [{ id: 'welcome', role: 'assistant', content: fallback, timestamp: Date.now() }, ...history];
 }
 
 function stripSuggestionBlock(text: string): string {
     return stripRichSuggestionBlock(text);
+}
+
+function createClientVideoId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `video-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createDraftConversationScope(botId: string): string {
+    return `${DRAFT_CONVERSATION_SCOPE_PREFIX}:${botId}:${createClientVideoId()}`;
+}
+
+function normalizeSearchText(text: string): string {
+    return text.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function getFileNameAliases(fileName: string): string[] {
+    const lowered = normalizeSearchText(fileName);
+    const base = lowered.replace(/\.[^.]+$/, '');
+    return [lowered, base].filter(Boolean);
+}
+
+function parseChineseOrdinalToken(token: string): number | null {
+    if (!token) {
+        return null;
+    }
+
+    if (/^\d+$/.test(token)) {
+        return Number.parseInt(token, 10);
+    }
+
+    const digits = new Map<string, number>([
+        ['一', 1],
+        ['二', 2],
+        ['三', 3],
+        ['四', 4],
+        ['五', 5],
+        ['六', 6],
+        ['七', 7],
+        ['八', 8],
+        ['九', 9],
+        ['十', 10],
+    ]);
+
+    if (digits.has(token)) {
+        return digits.get(token) || null;
+    }
+
+    if (token.startsWith('十')) {
+        return 10 + (digits.get(token.slice(1)) || 0);
+    }
+
+    if (token.endsWith('十')) {
+        return (digits.get(token[0]) || 0) * 10;
+    }
+
+    if (token.includes('十')) {
+        const [tens, ones] = token.split('十');
+        return ((digits.get(tens) || 0) * 10) + (digits.get(ones) || 0);
+    }
+
+    return null;
+}
+
+function collectExplicitVideoOrders(text: string): number[] {
+    const matches = new Set<number>();
+    const regexes = [
+        /视频\s*(\d+)/g,
+        /第([一二三四五六七八九十\d]+)(?:个|条)?视频/g,
+    ];
+
+    for (const regex of regexes) {
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(text)) !== null) {
+            const value = parseChineseOrdinalToken(match[1]);
+            if (value && value > 0) {
+                matches.add(value);
+            }
+        }
+    }
+
+    return [...matches];
+}
+
+function isComparisonPrompt(text: string): boolean {
+    return /(比较|对比|参考|参照|按.+优化|按照.+优化|基于.+优化|和.+比|跟.+比)/.test(text);
+}
+
+function hasCurrentVideoReference(text: string): boolean {
+    return /(这个视频|当前视频|刚发的|刚上传的|现在这个)/.test(text);
+}
+
+function hasPreviousVideoReference(text: string): boolean {
+    return /(上一个视频|前一个视频|上条视频|上一条视频|前一条视频|刚才那个视频|之前那个视频)/.test(text);
+}
+
+function dedupeConversationVideos(videos: ConversationVideoCatalogItem[]): ConversationVideoCatalogItem[] {
+    const seen = new Set<string>();
+    return videos.filter((video) => {
+        if (seen.has(video.clientVideoId)) {
+            return false;
+        }
+        seen.add(video.clientVideoId);
+        return true;
+    });
+}
+
+function chooseReferencedConversationVideos(params: {
+    text: string;
+    manualSelectedIds: string[];
+    conversationVideos: ConversationVideoCatalogItem[];
+    hasCurrentUploads: boolean;
+    skipHistoryVideoReuse?: boolean;
+}): {
+    historyVideos: ConversationVideoCatalogItem[];
+    notice?: VideoResolutionNotice;
+} {
+    if (params.skipHistoryVideoReuse) {
+        return { historyVideos: [] };
+    }
+
+    const allVideos = [...params.conversationVideos]
+        .sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt);
+    const manualSelections = dedupeConversationVideos(
+        params.manualSelectedIds
+            .map((id) => allVideos.find((video) => video.clientVideoId === id))
+            .filter((video): video is ConversationVideoCatalogItem => Boolean(video)),
+    ).slice(0, MAX_AUTO_REFERENCED_HISTORY_VIDEOS);
+
+    if (manualSelections.length > 0) {
+        const missingSelections = manualSelections.filter((video) => !video.isAvailableLocally);
+        if (missingSelections.length > 0) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'missing',
+                    message: `已选历史视频在当前设备不可用：${missingSelections.map((video) => video.videoLabel).join('、')}。请重新上传，或仅按历史文字继续。`,
+                    allowTextFallback: true,
+                },
+            };
+        }
+
+        return { historyVideos: manualSelections };
+    }
+
+    const trimmedText = params.text.trim();
+    if (!trimmedText) {
+        return { historyVideos: [] };
+    }
+
+    const explicitOrders = collectExplicitVideoOrders(trimmedText);
+    const explicitMatches = dedupeConversationVideos(explicitOrders
+        .map((order) => allVideos.find((video) => video.videoLabel === `视频${order}`))
+        .filter((video): video is ConversationVideoCatalogItem => Boolean(video)));
+
+    if (explicitMatches.length > 0) {
+        const missingMatches = explicitMatches.filter((video) => !video.isAvailableLocally);
+        if (missingMatches.length > 0) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'missing',
+                    message: `引用的历史视频在当前设备不可用：${missingMatches.map((video) => video.videoLabel).join('、')}。请重新上传，或仅按历史文字继续。`,
+                    allowTextFallback: true,
+                },
+            };
+        }
+
+        return { historyVideos: explicitMatches.slice(0, MAX_AUTO_REFERENCED_HISTORY_VIDEOS) };
+    }
+
+    const normalizedText = normalizeSearchText(trimmedText);
+    const aliasMatches = dedupeConversationVideos(allVideos.filter((video) => {
+        const aliases = [
+            video.videoLabel.toLowerCase(),
+            ...getFileNameAliases(video.fileName),
+        ];
+        return aliases.some((alias) => alias && normalizedText.includes(alias));
+    }));
+
+    if (aliasMatches.length > 0) {
+        if (aliasMatches.length > MAX_AUTO_REFERENCED_HISTORY_VIDEOS && isComparisonPrompt(trimmedText)) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'ambiguous',
+                    message: '检测到多个可能命中的历史视频。请先在“本会话视频”里点选后再发送。',
+                    allowTextFallback: false,
+                },
+            };
+        }
+
+        const missingMatches = aliasMatches.filter((video) => !video.isAvailableLocally);
+        if (missingMatches.length > 0) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'missing',
+                    message: `命中的历史视频在当前设备不可用：${missingMatches.map((video) => video.videoLabel).join('、')}。请重新上传，或仅按历史文字继续。`,
+                    allowTextFallback: true,
+                },
+            };
+        }
+
+        return { historyVideos: aliasMatches.slice(0, MAX_AUTO_REFERENCED_HISTORY_VIDEOS) };
+    }
+
+    const keywordMatches = dedupeConversationVideos(allVideos.filter((video) => {
+        if (!video.extractedText && !video.transcript) {
+            return false;
+        }
+        const haystack = normalizeSearchText([video.extractedText, video.transcript, video.fileName].filter(Boolean).join(' '));
+        return normalizedText.length >= 2 && haystack.includes(normalizedText);
+    }));
+
+    if (keywordMatches.length > 0) {
+        if (keywordMatches.length > MAX_AUTO_REFERENCED_HISTORY_VIDEOS) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'ambiguous',
+                    message: '检测到多个历史视频都可能符合当前描述。请先在“本会话视频”里明确选择。',
+                    allowTextFallback: false,
+                },
+            };
+        }
+
+        const missingMatches = keywordMatches.filter((video) => !video.isAvailableLocally);
+        if (missingMatches.length > 0) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'missing',
+                    message: `命中的历史视频在当前设备不可用：${missingMatches.map((video) => video.videoLabel).join('、')}。请重新上传，或仅按历史文字继续。`,
+                    allowTextFallback: true,
+                },
+            };
+        }
+
+        return { historyVideos: keywordMatches };
+    }
+
+    const availableVideos = allVideos.filter((video) => video.isAvailableLocally);
+    const latestVideo = availableVideos[availableVideos.length - 1];
+    const previousVideo = availableVideos[availableVideos.length - 2] || latestVideo;
+
+    if (hasPreviousVideoReference(trimmedText)) {
+        if (!previousVideo) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'missing',
+                    message: '没有可复用的历史视频。请重新上传目标视频，或仅按历史文字继续。',
+                    allowTextFallback: true,
+                },
+            };
+        }
+        return { historyVideos: [previousVideo] };
+    }
+
+    if (!params.hasCurrentUploads && hasCurrentVideoReference(trimmedText) && latestVideo) {
+        return { historyVideos: [latestVideo] };
+    }
+
+    if (isComparisonPrompt(trimmedText)) {
+        if (params.hasCurrentUploads && latestVideo) {
+            return { historyVideos: [latestVideo] };
+        }
+
+        if (availableVideos.length === 2) {
+            return { historyVideos: availableVideos };
+        }
+
+        if (availableVideos.length > 2) {
+            return {
+                historyVideos: [],
+                notice: {
+                    type: 'ambiguous',
+                    message: '当前会话里有多个历史视频。请先点选要比较的视频后再发送。',
+                    allowTextFallback: false,
+                },
+            };
+        }
+    }
+
+    return { historyVideos: [] };
 }
 
 export default function ChatPage() {
@@ -195,8 +520,9 @@ export default function ChatPage() {
 
     const currentConversation = conversationId ? getConversation(conversationId) : undefined;
     const botName = currentConversation?.botName || fallbackBotName;
+    const isVideoBreakdownBot = botId === VIDEO_BREAKDOWN_BOT_ID;
 
-    const [messages, setMessages] = useState<MessageItem[]>([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
+    const [messages, setMessages] = useState<MessageItem[]>([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
     const [inputText, setInputText] = useState('');
     const [imageModeEnabled, setImageModeEnabled] = useState(false);
     const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
@@ -208,6 +534,8 @@ export default function ChatPage() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const skipHydrationConversationIdRef = useRef<string | null>(null);
     const launcherDraftKeyRef = useRef<string | null>(null);
+    const draftConversationScopeRef = useRef<string | null>(null);
+    const conversationVideoPickerRef = useRef<HTMLDivElement>(null);
     const streamingFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
     const tableCopyResetTimerRef = useRef<number | null>(null);
@@ -222,6 +550,10 @@ export default function ChatPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+    const [conversationVideos, setConversationVideos] = useState<ConversationVideoCatalogItem[]>([]);
+    const [selectedConversationVideoIds, setSelectedConversationVideoIds] = useState<string[]>([]);
+    const [conversationVideoPickerOpen, setConversationVideoPickerOpen] = useState(false);
+    const [videoResolutionNotice, setVideoResolutionNotice] = useState<VideoResolutionNotice | null>(null);
 
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -268,7 +600,18 @@ export default function ChatPage() {
 
     useEffect(() => {
         setSelectedMsgIds(new Set());
+        setSelectedConversationVideoIds([]);
+        setConversationVideoPickerOpen(false);
+        setVideoResolutionNotice(null);
     }, [botId, conversationId]);
+
+    useEffect(() => {
+        if (conversationId) {
+            draftConversationScopeRef.current = conversationId;
+        } else if (!draftConversationScopeRef.current) {
+            draftConversationScopeRef.current = null;
+        }
+    }, [conversationId]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -292,7 +635,7 @@ export default function ChatPage() {
     useEffect(() => {
         if (!conversationId) {
             skipHydrationConversationIdRef.current = null;
-            setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
+            setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
             setStreamingText('');
             setSuggestions([]);
             setIsStreaming(false);
@@ -315,7 +658,7 @@ export default function ChatPage() {
             .catch((error) => {
                 if (cancelled) return;
                 console.error('[Chat] fetch conversation failed', error);
-                setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
+                setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
             })
             .finally(() => {
                 if (!cancelled) setIsLoadingConversation(false);
@@ -333,6 +676,119 @@ export default function ChatPage() {
         }
         return conversation;
     }, [fallbackWelcome, fetchConversation]);
+
+    const ensureConversationScope = useCallback(() => {
+        if (conversationId) {
+            draftConversationScopeRef.current = conversationId;
+            return conversationId;
+        }
+
+        if (!draftConversationScopeRef.current || !draftConversationScopeRef.current.startsWith(DRAFT_CONVERSATION_SCOPE_PREFIX)) {
+            draftConversationScopeRef.current = createDraftConversationScope(botId);
+        }
+
+        return draftConversationScopeRef.current;
+    }, [botId, conversationId]);
+
+    const refreshConversationVideos = useCallback(async () => {
+        const scope = conversationId || draftConversationScopeRef.current;
+        if (!scope) {
+            setConversationVideos([]);
+            return;
+        }
+
+        try {
+            const localVideos = await listLocalConversationVideos(scope);
+            const localVideoMap = new Map(localVideos.map((video) => [video.clientVideoId, video]));
+            const seen = new Set<string>();
+            let fallbackOrder = 1;
+            const nextCatalog: ConversationVideoCatalogItem[] = [];
+
+            for (const message of messages) {
+                for (const attachment of message.attachments || []) {
+                    if (attachment.kind !== 'video' || !attachment.clientVideoId || seen.has(attachment.clientVideoId)) {
+                        continue;
+                    }
+
+                    seen.add(attachment.clientVideoId);
+                    const localVideo = localVideoMap.get(attachment.clientVideoId);
+                    const parsedOrder = attachment.videoLabel
+                        ? Number.parseInt(attachment.videoLabel.replace(/\D/g, ''), 10)
+                        : Number.NaN;
+                    const orderIndex = Number.isFinite(parsedOrder) && parsedOrder > 0
+                        ? parsedOrder
+                        : localVideo?.orderIndex || fallbackOrder;
+                    const videoLabel = attachment.videoLabel || `视频${orderIndex}`;
+                    fallbackOrder = Math.max(fallbackOrder, orderIndex + 1);
+
+                    nextCatalog.push({
+                        clientVideoId: attachment.clientVideoId,
+                        videoLabel,
+                        fileName: attachment.fileName,
+                        fileSize: attachment.fileSize,
+                        mimeType: attachment.mimeType,
+                        previewUrl: attachment.previewUrl,
+                        extractedText: attachment.extractedText || localVideo?.extractedText || '',
+                        durationMs: attachment.durationMs,
+                        transcript: attachment.transcript || localVideo?.transcript || '',
+                        frames: attachment.frames,
+                        createdAt: message.timestamp,
+                        orderIndex,
+                        attachmentId: attachment.id,
+                        messageId: message.id,
+                        isAvailableLocally: Boolean(localVideo),
+                    });
+                }
+            }
+
+            setConversationVideos(nextCatalog.sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt));
+        } catch (error) {
+            console.error('[Chat] refresh conversation videos failed', error);
+            setConversationVideos([]);
+        }
+    }, [conversationId, messages]);
+
+    useEffect(() => {
+        void refreshConversationVideos();
+    }, [refreshConversationVideos]);
+
+    useEffect(() => {
+        setSelectedConversationVideoIds((current) => current.filter((id) => conversationVideos.some((video) => video.clientVideoId === id)));
+    }, [conversationVideos]);
+
+    useEffect(() => {
+        if (responseModel !== 'gemini' || imageModeEnabled || !isVideoBreakdownBot) {
+            setSelectedConversationVideoIds([]);
+            setConversationVideoPickerOpen(false);
+            setVideoResolutionNotice(null);
+        }
+    }, [imageModeEnabled, isVideoBreakdownBot, responseModel]);
+
+    useEffect(() => {
+        if (!(isVideoBreakdownBot && responseModel === 'gemini' && !imageModeEnabled)) {
+            setConversationVideoPickerOpen(false);
+        }
+    }, [imageModeEnabled, isVideoBreakdownBot, responseModel]);
+
+    useEffect(() => {
+        if (!conversationVideoPickerOpen || typeof window === 'undefined') {
+            return;
+        }
+
+        const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+            const target = event.target as Node | null;
+            if (!conversationVideoPickerRef.current?.contains(target)) {
+                setConversationVideoPickerOpen(false);
+            }
+        };
+
+        window.addEventListener('mousedown', handlePointerDown);
+        window.addEventListener('touchstart', handlePointerDown);
+        return () => {
+            window.removeEventListener('mousedown', handlePointerDown);
+            window.removeEventListener('touchstart', handlePointerDown);
+        };
+    }, [conversationVideoPickerOpen]);
 
     const botConversations = useMemo(
         () => conversations.filter((conversation) => conversation.botId === botId).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -477,6 +933,27 @@ export default function ChatPage() {
         }));
     };
 
+    const toggleConversationVideoSelection = useCallback((video: ConversationVideoCatalogItem) => {
+        if (!video.isAvailableLocally) {
+            setVideoResolutionNotice({
+                type: 'missing',
+                message: `${video.videoLabel} 当前设备已找不到原视频，请重新上传，或仅按历史文字继续。`,
+                allowTextFallback: true,
+            });
+            return;
+        }
+
+        setVideoResolutionNotice(null);
+        setSelectedConversationVideoIds((current) => {
+            if (current.includes(video.clientVideoId)) {
+                return current.filter((id) => id !== video.clientVideoId);
+            }
+
+            const next = [...current, video.clientVideoId];
+            return next.slice(-MAX_AUTO_REFERENCED_HISTORY_VIDEOS);
+        });
+    }, []);
+
     const parseAttachedFile = async (file: File, model: ResponseModel) => {
         const formData = new FormData();
         formData.append('file', file);
@@ -509,10 +986,16 @@ export default function ChatPage() {
         } satisfies ChatAttachmentPayload;
     };
 
-    const sendMessage = useCallback(async (rawText: string) => {
+    const sendMessage = useCallback(async (rawText: string, options?: { allowTextFallback?: boolean }) => {
         const isImageRequest = imageModeEnabled;
         const hasFiles = !isImageRequest && attachedFiles.length > 0;
-        if ((!rawText.trim() && !hasFiles) || isStreaming || isUploading) return;
+        const hasManualHistoryVideos = !isImageRequest
+            && responseModel === 'gemini'
+            && isVideoBreakdownBot
+            && selectedConversationVideoIds.length > 0;
+        if ((!rawText.trim() && !hasFiles && !hasManualHistoryVideos) || isStreaming || isUploading) return;
+
+        setVideoResolutionNotice(null);
 
         let parsedAttachments = attachedFiles;
         if (!isImageRequest && attachedFiles.length > 0) {
@@ -543,7 +1026,97 @@ export default function ChatPage() {
         }
 
         const messageText = rawText.trim();
-        const requestAttachments: ChatAttachmentPayload[] = parsedAttachments.map((attachment) => ({
+        const conversationScope = ensureConversationScope();
+        const currentVideoCount = conversationVideos.length;
+        let nextOrderIndex = currentVideoCount + 1;
+        const preparedAttachments = parsedAttachments.map((attachment) => {
+            if (attachment.kind !== 'video') {
+                return attachment;
+            }
+
+            const orderIndex = attachment.orderIndex || nextOrderIndex;
+            nextOrderIndex += 1;
+
+            return {
+                ...attachment,
+                clientVideoId: attachment.clientVideoId || createClientVideoId(),
+                videoLabel: attachment.videoLabel || `视频${orderIndex}`,
+                source: 'current' as const,
+                orderIndex,
+            };
+        });
+        const preparedCurrentVideos = preparedAttachments.filter((attachment) => attachment.kind === 'video');
+        const now = Date.now();
+        if (preparedCurrentVideos.length > 0) {
+            await Promise.all(preparedCurrentVideos.map((attachment) => putLocalConversationVideo({
+                conversationScope,
+                clientVideoId: attachment.clientVideoId as string,
+                fileName: attachment.name,
+                mimeType: attachment.mimeType || attachment.file.type || 'video/mp4',
+                fileSize: attachment.file.size,
+                createdAt: now,
+                lastAccessedAt: now,
+                orderIndex: attachment.orderIndex || currentVideoCount + 1,
+                extractedText: attachment.extractedText || '',
+                transcript: attachment.transcript || '',
+                blob: attachment.file,
+            })));
+        }
+
+        const referencedHistoryAttachments: AttachedFile[] = [];
+        if (!isImageRequest && responseModel === 'gemini' && isVideoBreakdownBot) {
+            const resolution = chooseReferencedConversationVideos({
+                text: messageText,
+                manualSelectedIds: selectedConversationVideoIds,
+                conversationVideos,
+                hasCurrentUploads: preparedCurrentVideos.length > 0,
+                skipHistoryVideoReuse: options?.allowTextFallback,
+            });
+
+            if (resolution.notice) {
+                setVideoResolutionNotice(resolution.notice);
+                return;
+            }
+
+            for (const video of resolution.historyVideos) {
+                const localVideo = await getLocalConversationVideo(conversationScope, video.clientVideoId);
+                if (!localVideo) {
+                    if (!options?.allowTextFallback) {
+                        setVideoResolutionNotice({
+                            type: 'missing',
+                            message: `${video.videoLabel} 在当前设备已不可用，请重新上传，或仅按历史文字继续。`,
+                            allowTextFallback: true,
+                        });
+                        return;
+                    }
+                    continue;
+                }
+
+                referencedHistoryAttachments.push({
+                    file: new File([localVideo.blob], video.fileName, {
+                        type: video.mimeType || localVideo.mimeType || 'video/mp4',
+                        lastModified: localVideo.createdAt,
+                    }),
+                    name: video.fileName,
+                    previewUrl: video.previewUrl || null,
+                    isImage: false,
+                    isVideo: true,
+                    kind: 'video',
+                    mimeType: video.mimeType || localVideo.mimeType || 'video/mp4',
+                    extractedText: video.extractedText || localVideo.extractedText,
+                    durationMs: video.durationMs,
+                    transcript: video.transcript || localVideo.transcript,
+                    frames: video.frames,
+                    clientVideoId: video.clientVideoId,
+                    videoLabel: video.videoLabel,
+                    source: 'history',
+                    orderIndex: video.orderIndex,
+                });
+            }
+        }
+
+        const finalAttachments = [...preparedAttachments, ...referencedHistoryAttachments];
+        const requestAttachments: ChatAttachmentPayload[] = finalAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
             fileSize: attachment.file.size,
@@ -553,11 +1126,14 @@ export default function ChatPage() {
             durationMs: attachment.durationMs,
             transcript: attachment.transcript,
             tempVideoToken: attachment.tempVideoToken,
+            clientVideoId: attachment.clientVideoId,
+            videoLabel: attachment.videoLabel,
+            source: attachment.source,
             frames: attachment.frames,
         }));
         const shouldSendGeminiVideoDirect = responseModel === 'gemini'
             && requestAttachments.some((attachment) => attachment.kind === 'video');
-        const optimisticAttachments: MessageAttachment[] = parsedAttachments.map((attachment) => ({
+        const optimisticAttachments: MessageAttachment[] = finalAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
             fileSize: attachment.file.size,
@@ -566,6 +1142,8 @@ export default function ChatPage() {
             extractedText: attachment.extractedText || '',
             durationMs: attachment.durationMs,
             transcript: attachment.transcript,
+            clientVideoId: attachment.clientVideoId,
+            videoLabel: attachment.videoLabel,
             frames: attachment.frames,
         }));
 
@@ -583,13 +1161,15 @@ export default function ChatPage() {
         }
 
         const createConversationPromise = !conversationId ? createConversation(botId) : null;
+        const optimisticTimestamp = Date.now();
 
         setMessages((current) => [
             ...current,
             {
-                id: `user-${Date.now()}`,
+                id: `user-${optimisticTimestamp}`,
                 role: 'user',
                 content: displayText,
+                timestamp: optimisticTimestamp,
                 kind: isImageRequest ? 'image' : 'text',
                 imagePrompt: isImageRequest ? displayText : undefined,
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
@@ -598,6 +1178,8 @@ export default function ChatPage() {
         ]);
         setInputText('');
         setSuggestions([]);
+        setSelectedConversationVideoIds([]);
+        setConversationVideoPickerOpen(false);
         setIsStreaming(true);
         setStreamingText('');
         setImageStatusText(isImageRequest ? '正在提交图片生成请求...' : '');
@@ -617,6 +1199,8 @@ export default function ChatPage() {
             if (!activeConversationId) {
                 const created = createConversationPromise ? await createConversationPromise : await createConversation(botId);
                 activeConversationId = created.id;
+                draftConversationScopeRef.current = created.id;
+                await migrateConversationVideoScope(conversationScope, created.id);
                 skipHydrationConversationIdRef.current = created.id;
                 router.replace(buildRoute(created.botId, { cid: created.id, wf: workflowFlag, name: created.botName }));
             }
@@ -644,7 +1228,7 @@ export default function ChatPage() {
                 ? (() => {
                     const formData = new FormData();
                     formData.append('payload', JSON.stringify(messagePayload));
-                    parsedAttachments
+                    finalAttachments
                         .filter((attachment) => attachment.kind === 'video')
                         .forEach((attachment) => {
                             formData.append('videoFiles', attachment.file, attachment.name);
@@ -679,9 +1263,10 @@ export default function ChatPage() {
                 }
 
                 if (finalText) {
+                    const assistantTimestamp = Date.now();
                     setMessages((current) => [
                         ...current,
-                        { id: `assistant-${Date.now()}`, role: 'assistant', content: finalText },
+                        { id: `assistant-${assistantTimestamp}`, role: 'assistant', content: finalText, timestamp: assistantTimestamp },
                     ]);
                 }
 
@@ -726,11 +1311,13 @@ export default function ChatPage() {
                         } else if (event.type === 'status' && typeof event.content === 'string') {
                             setImageStatusText(event.content);
                         } else if (event.type === 'image' && event.content) {
+                            const assistantImageTimestamp = Date.now();
                             setMessages((current) => [
                                 ...current,
                                 {
-                                    id: `assistant-image-${Date.now()}`,
+                                    id: `assistant-image-${assistantImageTimestamp}`,
                                     role: 'assistant',
+                                    timestamp: assistantImageTimestamp,
                                     content: event.content.content || '已生成图片。',
                                     kind: 'image',
                                     imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
@@ -757,11 +1344,13 @@ export default function ChatPage() {
                     if (event.type === 'status' && typeof event.content === 'string') {
                         setImageStatusText(event.content);
                     } else if (event.type === 'image' && event.content) {
+                        const assistantImageTimestamp = Date.now();
                         setMessages((current) => [
                             ...current,
                             {
-                                id: `assistant-image-${Date.now()}`,
+                                id: `assistant-image-${assistantImageTimestamp}`,
                                 role: 'assistant',
+                                timestamp: assistantImageTimestamp,
                                 content: event.content.content || '已生成图片。',
                                 kind: 'image',
                                 imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
@@ -787,9 +1376,10 @@ export default function ChatPage() {
                 }
                 streamingFrameRef.current = null;
                 pendingStreamingTextRef.current = finalText;
+                const assistantTimestamp = Date.now();
                 setMessages((current) => [
                     ...current,
-                    { id: `assistant-${Date.now()}`, role: 'assistant', content: finalText },
+                    { id: `assistant-${assistantTimestamp}`, role: 'assistant', content: finalText, timestamp: assistantTimestamp },
                 ]);
             }
 
@@ -798,7 +1388,7 @@ export default function ChatPage() {
             const message = error instanceof Error ? error.message : '发送失败';
             setMessages((current) => [
                 ...current,
-                { id: `err-${Date.now()}`, role: 'assistant', content: `出错了：${message}` },
+                { id: `err-${Date.now()}`, role: 'assistant', content: `出错了：${message}`, timestamp: Date.now() },
             ]);
         } finally {
             if (typeof window !== 'undefined' && streamingFrameRef.current !== null) {
@@ -811,9 +1401,13 @@ export default function ChatPage() {
             setImageStatusText('');
 
             if (shouldRefreshConversation && activeConversationId) {
-                void refreshConversation(activeConversationId, { syncMessages: false }).catch((error) => {
-                    console.error('[Chat] refresh conversation failed', error);
-                });
+                void refreshConversation(activeConversationId, { syncMessages: false })
+                    .then(() => refreshConversationVideos())
+                    .catch((error) => {
+                        console.error('[Chat] refresh conversation failed', error);
+                    });
+            } else {
+                void refreshConversationVideos();
             }
         }
     }, [
@@ -821,14 +1415,19 @@ export default function ChatPage() {
         botId,
         clearAttachments,
         conversationId,
+        conversationVideos,
         createConversation,
+        ensureConversationScope,
         flushStreamingText,
         imageModeEnabled,
         isStreaming,
         isUploading,
+        isVideoBreakdownBot,
         refreshConversation,
+        refreshConversationVideos,
         responseModel,
         router,
+        selectedConversationVideoIds,
         wfState,
         workflowFlag,
     ]);
@@ -859,10 +1458,15 @@ export default function ChatPage() {
 
     const startNewConversation = () => {
         launcherDraftKeyRef.current = null;
+        draftConversationScopeRef.current = null;
         clearAttachments();
-        setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome }]);
+        setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
         setInputText('');
         setSuggestions([]);
+        setConversationVideos([]);
+        setSelectedConversationVideoIds([]);
+        setConversationVideoPickerOpen(false);
+        setVideoResolutionNotice(null);
         setStreamingText('');
         setIsStreaming(false);
         setSidebarOpen(false);
@@ -880,6 +1484,7 @@ export default function ChatPage() {
         const files = Array.from(event.target.files || []);
         if (!files.length) return;
         event.target.value = '';
+        setVideoResolutionNotice(null);
 
         try {
             if (attachedFiles.length >= MAX_ATTACHMENTS) {
@@ -972,6 +1577,7 @@ export default function ChatPage() {
     const assistantMessages = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image');
     const showLoadingBubble = isLoadingConversation && !isStreaming && messages.length <= 1;
     const showStreamingBubble = isStreaming;
+    const showConversationVideoLibrary = isVideoBreakdownBot && responseModel === 'gemini' && !imageModeEnabled;
 
     const togglePinMsg = (id: string) => setSelectedMsgIds((current) => {
         const next = new Set(current);
@@ -1446,6 +2052,24 @@ export default function ChatPage() {
                         ))}
                     </div>
                 )}
+                {videoResolutionNotice && (
+                    <div className={styles.videoResolutionNotice}>
+                        <div>
+                            <strong>{videoResolutionNotice.type === 'ambiguous' ? '请先确认目标视频' : '历史视频不可用'}</strong>
+                            <p>{videoResolutionNotice.message}</p>
+                        </div>
+                        {videoResolutionNotice.allowTextFallback && (
+                            <button
+                                type="button"
+                                className={styles.videoResolutionAction}
+                                onClick={() => void sendMessage(inputText, { allowTextFallback: true })}
+                                disabled={isStreaming || isUploading}
+                            >
+                                仅按文字继续
+                            </button>
+                        )}
+                    </div>
+                )}
                 <div className={styles.inputMeta}>
                     <div className={styles.metaControls}>
                         <button
@@ -1473,6 +2097,76 @@ export default function ChatPage() {
                             </select>
                             <ChevronDown size={16} className={styles.modelSelectChevron} />
                         </div>
+                        {showConversationVideoLibrary && (
+                            <div ref={conversationVideoPickerRef} className={styles.conversationVideoPicker}>
+                                <button
+                                    type="button"
+                                    className={`${styles.modeToggle} ${conversationVideoPickerOpen ? styles.modeToggleActive : ''}`}
+                                    onClick={() => setConversationVideoPickerOpen((current) => !current)}
+                                    aria-expanded={conversationVideoPickerOpen}
+                                    aria-haspopup="dialog"
+                                >
+                                    <Video size={16} />
+                                    会话视频
+                                    {selectedConversationVideoIds.length > 0 && (
+                                        <span className={styles.conversationVideoToggleCount}>
+                                            {selectedConversationVideoIds.length}
+                                        </span>
+                                    )}
+                                    <ChevronDown size={14} className={styles.conversationVideoToggleChevron} />
+                                </button>
+                                {conversationVideoPickerOpen && (
+                                    <div className={styles.conversationVideoPopover}>
+                                        <div className={styles.conversationVideoShelf}>
+                                            <div className={styles.conversationVideoShelfHeader}>
+                                                <div>
+                                                    <strong>本会话视频</strong>
+                                                    <span>点击选择历史视频参与本轮分析</span>
+                                                </div>
+                                                <span className={styles.conversationVideoShelfMeta}>
+                                                    {selectedConversationVideoIds.length > 0
+                                                        ? `已选 ${selectedConversationVideoIds.length}/${MAX_AUTO_REFERENCED_HISTORY_VIDEOS}`
+                                                        : '最多可选 2 个历史视频'}
+                                                </span>
+                                            </div>
+                                            {conversationVideos.length > 0 ? (
+                                                <div className={styles.conversationVideoGrid}>
+                                                    {conversationVideos.map((video) => {
+                                                        const selected = selectedConversationVideoIds.includes(video.clientVideoId);
+                                                        const summaryText = (video.transcript || video.extractedText || '').trim();
+                                                        return (
+                                                            <button
+                                                                key={video.clientVideoId}
+                                                                type="button"
+                                                                className={`${styles.conversationVideoCard} ${selected ? styles.conversationVideoCardSelected : ''} ${!video.isAvailableLocally ? styles.conversationVideoCardUnavailable : ''}`}
+                                                                onClick={() => toggleConversationVideoSelection(video)}
+                                                                aria-pressed={selected}
+                                                            >
+                                                                <div className={styles.conversationVideoCardTop}>
+                                                                    <span className={styles.conversationVideoBadge}>{video.videoLabel}</span>
+                                                                    <span className={styles.conversationVideoState}>
+                                                                        {video.isAvailableLocally ? '本机可用' : '需重传'}
+                                                                    </span>
+                                                                </div>
+                                                                <div className={styles.conversationVideoName}>{video.fileName}</div>
+                                                                <div className={styles.conversationVideoSummary}>
+                                                                    {summaryText || '可作为历史视频重新交给 Gemini 直接分析。'}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <div className={styles.conversationVideoEmpty}>
+                                                    <strong>当前会话还没有可复用视频</strong>
+                                                    <span>先上传一个视频并完成一次分析，之后这里会一直保留会话视频选择入口。</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <span className={styles.inputHint}>
                         {isStreaming && imageModeEnabled
@@ -1509,7 +2203,10 @@ export default function ChatPage() {
                     </button>
                     <textarea
                         value={inputText}
-                        onChange={(event) => setInputText(event.target.value)}
+                        onChange={(event) => {
+                            setInputText(event.target.value);
+                            setVideoResolutionNotice(null);
+                        }}
                         onKeyDown={(event) => {
                             if (event.key === 'Enter' && !event.shiftKey) {
                                 event.preventDefault();
@@ -1528,7 +2225,7 @@ export default function ChatPage() {
                     <button
                         onClick={() => void sendMessage(inputText)}
                         className={styles.sendBtn}
-                        disabled={(!inputText.trim() && attachedFiles.length === 0) || isStreaming || isTranscribing || isUploading}
+                        disabled={(!inputText.trim() && attachedFiles.length === 0 && !(responseModel === 'gemini' && isVideoBreakdownBot && selectedConversationVideoIds.length > 0)) || isStreaming || isTranscribing || isUploading}
                     >
                         {imageModeEnabled ? <ImageIcon size={18} /> : <Send size={18} />}
                     </button>

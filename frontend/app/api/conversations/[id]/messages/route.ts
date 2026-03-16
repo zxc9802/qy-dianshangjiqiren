@@ -63,6 +63,9 @@ const attachmentSchema = z.object({
     previewUrl: z.string().max(2048).optional(),
     durationMs: z.number().int().nonnegative().optional(),
     transcript: z.string().optional(),
+    clientVideoId: z.string().max(255).optional(),
+    videoLabel: z.string().max(32).optional(),
+    source: z.enum(['current', 'history']).optional(),
     frames: z.array(z.object({
         url: z.string().min(1).max(2048),
         timestampMs: z.number().int().nonnegative(),
@@ -135,6 +138,9 @@ function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[])
         previewUrl: attachment.previewUrl,
         durationMs: attachment.durationMs,
         transcript: attachment.transcript?.trim(),
+        clientVideoId: attachment.clientVideoId?.trim(),
+        videoLabel: attachment.videoLabel?.trim(),
+        source: attachment.source,
         frames: attachment.frames?.map((frame) => ({
             url: frame.url,
             timestampMs: frame.timestampMs,
@@ -234,9 +240,16 @@ async function buildGeminiCurrentTurnMessage(
     const questionText = rawText.trim() || 'Analyze the uploaded attachments and provide a structured answer.';
 
     for (const attachment of attachments) {
+        const attachmentDescriptor = attachment.videoLabel
+            ? `${attachment.videoLabel} (${attachment.fileName})`
+            : attachment.fileName;
+        const videoInstruction = attachment.source === 'history'
+            ? `User referenced a previously uploaded video attachment named ${attachmentDescriptor}. Inspect this video directly and answer from the video itself.`
+            : `User uploaded a video attachment named ${attachmentDescriptor}. Inspect the video directly and answer from the video itself.`;
+
         if (attachment.kind === 'video' && attachment.inlineVideoData) {
             parts.push({
-                text: `User uploaded a video attachment named ${attachment.fileName}. Inspect the video directly and answer from the video itself.`,
+                text: videoInstruction,
             });
             parts.push({
                 inlineData: {
@@ -250,7 +263,7 @@ async function buildGeminiCurrentTurnMessage(
         if (attachment.kind === 'video' && attachment.tempVideoToken) {
             const tempVideo = await loadTempVideo(attachment.tempVideoToken);
             parts.push({
-                text: `User uploaded a video attachment named ${attachment.fileName}. Inspect the video directly and answer from the video itself.`,
+                text: videoInstruction,
             });
             parts.push({
                 inlineData: {

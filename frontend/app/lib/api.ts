@@ -413,6 +413,8 @@ export interface AttachmentInfo {
     extractedText?: string;
     durationMs?: number;
     transcript?: string;
+    clientVideoId?: string;
+    videoLabel?: string;
     frames?: Array<{
         url: string;
         timestampMs: number;
@@ -429,6 +431,9 @@ export interface ChatAttachmentPayload {
     durationMs?: number;
     transcript?: string;
     tempVideoToken?: string;
+    clientVideoId?: string;
+    videoLabel?: string;
+    source?: 'current' | 'history';
     frames?: Array<{
         url: string;
         timestampMs: number;

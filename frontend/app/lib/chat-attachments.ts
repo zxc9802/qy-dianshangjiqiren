@@ -16,23 +16,28 @@ export interface ChatAttachmentUpload {
     transcript?: string;
     frames?: ChatAttachmentFrame[];
     tempVideoToken?: string;
+    clientVideoId?: string;
+    videoLabel?: string;
+    source?: 'current' | 'history';
 }
 
 export interface StoredChatAttachmentMetadata {
-    version: 1;
+    version: 1 | 2;
     kind: ChatAttachmentKind;
     mimeType?: string;
     extractedText: string;
     durationMs?: number;
     transcript?: string;
     frames?: ChatAttachmentFrame[];
+    clientVideoId?: string;
+    videoLabel?: string;
 }
 
 export interface ChatAttachmentRecord extends ChatAttachmentUpload {
     fileUrl: string;
 }
 
-const ATTACHMENT_METADATA_VERSION = 1;
+const ATTACHMENT_METADATA_VERSION = 2;
 
 function normalizeFrame(frame: unknown): ChatAttachmentFrame | null {
     if (typeof frame !== 'object' || frame === null) {
@@ -52,17 +57,24 @@ function normalizeFrame(frame: unknown): ChatAttachmentFrame | null {
     };
 }
 
-export function buildAttachmentDisplayLabel(attachment: Pick<ChatAttachmentUpload, 'kind' | 'fileName'>): string {
+export function buildAttachmentDisplayLabel(attachment: Pick<ChatAttachmentUpload, 'kind' | 'fileName' | 'videoLabel'>): string {
+    const baseName = attachment.kind === 'video' && attachment.videoLabel
+        ? `${attachment.videoLabel} ${attachment.fileName}`
+        : attachment.fileName;
+
     if (attachment.kind === 'video') {
-        return `[视频: ${attachment.fileName}]`;
+        return `[视频: ${baseName}]`;
     }
     if (attachment.kind === 'image') {
-        return `[图片: ${attachment.fileName}]`;
+        return `[图片: ${baseName}]`;
     }
-    return `[文件: ${attachment.fileName}]`;
+    return `[文件: ${baseName}]`;
 }
 
-export function buildMessageDisplayContent(text: string, attachments: Array<Pick<ChatAttachmentUpload, 'kind' | 'fileName'>>): string {
+export function buildMessageDisplayContent(
+    text: string,
+    attachments: Array<Pick<ChatAttachmentUpload, 'kind' | 'fileName' | 'videoLabel'>>,
+): string {
     const trimmed = text.trim();
     const labels = attachments.map(buildAttachmentDisplayLabel).join('\n');
 
@@ -73,7 +85,10 @@ export function buildMessageDisplayContent(text: string, attachments: Array<Pick
     return labels || trimmed;
 }
 
-export function stripAttachmentDisplayLabels(text: string, attachments: Array<Pick<ChatAttachmentUpload, 'kind' | 'fileName'>>): string {
+export function stripAttachmentDisplayLabels(
+    text: string,
+    attachments: Array<Pick<ChatAttachmentUpload, 'kind' | 'fileName' | 'videoLabel'>>,
+): string {
     const lines = text.split(/\r?\n/);
     const remainingLabels = new Set(attachments.map(buildAttachmentDisplayLabel));
     let index = 0;
@@ -98,10 +113,13 @@ export function getDefaultAttachmentPrompt(attachments: Array<Pick<ChatAttachmen
 
 export function buildAttachmentContextBlock(attachment: Pick<
 ChatAttachmentUpload,
-'kind' | 'fileName' | 'extractedText' | 'durationMs' | 'transcript' | 'frames'
+    'kind' | 'fileName' | 'extractedText' | 'durationMs' | 'transcript' | 'frames' | 'videoLabel'
 >): string {
+    const videoTitle = attachment.videoLabel
+        ? `${attachment.videoLabel} / ${attachment.fileName}`
+        : attachment.fileName;
     const title = attachment.kind === 'video'
-        ? `视频附件：${attachment.fileName}`
+        ? `视频附件：${videoTitle}`
         : attachment.kind === 'image'
             ? `图片附件：${attachment.fileName}`
             : `文件附件：${attachment.fileName}`;
@@ -156,6 +174,8 @@ export function serializeAttachmentMetadata(attachment: ChatAttachmentUpload): s
             url: frame.url,
             timestampMs: Math.max(0, Math.round(frame.timestampMs)),
         })),
+        clientVideoId: attachment.clientVideoId,
+        videoLabel: attachment.videoLabel,
     };
 
     return JSON.stringify(payload);
@@ -172,7 +192,7 @@ export function parseAttachmentMetadata(
 
     try {
         const parsed = JSON.parse(parsedText) as Partial<StoredChatAttachmentMetadata>;
-        if (parsed.version !== ATTACHMENT_METADATA_VERSION || typeof parsed.kind !== 'string') {
+        if ((parsed.version !== 1 && parsed.version !== ATTACHMENT_METADATA_VERSION) || typeof parsed.kind !== 'string') {
             return null;
         }
 
@@ -188,6 +208,8 @@ export function parseAttachmentMetadata(
             frames: Array.isArray(parsed.frames)
                 ? parsed.frames.map(normalizeFrame).filter((frame): frame is ChatAttachmentFrame => frame !== null)
                 : [],
+            clientVideoId: typeof parsed.clientVideoId === 'string' ? parsed.clientVideoId : undefined,
+            videoLabel: typeof parsed.videoLabel === 'string' ? parsed.videoLabel : undefined,
         };
     } catch {
         const inferredKind: ChatAttachmentKind = fileType.startsWith('image/')
@@ -226,6 +248,8 @@ export function normalizeAttachmentRecord(input: {
         previewUrl,
         durationMs: metadata?.durationMs,
         transcript: metadata?.transcript,
+        clientVideoId: metadata?.clientVideoId,
+        videoLabel: metadata?.videoLabel,
         frames,
         fileUrl: input.fileUrl,
     };
