@@ -314,6 +314,23 @@ function chooseReferencedConversationVideos(params: {
     historyVideos: ConversationVideoCatalogItem[];
     notice?: VideoResolutionNotice;
 } {
+    const createMissingVideoNotice = (
+        message: string,
+        options?: { videoLabel?: string },
+    ): {
+        historyVideos: ConversationVideoCatalogItem[];
+        notice: VideoResolutionNotice;
+    } => ({
+        historyVideos: [],
+        notice: {
+            type: 'missing',
+            message: options?.videoLabel
+                ? `${options.videoLabel} 当前设备已找不到原视频，${message}`
+                : message,
+            allowTextFallback: true,
+        },
+    });
+
     if (params.skipHistoryVideoReuse) {
         return { historyVideos: [] };
     }
@@ -440,29 +457,37 @@ function chooseReferencedConversationVideos(params: {
     }
 
     const availableVideos = allVideos.filter((video) => video.isAvailableLocally);
-    const latestVideo = availableVideos[availableVideos.length - 1];
-    const previousVideo = availableVideos[availableVideos.length - 2] || latestVideo;
+    const latestVideo = allVideos[allVideos.length - 1];
+    const previousVideo = allVideos[allVideos.length - 2] || latestVideo;
 
     if (hasPreviousVideoReference(trimmedText)) {
         if (!previousVideo) {
-            return {
-                historyVideos: [],
-                notice: {
-                    type: 'missing',
-                    message: '没有可复用的历史视频。请重新上传目标视频，或仅按历史文字继续。',
-                    allowTextFallback: true,
-                },
-            };
+            return createMissingVideoNotice('请重新上传目标视频，或仅按历史文字继续。');
+        }
+        if (!previousVideo.isAvailableLocally) {
+            return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
+                videoLabel: previousVideo.videoLabel,
+            });
         }
         return { historyVideos: [previousVideo] };
     }
 
     if (!params.hasCurrentUploads && hasCurrentVideoReference(trimmedText) && latestVideo) {
+        if (!latestVideo.isAvailableLocally) {
+            return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
+                videoLabel: latestVideo.videoLabel,
+            });
+        }
         return { historyVideos: [latestVideo] };
     }
 
     if (isComparisonPrompt(trimmedText)) {
         if (params.hasCurrentUploads && latestVideo) {
+            if (!latestVideo.isAvailableLocally) {
+                return createMissingVideoNotice('请重新上传后再比较，或仅按历史文字继续。', {
+                    videoLabel: latestVideo.videoLabel,
+                });
+            }
             return { historyVideos: [latestVideo] };
         }
 
@@ -480,6 +505,15 @@ function chooseReferencedConversationVideos(params: {
                 },
             };
         }
+    }
+
+    if (!params.hasCurrentUploads && latestVideo) {
+        if (!latestVideo.isAvailableLocally) {
+            return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
+                videoLabel: latestVideo.videoLabel,
+            });
+        }
+        return { historyVideos: [latestVideo] };
     }
 
     return { historyVideos: [] };
@@ -741,10 +775,37 @@ export default function ChatPage() {
                 }
             }
 
+            // Keep locally cached videos visible even if the latest conversation
+            // payload temporarily misses attachment metadata.
+            for (const localVideo of localVideos) {
+                if (seen.has(localVideo.clientVideoId)) {
+                    continue;
+                }
+
+                const orderIndex = localVideo.orderIndex || fallbackOrder;
+                const videoLabel = `视频${orderIndex}`;
+                fallbackOrder = Math.max(fallbackOrder, orderIndex + 1);
+
+                nextCatalog.push({
+                    clientVideoId: localVideo.clientVideoId,
+                    videoLabel,
+                    fileName: localVideo.fileName,
+                    fileSize: localVideo.fileSize,
+                    mimeType: localVideo.mimeType,
+                    previewUrl: undefined,
+                    extractedText: localVideo.extractedText || '',
+                    durationMs: undefined,
+                    transcript: localVideo.transcript || '',
+                    frames: [],
+                    createdAt: localVideo.createdAt,
+                    orderIndex,
+                    isAvailableLocally: true,
+                });
+            }
+
             setConversationVideos(nextCatalog.sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt));
         } catch (error) {
             console.error('[Chat] refresh conversation videos failed', error);
-            setConversationVideos([]);
         }
     }, [conversationId, messages]);
 
