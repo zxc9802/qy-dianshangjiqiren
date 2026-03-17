@@ -15,6 +15,24 @@ function normalizeUrl(value: string | undefined, fallback: string): string {
     return (value?.trim() || fallback).replace(/\/+$/, '');
 }
 
+function isLocalOnlyUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return ['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname);
+    } catch {
+        return false;
+    }
+}
+
+function resolvePublicUrl(value: string | undefined, fallback: string): string {
+    const normalized = normalizeUrl(value, fallback);
+    if (process.env.NODE_ENV === 'production' && isLocalOnlyUrl(normalized)) {
+        return fallback;
+    }
+
+    return normalized;
+}
+
 function safeTrim(value: string | undefined): string {
     return value?.trim() || '';
 }
@@ -57,11 +75,11 @@ export async function ensureVideoSsoTicketTable(): Promise<void> {
 }
 
 export function getMainAppUrl(): string {
-    return normalizeUrl(readServerEnv('MAIN_APP_URL'), DEFAULT_MAIN_APP_URL);
+    return resolvePublicUrl(readServerEnv('MAIN_APP_URL'), DEFAULT_MAIN_APP_URL);
 }
 
 export function getVideoAppUrl(): string {
-    return normalizeUrl(readServerEnv('VIDEO_APP_URL'), DEFAULT_VIDEO_APP_URL);
+    return resolvePublicUrl(readServerEnv('VIDEO_APP_URL'), DEFAULT_VIDEO_APP_URL);
 }
 
 export function getMainAppVideoEntryUrl(): string {
