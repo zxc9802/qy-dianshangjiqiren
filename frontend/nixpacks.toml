@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["ffmpeg", "chromium", "python311", "python311Packages.pip"]
+
+[phases.build]
+cmds = [
+  "python3 -m pip install -r requirements.txt",
+  "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium"
+]
+
+[start]
+cmd = "npm run start"

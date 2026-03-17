@@ -39,6 +39,23 @@ import {
     Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon, Video, Settings,
 } from 'lucide-react';
 
+const URL_MATCH_REGEX = /https?:\/\/[^\s<>"'`]+/gi;
+const REMOTE_VIDEO_PATH_REGEX = /\.(mp4|mov|webm|m4v)(?:$|[?#])/i;
+const KNOWN_VIDEO_HOST_PATTERNS = [
+    /(^|\.)youtube\.com$/i,
+    /(^|\.)youtu\.be$/i,
+    /(^|\.)bilibili\.com$/i,
+    /(^|\.)b23\.tv$/i,
+    /(^|\.)tiktok\.com$/i,
+    /(^|\.)douyin\.com$/i,
+    /(^|\.)iesdouyin\.com$/i,
+    /(^|\.)xiaohongshu\.com$/i,
+    /(^|\.)xhslink\.com$/i,
+    /(^|\.)rednote\.com$/i,
+    /(^|\.)kuaishou\.com$/i,
+    /(^|\.)weishi\.qq\.com$/i,
+];
+
 interface MessageAttachment extends Omit<AttachmentInfo, 'id' | 'fileType' | 'fileUrl' | 'kind'> {
     id?: string;
     fileType?: string;
@@ -61,6 +78,7 @@ interface MessageItem {
 interface AttachedFile {
     file: File;
     name: string;
+    fileSize?: number;
     extractedText?: string;
     previewUrl: string | null;
     isImage: boolean;
@@ -75,6 +93,7 @@ interface AttachedFile {
     videoLabel?: string;
     source?: 'current' | 'history';
     orderIndex?: number;
+    remoteVideoUrl?: string;
 }
 
 const MAX_ATTACHMENTS = 10;
@@ -100,6 +119,7 @@ interface ConversationVideoCatalogItem {
     attachmentId?: string;
     messageId?: string;
     isAvailableLocally: boolean;
+    remoteVideoUrl?: string;
 }
 
 interface VideoResolutionNotice {
@@ -293,6 +313,120 @@ function hasPreviousVideoReference(text: string): boolean {
     return /(上一个视频|前一个视频|上条视频|上一条视频|前一条视频|刚才那个视频|之前那个视频)/.test(text);
 }
 
+function hasVideoAnalysisIntent(text: string): boolean {
+    return /(视频|片子|镜头|画面|开头|开场|结尾|转场|字幕|配音|口播|bgm|BGM|配乐|节奏|卡点|分镜|封面|时长|逐帧|重看|复看|再看一遍|重新看|分析这个|拆解这个|优化这个视频)/.test(text);
+}
+
+function buildRecentVideoIntentMessages(messages: MessageItem[]): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return messages
+        .filter((message) => message.id !== 'welcome' && message.kind !== 'image')
+        .slice(-6)
+        .map((message) => {
+            const normalizedContent = message.attachments?.length
+                ? stripAttachmentDisplayLabels(message.content, message.attachments)
+                : message.content;
+            const cleanContent = message.role === 'assistant'
+                ? stripSuggestionBlock(normalizedContent)
+                : normalizedContent;
+            return {
+                role: message.role,
+                content: cleanContent.trim().slice(0, 1500),
+            };
+        })
+        .filter((message) => message.content.length > 0);
+}
+
+function isLikelyRemoteVideoUrl(value: string): boolean {
+    try {
+        const url = new URL(value);
+        const hostname = url.hostname.trim().toLowerCase();
+        if (!hostname) {
+            return false;
+        }
+
+        if (REMOTE_VIDEO_PATH_REGEX.test(url.pathname)) {
+            return true;
+        }
+
+        return KNOWN_VIDEO_HOST_PATTERNS.some((pattern) => pattern.test(hostname));
+    } catch {
+        return false;
+    }
+}
+
+function extractRemoteVideoUrls(text: string): string[] {
+    const matches = text.match(URL_MATCH_REGEX) || [];
+    const uniqueUrls = new Set<string>();
+
+    for (const match of matches) {
+        const normalized = match
+            .trim()
+            .replace(/[),.;!?]+$/, '')
+            .replace(/[\u3002\uff0c\uff1f\uff01\uff1b\uff1a\uff09\u3011\u300b]+$/u, '')
+            .replace(/[\p{Script=Han}]+$/gu, '');
+        if (!normalized || !isLikelyRemoteVideoUrl(normalized)) {
+            continue;
+        }
+
+        uniqueUrls.add(normalized);
+    }
+
+    return [...uniqueUrls];
+}
+
+function stripRemoteVideoUrls(text: string, remoteVideoUrls: string[]): string {
+    if (remoteVideoUrls.length === 0) {
+        return text.trim();
+    }
+
+    let nextText = text;
+    for (const remoteVideoUrl of remoteVideoUrls) {
+        nextText = nextText.replace(remoteVideoUrl, ' ');
+    }
+
+    return nextText
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+}
+
+function inferRemoteVideoFileName(remoteVideoUrl: string, fallbackIndex: number): string {
+    try {
+        const url = new URL(remoteVideoUrl);
+        const pathname = url.pathname || '';
+        const rawSegment = pathname.split('/').filter(Boolean).at(-1) || `remote-video-${fallbackIndex}`;
+        const decodedSegment = decodeURIComponent(rawSegment);
+        return /\.[a-z0-9]{2,5}$/i.test(decodedSegment)
+            ? decodedSegment
+            : `${decodedSegment}.mp4`;
+    } catch {
+        return `remote-video-${fallbackIndex}.mp4`;
+    }
+}
+
+function inferRemoteVideoMimeType(remoteVideoUrl: string): string {
+    if (/\.mov(?:$|[?#])/i.test(remoteVideoUrl)) {
+        return 'video/quicktime';
+    }
+    if (/\.webm(?:$|[?#])/i.test(remoteVideoUrl)) {
+        return 'video/webm';
+    }
+    if (/\.m4v(?:$|[?#])/i.test(remoteVideoUrl)) {
+        return 'video/x-m4v';
+    }
+    return 'video/mp4';
+}
+
+function isDirectGeminiVideoBypassCandidate(file: File, model: ResponseModel): boolean {
+    if (model !== 'gemini') {
+        return false;
+    }
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    return file.type.startsWith('video/') || ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
+}
+
 function dedupeConversationVideos(videos: ConversationVideoCatalogItem[]): ConversationVideoCatalogItem[] {
     const seen = new Set<string>();
     return videos.filter((video) => {
@@ -302,6 +436,22 @@ function dedupeConversationVideos(videos: ConversationVideoCatalogItem[]): Conve
         seen.add(video.clientVideoId);
         return true;
     });
+}
+
+function canReuseConversationVideo(video: ConversationVideoCatalogItem): boolean {
+    return video.isAvailableLocally || Boolean(video.remoteVideoUrl);
+}
+
+function getConversationVideoStateLabel(video: ConversationVideoCatalogItem): string {
+    if (video.isAvailableLocally) {
+        return '鏈満鍙敤';
+    }
+
+    if (video.remoteVideoUrl) {
+        return '閾炬帴鍙噸鍙?';
+    }
+
+    return '闇€閲嶄紶';
 }
 
 function chooseReferencedConversationVideos(params: {
@@ -344,7 +494,7 @@ function chooseReferencedConversationVideos(params: {
     ).slice(0, MAX_AUTO_REFERENCED_HISTORY_VIDEOS);
 
     if (manualSelections.length > 0) {
-        const missingSelections = manualSelections.filter((video) => !video.isAvailableLocally);
+        const missingSelections = manualSelections.filter((video) => !canReuseConversationVideo(video));
         if (missingSelections.length > 0) {
             return {
                 historyVideos: [],
@@ -370,7 +520,7 @@ function chooseReferencedConversationVideos(params: {
         .filter((video): video is ConversationVideoCatalogItem => Boolean(video)));
 
     if (explicitMatches.length > 0) {
-        const missingMatches = explicitMatches.filter((video) => !video.isAvailableLocally);
+        const missingMatches = explicitMatches.filter((video) => !canReuseConversationVideo(video));
         if (missingMatches.length > 0) {
             return {
                 historyVideos: [],
@@ -406,7 +556,7 @@ function chooseReferencedConversationVideos(params: {
             };
         }
 
-        const missingMatches = aliasMatches.filter((video) => !video.isAvailableLocally);
+        const missingMatches = aliasMatches.filter((video) => !canReuseConversationVideo(video));
         if (missingMatches.length > 0) {
             return {
                 historyVideos: [],
@@ -441,7 +591,7 @@ function chooseReferencedConversationVideos(params: {
             };
         }
 
-        const missingMatches = keywordMatches.filter((video) => !video.isAvailableLocally);
+        const missingMatches = keywordMatches.filter((video) => !canReuseConversationVideo(video));
         if (missingMatches.length > 0) {
             return {
                 historyVideos: [],
@@ -456,7 +606,7 @@ function chooseReferencedConversationVideos(params: {
         return { historyVideos: keywordMatches };
     }
 
-    const availableVideos = allVideos.filter((video) => video.isAvailableLocally);
+    const availableVideos = allVideos.filter(canReuseConversationVideo);
     const latestVideo = allVideos[allVideos.length - 1];
     const previousVideo = allVideos[allVideos.length - 2] || latestVideo;
 
@@ -464,7 +614,7 @@ function chooseReferencedConversationVideos(params: {
         if (!previousVideo) {
             return createMissingVideoNotice('请重新上传目标视频，或仅按历史文字继续。');
         }
-        if (!previousVideo.isAvailableLocally) {
+        if (!canReuseConversationVideo(previousVideo)) {
             return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
                 videoLabel: previousVideo.videoLabel,
             });
@@ -473,7 +623,7 @@ function chooseReferencedConversationVideos(params: {
     }
 
     if (!params.hasCurrentUploads && hasCurrentVideoReference(trimmedText) && latestVideo) {
-        if (!latestVideo.isAvailableLocally) {
+        if (!canReuseConversationVideo(latestVideo)) {
             return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
                 videoLabel: latestVideo.videoLabel,
             });
@@ -483,7 +633,7 @@ function chooseReferencedConversationVideos(params: {
 
     if (isComparisonPrompt(trimmedText)) {
         if (params.hasCurrentUploads && latestVideo) {
-            if (!latestVideo.isAvailableLocally) {
+            if (!canReuseConversationVideo(latestVideo)) {
                 return createMissingVideoNotice('请重新上传后再比较，或仅按历史文字继续。', {
                     videoLabel: latestVideo.videoLabel,
                 });
@@ -507,8 +657,8 @@ function chooseReferencedConversationVideos(params: {
         }
     }
 
-    if (!params.hasCurrentUploads && latestVideo) {
-        if (!latestVideo.isAvailableLocally) {
+    if (!params.hasCurrentUploads && latestVideo && hasVideoAnalysisIntent(trimmedText)) {
+        if (!canReuseConversationVideo(latestVideo)) {
             return createMissingVideoNotice('请重新上传，或仅按历史文字继续。', {
                 videoLabel: latestVideo.videoLabel,
             });
@@ -770,7 +920,8 @@ export default function ChatPage() {
                         orderIndex,
                         attachmentId: attachment.id,
                         messageId: message.id,
-                        isAvailableLocally: Boolean(localVideo),
+                        isAvailableLocally: Boolean(localVideo || attachment.remoteVideoUrl),
+                        remoteVideoUrl: attachment.remoteVideoUrl,
                     });
                 }
             }
@@ -995,7 +1146,7 @@ export default function ChatPage() {
     };
 
     const toggleConversationVideoSelection = useCallback((video: ConversationVideoCatalogItem) => {
-        if (!video.isAvailableLocally) {
+        if (!canReuseConversationVideo(video)) {
             setVideoResolutionNotice({
                 type: 'missing',
                 message: `${video.videoLabel} 当前设备已找不到原视频，请重新上传，或仅按历史文字继续。`,
@@ -1015,7 +1166,46 @@ export default function ChatPage() {
         });
     }, []);
 
+    const shouldInspectLatestVideoWithGemini = useCallback(async (params: {
+        conversationId: string;
+        messageText: string;
+        latestVideo: ConversationVideoCatalogItem;
+    }): Promise<boolean> => {
+        try {
+            const response = await api.classifyConversationVideoIntent(params.conversationId, {
+                messageText: params.messageText,
+                latestVideo: {
+                    videoLabel: params.latestVideo.videoLabel,
+                    fileName: params.latestVideo.fileName,
+                    extractedText: params.latestVideo.extractedText.slice(0, 2000),
+                    transcript: params.latestVideo.transcript?.slice(0, 2000),
+                },
+                recentMessages: buildRecentVideoIntentMessages(messages),
+            });
+
+            return response.data.shouldInspectVideo;
+        } catch (error) {
+            console.error('[Chat] classify video intent failed', error);
+            return false;
+        }
+    }, [messages]);
+
     const parseAttachedFile = async (file: File, model: ResponseModel) => {
+        if (isDirectGeminiVideoBypassCandidate(file, model)) {
+            return {
+                kind: 'video' as ChatAttachmentKind,
+                fileName: file.name,
+                fileSize: file.size,
+                mimeType: file.type || undefined,
+                previewUrl: undefined,
+                extractedText: '',
+                durationMs: undefined,
+                transcript: '',
+                tempVideoToken: undefined,
+                frames: [] as ChatAttachmentFrame[],
+            } satisfies ChatAttachmentPayload;
+        }
+
         const formData = new FormData();
         formData.append('file', file);
         formData.append('responseModel', model);
@@ -1062,10 +1252,9 @@ export default function ChatPage() {
         if (!isImageRequest && attachedFiles.length > 0) {
             setIsUploading(true);
             try {
-                parsedAttachments = [];
-                for (const attachment of attachedFiles) {
+                parsedAttachments = await Promise.all(attachedFiles.map(async (attachment) => {
                     const parsed = await parseAttachedFile(attachment.file, responseModel);
-                    parsedAttachments.push({
+                    return {
                         ...attachment,
                         name: parsed.fileName,
                         kind: parsed.kind,
@@ -1076,8 +1265,8 @@ export default function ChatPage() {
                         tempVideoToken: parsed.tempVideoToken,
                         frames: parsed.frames,
                         previewUrl: attachment.isImage ? attachment.previewUrl : (parsed.previewUrl || attachment.previewUrl),
-                    });
-                }
+                    };
+                }));
             } catch (error) {
                 alert(error instanceof Error ? error.message : '文件上传失败');
                 return;
@@ -1086,11 +1275,30 @@ export default function ChatPage() {
             }
         }
 
-        const messageText = rawText.trim();
+        const detectedRemoteVideoUrls = !isImageRequest && responseModel === 'gemini' && isVideoBreakdownBot
+            ? extractRemoteVideoUrls(rawText).slice(0, Math.max(0, MAX_ATTACHMENTS - parsedAttachments.length))
+            : [];
+        const messageText = stripRemoteVideoUrls(rawText, detectedRemoteVideoUrls);
         const conversationScope = ensureConversationScope();
         const currentVideoCount = conversationVideos.length;
         let nextOrderIndex = currentVideoCount + 1;
-        const preparedAttachments = parsedAttachments.map((attachment) => {
+        const remoteVideoAttachments: AttachedFile[] = detectedRemoteVideoUrls.map((remoteVideoUrl, index) => ({
+            file: new File([], inferRemoteVideoFileName(remoteVideoUrl, currentVideoCount + index + 1), {
+                type: inferRemoteVideoMimeType(remoteVideoUrl),
+            }),
+            name: inferRemoteVideoFileName(remoteVideoUrl, currentVideoCount + index + 1),
+            fileSize: 0,
+            previewUrl: null,
+            isImage: false,
+            isVideo: true,
+            kind: 'video',
+            mimeType: inferRemoteVideoMimeType(remoteVideoUrl),
+            extractedText: '',
+            remoteVideoUrl,
+            source: 'current',
+        }));
+        const pendingAttachments = [...parsedAttachments, ...remoteVideoAttachments];
+        const preparedAttachments = pendingAttachments.map((attachment) => {
             if (attachment.kind !== 'video') {
                 return attachment;
             }
@@ -1109,19 +1317,21 @@ export default function ChatPage() {
         const preparedCurrentVideos = preparedAttachments.filter((attachment) => attachment.kind === 'video');
         const now = Date.now();
         if (preparedCurrentVideos.length > 0) {
-            await Promise.all(preparedCurrentVideos.map((attachment) => putLocalConversationVideo({
-                conversationScope,
-                clientVideoId: attachment.clientVideoId as string,
-                fileName: attachment.name,
-                mimeType: attachment.mimeType || attachment.file.type || 'video/mp4',
-                fileSize: attachment.file.size,
-                createdAt: now,
-                lastAccessedAt: now,
-                orderIndex: attachment.orderIndex || currentVideoCount + 1,
-                extractedText: attachment.extractedText || '',
-                transcript: attachment.transcript || '',
-                blob: attachment.file,
-            })));
+            await Promise.all(preparedCurrentVideos
+                .filter((attachment) => !attachment.remoteVideoUrl && attachment.file.size > 0)
+                .map((attachment) => putLocalConversationVideo({
+                    conversationScope,
+                    clientVideoId: attachment.clientVideoId as string,
+                    fileName: attachment.name,
+                    mimeType: attachment.mimeType || attachment.file.type || 'video/mp4',
+                    fileSize: attachment.file.size,
+                    createdAt: now,
+                    lastAccessedAt: now,
+                    orderIndex: attachment.orderIndex || currentVideoCount + 1,
+                    extractedText: attachment.extractedText || '',
+                    transcript: attachment.transcript || '',
+                    blob: attachment.file,
+                })));
         }
 
         const referencedHistoryAttachments: AttachedFile[] = [];
@@ -1139,9 +1349,52 @@ export default function ChatPage() {
                 return;
             }
 
-            for (const video of resolution.historyVideos) {
+            let resolvedHistoryVideos = resolution.historyVideos;
+            const latestVideo = [...conversationVideos]
+                .sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt)
+                .at(-1);
+            const shouldModelJudgeLatestVideo = Boolean(
+                !options?.allowTextFallback
+                && preparedCurrentVideos.length === 0
+                && conversationId
+                && selectedConversationVideoIds.length === 0
+                && latestVideo
+                && resolvedHistoryVideos.length <= 1
+                && (!resolvedHistoryVideos[0] || resolvedHistoryVideos[0].clientVideoId === latestVideo.clientVideoId)
+                && collectExplicitVideoOrders(messageText).length === 0
+                && !hasCurrentVideoReference(messageText)
+                && !hasPreviousVideoReference(messageText)
+                && !isComparisonPrompt(messageText),
+            );
+
+            if (
+                shouldModelJudgeLatestVideo
+                && latestVideo
+            ) {
+                const shouldInspectLatestVideo = await shouldInspectLatestVideoWithGemini({
+                    conversationId: conversationId as string,
+                    messageText,
+                    latestVideo,
+                });
+
+                if (shouldInspectLatestVideo) {
+                    if (!canReuseConversationVideo(latestVideo)) {
+                        setVideoResolutionNotice({
+                            type: 'missing',
+                            message: `${latestVideo.videoLabel} 在当前设备已不可用，请重新上传，或仅按历史文字继续。`,
+                            allowTextFallback: true,
+                        });
+                        return;
+                    }
+                    resolvedHistoryVideos = [latestVideo];
+                } else {
+                    resolvedHistoryVideos = resolvedHistoryVideos.filter((video) => video.clientVideoId !== latestVideo.clientVideoId);
+                }
+            }
+
+            for (const video of resolvedHistoryVideos) {
                 const localVideo = await getLocalConversationVideo(conversationScope, video.clientVideoId);
-                if (!localVideo) {
+                if (!localVideo && !video.remoteVideoUrl) {
                     if (!options?.allowTextFallback) {
                         setVideoResolutionNotice({
                             type: 'missing',
@@ -1154,24 +1407,30 @@ export default function ChatPage() {
                 }
 
                 referencedHistoryAttachments.push({
-                    file: new File([localVideo.blob], video.fileName, {
-                        type: video.mimeType || localVideo.mimeType || 'video/mp4',
-                        lastModified: localVideo.createdAt,
-                    }),
+                    file: localVideo
+                        ? new File([localVideo.blob], video.fileName, {
+                            type: video.mimeType || localVideo.mimeType || 'video/mp4',
+                            lastModified: localVideo.createdAt,
+                        })
+                        : new File([], video.fileName, {
+                            type: video.mimeType || inferRemoteVideoMimeType(video.remoteVideoUrl || ''),
+                        }),
                     name: video.fileName,
+                    fileSize: localVideo?.fileSize || video.fileSize,
                     previewUrl: video.previewUrl || null,
                     isImage: false,
                     isVideo: true,
                     kind: 'video',
-                    mimeType: video.mimeType || localVideo.mimeType || 'video/mp4',
-                    extractedText: video.extractedText || localVideo.extractedText,
+                    mimeType: video.mimeType || localVideo?.mimeType || inferRemoteVideoMimeType(video.remoteVideoUrl || ''),
+                    extractedText: video.extractedText || localVideo?.extractedText,
                     durationMs: video.durationMs,
-                    transcript: video.transcript || localVideo.transcript,
+                    transcript: video.transcript || localVideo?.transcript,
                     frames: video.frames,
                     clientVideoId: video.clientVideoId,
                     videoLabel: video.videoLabel,
                     source: 'history',
                     orderIndex: video.orderIndex,
+                    remoteVideoUrl: video.remoteVideoUrl,
                 });
             }
         }
@@ -1180,7 +1439,7 @@ export default function ChatPage() {
         const requestAttachments: ChatAttachmentPayload[] = finalAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
-            fileSize: attachment.file.size,
+            fileSize: attachment.fileSize ?? attachment.file.size,
             mimeType: attachment.mimeType || attachment.file.type || undefined,
             previewUrl: attachment.kind === 'video' ? attachment.previewUrl || undefined : undefined,
             extractedText: attachment.extractedText || '',
@@ -1190,6 +1449,7 @@ export default function ChatPage() {
             clientVideoId: attachment.clientVideoId,
             videoLabel: attachment.videoLabel,
             source: attachment.source,
+            remoteVideoUrl: attachment.remoteVideoUrl,
             frames: attachment.frames,
         }));
         const shouldSendGeminiVideoDirect = responseModel === 'gemini'
@@ -1197,7 +1457,7 @@ export default function ChatPage() {
         const optimisticAttachments: MessageAttachment[] = finalAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
-            fileSize: attachment.file.size,
+            fileSize: attachment.fileSize ?? attachment.file.size,
             mimeType: attachment.mimeType || attachment.file.type || undefined,
             previewUrl: attachment.previewUrl || undefined,
             extractedText: attachment.extractedText || '',
@@ -1205,6 +1465,7 @@ export default function ChatPage() {
             transcript: attachment.transcript,
             clientVideoId: attachment.clientVideoId,
             videoLabel: attachment.videoLabel,
+            remoteVideoUrl: attachment.remoteVideoUrl,
             frames: attachment.frames,
         }));
 
@@ -1290,7 +1551,7 @@ export default function ChatPage() {
                     const formData = new FormData();
                     formData.append('payload', JSON.stringify(messagePayload));
                     finalAttachments
-                        .filter((attachment) => attachment.kind === 'video')
+                        .filter((attachment) => attachment.kind === 'video' && !attachment.remoteVideoUrl)
                         .forEach((attachment) => {
                             formData.append('videoFiles', attachment.file, attachment.name);
                         });
@@ -1489,6 +1750,7 @@ export default function ChatPage() {
         responseModel,
         router,
         selectedConversationVideoIds,
+        shouldInspectLatestVideoWithGemini,
         wfState,
         workflowFlag,
     ]);
@@ -2195,13 +2457,15 @@ export default function ChatPage() {
                                                     {conversationVideos.map((video) => {
                                                         const selected = selectedConversationVideoIds.includes(video.clientVideoId);
                                                         const summaryText = (video.transcript || video.extractedText || '').trim();
+                                                        const reusable = canReuseConversationVideo(video);
                                                         return (
                                                             <button
                                                                 key={video.clientVideoId}
                                                                 type="button"
-                                                                className={`${styles.conversationVideoCard} ${selected ? styles.conversationVideoCardSelected : ''} ${!video.isAvailableLocally ? styles.conversationVideoCardUnavailable : ''}`}
+                                                                className={`${styles.conversationVideoCard} ${selected ? styles.conversationVideoCardSelected : ''} ${!reusable ? styles.conversationVideoCardUnavailable : ''}`}
                                                                 onClick={() => toggleConversationVideoSelection(video)}
                                                                 aria-pressed={selected}
+                                                                title={getConversationVideoStateLabel(video)}
                                                             >
                                                                 <div className={styles.conversationVideoCardTop}>
                                                                     <span className={styles.conversationVideoBadge}>{video.videoLabel}</span>

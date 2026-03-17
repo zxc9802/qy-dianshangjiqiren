@@ -20,6 +20,30 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Remote Video Links
+
+This app can fetch page-video links such as TikTok, YouTube, Xiaohongshu, or Bilibili before sending the video to Gemini.
+
+- Direct `.mp4/.mov/.webm/.m4v` links are downloaded directly.
+- Douyin links use a custom page/API parser first, then fall back to `yt-dlp`.
+- TikTok links use `Playwright + Chromium` first, then fall back to `yt-dlp`.
+- YouTube links continue to use `yt-dlp`, but now inject a JS runtime plus default extractor args for current YouTube clients.
+- Deployments should install the Python packages from `requirements.txt` so `yt-dlp` and `curl_cffi` are available.
+- For Nixpacks-based platforms, `nixpacks.toml` installs `ffmpeg`, `chromium`, Python, and the Playwright Chromium browser bundle.
+- TikTok-style pages often need extra network context. Supported environment variables:
+  - `YT_DLP_COOKIES_FILE` or `YT_DLP_COOKIES_BASE64`
+  - `YT_DLP_COOKIES_FROM_BROWSER`
+  - `YT_DLP_IMPERSONATE`
+  - `YT_DLP_PROXY`
+  - `YT_DLP_FORCE_IPV4`
+  - `YT_DLP_EXTRACTOR_ARGS`
+  - `YT_DLP_YOUTUBE_EXTRACTOR_ARGS`
+  - `YT_DLP_EXTRA_HEADERS`
+  - `YT_DLP_REFERER`
+  - `YT_DLP_USER_AGENT`
+  - `TIKTOK_PLAYWRIGHT_ENABLED`
+  - `TIKTOK_PLAYWRIGHT_TIMEOUT_MS`
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

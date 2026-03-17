@@ -219,6 +219,24 @@ export const api = {
         });
     },
 
+    classifyConversationVideoIntent: (id: string, body: {
+        messageText: string;
+        latestVideo?: {
+            videoLabel?: string;
+            fileName: string;
+            extractedText?: string;
+            transcript?: string;
+        };
+        recentMessages?: Array<{
+            role: 'user' | 'assistant';
+            content: string;
+        }>;
+    }) =>
+        request<{ success: boolean; data: VideoIntentDecision }>(`/conversations/${id}/video-intent`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
     migrateLocalData: (body: {
         conversations: LocalConversationItem[];
         favorites: LocalConversationItem[];
@@ -246,21 +264,6 @@ export const api = {
 
     deleteImageGeneration: (id: string) =>
         request<{ success: boolean }>(`/image-generations/${id}`, { method: 'DELETE' }),
-
-    // Video generations
-    getVideoGenerationModels: () =>
-        request<{ success: boolean; data: VideoGenerationModelResponse }>('/video-generations/models'),
-
-    generateVideo: (body: VideoGenerationRequest) =>
-        request<{ success: boolean; data: VideoGenerationTaskResponse }>('/video-generations/generate', {
-            method: 'POST',
-            body: JSON.stringify(body),
-        }),
-
-    getVideoGenerationStatus: (params: { familyId: string; taskId: string }) => {
-        const qs = new URLSearchParams(params).toString();
-        return request<{ success: boolean; data: VideoGenerationStatusResponse }>(`/video-generations/status?${qs}`);
-    },
 
     // Image prompt custom tags
     getImagePromptTags: () =>
@@ -415,6 +418,9 @@ export interface AttachmentInfo {
     transcript?: string;
     clientVideoId?: string;
     videoLabel?: string;
+    remoteVideoUrl?: string;
+    remotePlatform?: 'youtube' | 'douyin' | 'tiktok' | 'generic';
+    downloadMethod?: 'direct' | 'douyin-parser' | 'tiktok-playwright' | 'yt-dlp';
     frames?: Array<{
         url: string;
         timestampMs: number;
@@ -434,10 +440,19 @@ export interface ChatAttachmentPayload {
     clientVideoId?: string;
     videoLabel?: string;
     source?: 'current' | 'history';
+    remoteVideoUrl?: string;
+    remotePlatform?: 'youtube' | 'douyin' | 'tiktok' | 'generic';
+    downloadMethod?: 'direct' | 'douyin-parser' | 'tiktok-playwright' | 'yt-dlp';
     frames?: Array<{
         url: string;
         timestampMs: number;
     }>;
+}
+
+export interface VideoIntentDecision {
+    shouldInspectVideo: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    reason: string;
 }
 
 export interface ImageGenerationRequest {
@@ -473,83 +488,6 @@ export interface ImageGenerationItem {
 export interface ImageGenerationListResponse {
     items: ImageGenerationItem[];
     nextCursor: string | null;
-}
-
-export type VideoFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'url-list' | 'json';
-
-export interface VideoFieldOption {
-    label: string;
-    value: string;
-}
-
-export interface VideoFieldDefinition {
-    key: string;
-    label: string;
-    type: VideoFieldType;
-    required?: boolean;
-    placeholder?: string;
-    description?: string;
-    defaultValue?: string | number | boolean;
-    options?: VideoFieldOption[];
-    min?: number;
-    max?: number;
-    step?: number;
-    rows?: number;
-}
-
-export type VideoVerificationState = 'working' | 'blocked' | 'partial' | 'submission_only';
-export type VideoSupportState = 'supported' | 'not_listed';
-
-export interface VideoGenerationFamily {
-    id: string;
-    label: string;
-    description: string;
-    createPath: string;
-    queryPathTemplate?: string;
-    supportNotes: string;
-    fields: VideoFieldDefinition[];
-    supportState: VideoSupportState;
-    supportedModels: string[];
-    verification: {
-        state: VideoVerificationState;
-        summary: string;
-        testedAt: string;
-    };
-}
-
-export interface VideoGenerationModelResponse {
-    rawModels: string[];
-    families: VideoGenerationFamily[];
-}
-
-export interface VideoGenerationRequest {
-    familyId: string;
-    inputs: Record<string, unknown>;
-}
-
-export interface VideoUpstreamPayload {
-    ok: boolean;
-    status: number;
-    statusText: string;
-    data: unknown;
-}
-
-export interface VideoGenerationTaskResponse {
-    familyId: string;
-    taskId: string;
-    create: VideoUpstreamPayload;
-    latest: VideoUpstreamPayload | null;
-    latestError: string | null;
-    status: string | null;
-    videoUrl: string | null;
-}
-
-export interface VideoGenerationStatusResponse {
-    familyId: string;
-    taskId: string;
-    query: VideoUpstreamPayload;
-    status: string | null;
-    videoUrl: string | null;
 }
 
 export interface ImagePromptTagItem {

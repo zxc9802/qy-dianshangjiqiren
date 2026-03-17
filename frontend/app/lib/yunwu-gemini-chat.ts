@@ -21,6 +21,14 @@ type StreamOptions = {
     maxOutputTokens?: number;
 };
 
+type RequestOptions = {
+    systemPrompt: string;
+    messages: GeminiChatMessage[];
+    temperature?: number;
+    topP?: number;
+    maxOutputTokens?: number;
+};
+
 function normalizeStreamUrl(rawUrl?: string): string {
     let url = (rawUrl || DEFAULT_GEMINI_CHAT_URL).trim();
     url = url.replace(':generateContent', ':streamGenerateContent');
@@ -28,6 +36,30 @@ function normalizeStreamUrl(rawUrl?: string): string {
         url += url.includes('?') ? '&alt=sse' : '?alt=sse';
     }
     return url;
+}
+
+function normalizeRequestUrl(rawUrl?: string): string {
+    let url = (rawUrl || DEFAULT_GEMINI_CHAT_URL).trim();
+    url = url.replace(':streamGenerateContent', ':generateContent');
+    url = url.replace(/[?&]alt=sse(?:&|$)/, (match) => (match.startsWith('?') ? '?' : ''));
+    url = url.replace(/\?&/, '?');
+    url = url.replace(/[?&]$/, '');
+    return url;
+}
+
+function buildGeminiContents(messages: GeminiChatMessage[]) {
+    return messages
+        .map((message) => {
+            const parts = typeof message.content === 'string'
+                ? (message.content.trim() ? [{ text: message.content.trim() }] : [])
+                : message.content.filter((part) => ('text' in part ? part.text.trim().length > 0 : Boolean(part.inlineData?.data)));
+
+            return {
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts,
+            };
+        })
+        .filter((message) => message.parts.length > 0);
 }
 
 export async function streamYunwuGeminiChat({
@@ -44,18 +76,7 @@ export async function streamYunwuGeminiChat({
     }
 
     const apiUrl = normalizeStreamUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
-    const contents = messages
-        .map((message) => {
-            const parts = typeof message.content === 'string'
-                ? (message.content.trim() ? [{ text: message.content.trim() }] : [])
-                : message.content.filter((part) => ('text' in part ? part.text.trim().length > 0 : Boolean(part.inlineData?.data)));
-
-            return {
-                role: message.role === 'assistant' ? 'model' : 'user',
-                parts,
-            };
-        })
-        .filter((message) => message.parts.length > 0);
+    const contents = buildGeminiContents(messages);
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
@@ -153,4 +174,62 @@ export async function streamYunwuGeminiChat({
             // Ignore trailing partial chunk.
         }
     }
+}
+
+export async function requestYunwuGeminiChat({
+    systemPrompt,
+    messages,
+    temperature = 0.2,
+    topP = 0.8,
+    maxOutputTokens = 512,
+}: RequestOptions): Promise<string> {
+    const apiKey = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY');
+    if (!apiKey) {
+        throw new AppError('Missing chat API key configuration', 500);
+    }
+
+    const apiUrl = normalizeRequestUrl(readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL'));
+    const contents = buildGeminiContents(messages);
+
+    const upstream = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            contents,
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: {
+                temperature,
+                topP,
+                maxOutputTokens,
+            },
+        }),
+    });
+
+    if (!upstream.ok) {
+        const errorText = await upstream.text().catch(() => upstream.statusText);
+        throw new AppError(`Upstream chat request failed: ${errorText || upstream.statusText}`, upstream.status);
+    }
+
+    const data = await upstream.json().catch(() => null) as {
+        candidates?: Array<{
+            content?: {
+                parts?: Array<{ text?: string; thought?: boolean }>;
+            };
+        }>;
+    } | null;
+
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) {
+        return '';
+    }
+
+    return parts
+        .filter((part) => part?.text && !part?.thought)
+        .map((part) => part.text?.trim() || '')
+        .filter(Boolean)
+        .join('\n')
+        .trim();
 }

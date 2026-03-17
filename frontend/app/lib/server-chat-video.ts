@@ -1,98 +1,75 @@
-import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { ChatAttachmentFrame, formatDuration } from './chat-attachments';
+import { AppError } from './auth';
+import { ChatAttachmentFrame, formatDuration, type RemoteVideoDownloadMethod, type RemoteVideoPlatform } from './chat-attachments';
 import { describeImageWithGemini } from './server-gemini-media';
+import { readServerEnv } from './server-env';
 import { transcribeWaveBuffer } from './server-voice-transcription';
 
 const execFileAsync = promisify(execFile);
-
 const TEMP_VIDEO_ROOT = path.join(process.cwd(), 'storage', 'chat-video-temp');
 const PERSISTED_FRAME_ROOT = path.join(process.cwd(), 'public', 'chat-video-frames');
 const TEMP_VIDEO_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_KEYFRAMES = 3;
+const DEFAULT_MAX_REMOTE_VIDEO_SIZE = 20 * 1024 * 1024;
+const DEFAULT_TIKTOK_PLAYWRIGHT_TIMEOUT_MS = 20_000;
+const REMOTE_VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.m4v']);
+const REMOTE_VIDEO_MIME_MAP: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/x-m4v' };
+const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+const DOUYIN_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
+const isTikTokPlaceholderAssetUrl = (remoteUrl: string): boolean => {
+    const normalized = remoteUrl.toLowerCase();
+    return normalized.includes('website-login-static')
+        || normalized.includes('/playback1.mp4')
+        || normalized.includes('webapp-desktop/playback');
+};
 
-interface TempVideoMeta {
-    token: string;
-    fileName: string;
-    mimeType: string;
-    createdAt: string;
-    sourceFileName: string;
-}
+interface TempVideoMeta { token: string; fileName: string; mimeType: string; createdAt: string; sourceFileName: string }
+interface ExtractedFrameFile extends ChatAttachmentFrame { absolutePath: string }
+export interface ProcessedVideoUpload { extractedText: string; transcript: string; durationMs?: number; previewUrl?: string; frames: ChatAttachmentFrame[]; tempVideoToken?: string }
+export interface ProcessUploadedVideoOptions { includeFrameDescriptions?: boolean; includeTranscript?: boolean }
+export interface TempVideoData { buffer: Buffer; fileName: string; mimeType: string; absolutePath: string }
+export interface DownloadedRemoteVideo extends ProcessedVideoUpload { buffer: Buffer; fileName: string; mimeType: string; fileSize: number; remotePlatform: RemoteVideoPlatform; downloadMethod: RemoteVideoDownloadMethod }
+export interface DownloadRemoteVideoOptions extends ProcessUploadedVideoOptions { preprocess?: boolean }
+interface YtDlpInvocation { command: string; prefixArgs: string[] }
+interface RemoteVideoBinary { buffer: Buffer; fileName: string; mimeType: string; remotePlatform: RemoteVideoPlatform; downloadMethod: RemoteVideoDownloadMethod }
+interface RemoteVideoDownloadContext { maxSize: number; normalizedUrl: string; platform: RemoteVideoPlatform }
+type TikTokPlaywrightModule = typeof import('playwright');
+type TikTokBrowser = import('playwright').Browser;
+type TikTokPage = import('playwright').Page;
 
-interface ExtractedFrameFile extends ChatAttachmentFrame {
-    absolutePath: string;
-}
+let cachedYtDlpImpersonateTargetsPromise: Promise<Set<string>> | null = null;
+let cachedPlaywrightModulePromise: Promise<TikTokPlaywrightModule> | null = null;
+let cachedTikTokBrowserPromise: Promise<TikTokBrowser> | null = null;
 
-export interface ProcessedVideoUpload {
-    extractedText: string;
-    transcript: string;
-    durationMs?: number;
-    previewUrl?: string;
-    frames: ChatAttachmentFrame[];
-    tempVideoToken: string;
-}
-
-export interface ProcessUploadedVideoOptions {
-    includeFrameDescriptions?: boolean;
-    includeTranscript?: boolean;
-}
-
-export interface TempVideoData {
-    buffer: Buffer;
-    fileName: string;
-    mimeType: string;
-    absolutePath: string;
-}
-
-export async function storeUploadedVideo(params: {
-    buffer: Buffer;
-    fileName: string;
-    mimeType: string;
-}): Promise<{ tempVideoToken: string }> {
+export async function storeUploadedVideo(params: { buffer: Buffer; fileName: string; mimeType: string }): Promise<{ tempVideoToken: string }> {
     await cleanupStaleTempVideos();
     const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
     return { tempVideoToken: temp.token };
 }
 
-export async function processUploadedVideo(params: {
-    buffer: Buffer;
-    fileName: string;
-    mimeType: string;
-}, options: ProcessUploadedVideoOptions = {}): Promise<ProcessedVideoUpload> {
-    const {
-        includeFrameDescriptions = true,
-        includeTranscript = true,
-    } = options;
-
+export async function processUploadedVideo(params: { buffer: Buffer; fileName: string; mimeType: string }, options: ProcessUploadedVideoOptions = {}): Promise<ProcessedVideoUpload> {
+    const { includeFrameDescriptions = true, includeTranscript = true } = options;
     await cleanupStaleTempVideos();
-
     const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
     let durationMs: number | undefined;
     let frames: ExtractedFrameFile[] = [];
     let transcript = '';
     let frameDescriptions: string[] = [];
-
     try {
         durationMs = await probeVideoDurationMs(temp.absolutePath).catch(() => undefined);
         if (includeFrameDescriptions) {
             frames = await extractKeyframes(temp.absolutePath, durationMs).catch(() => []);
             frameDescriptions = await describeFrames(frames).catch(() => []);
         }
-        if (includeTranscript) {
-            transcript = await extractTranscript(temp.absolutePath).catch(() => '');
-        }
-
+        if (includeTranscript) transcript = await extractTranscript(temp.absolutePath).catch(() => '');
         return {
-            extractedText: buildVideoExtractedText({
-                fileName: params.fileName,
-                durationMs,
-                transcript: includeTranscript ? transcript : '',
-                transcriptAttempted: includeTranscript,
-                frameDescriptions,
-            }),
+            extractedText: buildVideoExtractedText({ fileName: params.fileName, durationMs, transcript: includeTranscript ? transcript : '', transcriptAttempted: includeTranscript, frameDescriptions }),
             transcript: includeTranscript ? transcript : '',
             durationMs,
             previewUrl: frames[0]?.url,
@@ -111,179 +88,154 @@ export async function loadTempVideo(token: string): Promise<TempVideoData> {
     const meta = JSON.parse(await fs.readFile(metaPath, 'utf8')) as TempVideoMeta;
     const absolutePath = path.join(TEMP_VIDEO_ROOT, safeToken, meta.sourceFileName);
     const buffer = await fs.readFile(absolutePath);
-
-    return {
-        buffer,
-        fileName: meta.fileName,
-        mimeType: meta.mimeType,
-        absolutePath,
-    };
+    return { buffer, fileName: meta.fileName, mimeType: meta.mimeType, absolutePath };
 }
 
 export async function deleteTempVideo(token: string): Promise<void> {
-    const safeToken = sanitizeToken(token);
-    await fs.rm(path.join(TEMP_VIDEO_ROOT, safeToken), { recursive: true, force: true }).catch(() => undefined);
+    await fs.rm(path.join(TEMP_VIDEO_ROOT, sanitizeToken(token)), { recursive: true, force: true }).catch(() => undefined);
 }
 
 export async function cleanupStaleTempVideos(ttlMs = TEMP_VIDEO_TTL_MS): Promise<void> {
     const now = Date.now();
     await fs.mkdir(TEMP_VIDEO_ROOT, { recursive: true });
-
     const entries = await fs.readdir(TEMP_VIDEO_ROOT, { withFileTypes: true }).catch(() => []);
     await Promise.all(entries.map(async (entry) => {
-        if (!entry.isDirectory()) {
-            return;
-        }
-
+        if (!entry.isDirectory()) return;
         const absolute = path.join(TEMP_VIDEO_ROOT, entry.name);
         try {
             const stat = await fs.stat(absolute);
-            if (now - stat.mtimeMs > ttlMs) {
-                await fs.rm(absolute, { recursive: true, force: true });
-            }
-        } catch {
-            // Ignore cleanup errors.
-        }
+            if (now - stat.mtimeMs > ttlMs) await fs.rm(absolute, { recursive: true, force: true });
+        } catch {}
     }));
 }
 
-async function createTempVideo(buffer: Buffer, fileName: string, mimeType: string): Promise<{
-    token: string;
-    absolutePath: string;
-}> {
+export async function downloadRemoteVideo(remoteUrl: string, options: DownloadRemoteVideoOptions = {}): Promise<DownloadedRemoteVideo> {
+    const {
+        preprocess = true,
+        includeFrameDescriptions = true,
+        includeTranscript = true,
+    } = options;
+    const maxSize = Number.parseInt(readServerEnv('MAX_FILE_SIZE') || '', 10) || DEFAULT_MAX_REMOTE_VIDEO_SIZE;
+    const normalizedUrl = normalizeRemoteVideoUrl(remoteUrl);
+    await assertSafeRemoteVideoUrl(normalizedUrl);
+    const context: RemoteVideoDownloadContext = { maxSize, normalizedUrl, platform: detectRemoteVideoPlatform(normalizedUrl) };
+    console.info('[RemoteVideo] start', { platform: context.platform, url: summarizeRemoteVideoUrl(normalizedUrl) });
+    let directError: unknown;
+    let providerError: unknown;
+    let downloaded: RemoteVideoBinary | null = null;
+    try {
+        downloaded = await downloadDirectRemoteVideo(context);
+        console.info('[RemoteVideo] direct success', { platform: downloaded.remotePlatform, method: downloaded.downloadMethod, bytes: downloaded.buffer.length });
+    } catch (error) {
+        directError = error;
+        console.warn('[RemoteVideo] direct failed', { platform: context.platform, reason: formatRemoteVideoError(error) });
+    }
+    if (!downloaded) {
+        try {
+            downloaded = await downloadRemoteVideoViaProvider(context);
+            if (downloaded) console.info('[RemoteVideo] provider success', { platform: downloaded.remotePlatform, method: downloaded.downloadMethod, bytes: downloaded.buffer.length });
+        } catch (error) {
+            providerError = error;
+            console.warn('[RemoteVideo] provider failed', { platform: context.platform, reason: formatRemoteVideoError(error) });
+        }
+    }
+    if (!downloaded) {
+        try {
+            downloaded = await downloadRemoteVideoWithYtDlp(context);
+            console.info('[RemoteVideo] yt-dlp success', { platform: downloaded.remotePlatform, method: downloaded.downloadMethod, bytes: downloaded.buffer.length });
+        } catch (fallbackError) {
+            if (fallbackError instanceof AppError) throw fallbackError;
+            throw new AppError(
+                `Could not fetch a video from this link. Direct download failed: ${formatRemoteVideoError(directError) || 'unknown error'}.`
+                + ` Provider download failed: ${formatRemoteVideoError(providerError) || 'not attempted'}.`
+                + ` yt-dlp fallback failed: ${formatRemoteVideoError(fallbackError) || 'unknown error'}.`,
+                400,
+            );
+        }
+    }
+    if (!downloaded) throw new AppError('Could not fetch a video from this link.', 400);
+    if (!preprocess) {
+        return {
+            extractedText: '',
+            transcript: '',
+            durationMs: undefined,
+            previewUrl: undefined,
+            frames: [],
+            tempVideoToken: undefined,
+            buffer: downloaded.buffer,
+            fileName: downloaded.fileName,
+            mimeType: downloaded.mimeType,
+            fileSize: downloaded.buffer.length,
+            remotePlatform: downloaded.remotePlatform,
+            downloadMethod: downloaded.downloadMethod,
+        };
+    }
+    const processed = await processUploadedVideo(
+        { buffer: downloaded.buffer, fileName: downloaded.fileName, mimeType: downloaded.mimeType },
+        { includeFrameDescriptions, includeTranscript },
+    );
+    await deleteTempVideo(processed.tempVideoToken as string);
+    return { ...processed, buffer: downloaded.buffer, fileName: downloaded.fileName, mimeType: downloaded.mimeType, fileSize: downloaded.buffer.length, remotePlatform: downloaded.remotePlatform, downloadMethod: downloaded.downloadMethod };
+}
+
+async function createTempVideo(buffer: Buffer, fileName: string, mimeType: string): Promise<{ token: string; absolutePath: string }> {
     const token = `${Date.now()}-${randomUUID()}`;
     const extension = path.extname(fileName) || '.mp4';
     const directory = path.join(TEMP_VIDEO_ROOT, token);
     const sourceFileName = `source${extension.toLowerCase()}`;
     const absolutePath = path.join(directory, sourceFileName);
-
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(absolutePath, buffer);
-
-    const meta: TempVideoMeta = {
-        token,
-        fileName,
-        mimeType,
-        createdAt: new Date().toISOString(),
-        sourceFileName,
-    };
+    const meta: TempVideoMeta = { token, fileName, mimeType, createdAt: new Date().toISOString(), sourceFileName };
     await fs.writeFile(path.join(directory, 'meta.json'), JSON.stringify(meta), 'utf8');
-
     return { token, absolutePath };
 }
 
 async function probeVideoDurationMs(absolutePath: string): Promise<number> {
-    const { stdout } = await execFileAsync('ffprobe', [
-        '-v',
-        'error',
-        '-show_entries',
-        'format=duration',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
-        absolutePath,
-    ]);
-
+    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', absolutePath]);
     const seconds = Number.parseFloat(stdout.trim());
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-        throw new Error('Unable to determine video duration.');
-    }
-
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Unable to determine video duration.');
     return Math.round(seconds * 1000);
 }
 
 async function extractKeyframes(absolutePath: string, durationMs?: number): Promise<ExtractedFrameFile[]> {
     await fs.mkdir(PERSISTED_FRAME_ROOT, { recursive: true });
-
     const timestamps = buildFrameTimestamps(durationMs);
     const token = `${Date.now()}-${randomUUID()}`;
     const results: ExtractedFrameFile[] = [];
-
     for (let index = 0; index < timestamps.length; index += 1) {
         const timestampMs = timestamps[index];
         const fileName = `${token}-${index + 1}.jpg`;
         const absoluteFramePath = path.join(PERSISTED_FRAME_ROOT, fileName);
-
         try {
-            await execFileAsync('ffmpeg', [
-                '-y',
-                '-ss',
-                String(Math.max(0, timestampMs / 1000)),
-                '-i',
-                absolutePath,
-                '-frames:v',
-                '1',
-                '-vf',
-                "scale='min(768,iw)':-2",
-                '-q:v',
-                '4',
-                absoluteFramePath,
-            ]);
-
-            results.push({
-                url: `/chat-video-frames/${fileName}`,
-                timestampMs,
-                absolutePath: absoluteFramePath,
-            });
-        } catch {
-            // Skip frames that cannot be extracted.
-        }
+            await execFileAsync('ffmpeg', ['-y', '-ss', String(Math.max(0, timestampMs / 1000)), '-i', absolutePath, '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', absoluteFramePath]);
+            results.push({ url: `/chat-video-frames/${fileName}`, timestampMs, absolutePath: absoluteFramePath });
+        } catch {}
     }
-
     return results;
 }
 
 function buildFrameTimestamps(durationMs?: number): number[] {
-    if (!durationMs || durationMs <= 0) {
-        return [0, 1500, 3000];
-    }
-
-    const totalSeconds = durationMs / 1000;
-    if (totalSeconds <= 6) {
-        return [0, durationMs / 2, Math.max(durationMs - 500, 0)].map((value) => Math.round(value));
-    }
-
-    const points = [0.15, 0.5, 0.85];
-    return points
-        .slice(0, MAX_KEYFRAMES)
-        .map((point) => Math.round(durationMs * point))
-        .filter((value, index, list) => list.indexOf(value) === index);
+    if (!durationMs || durationMs <= 0) return [0, 1500, 3000];
+    if (durationMs / 1000 <= 6) return [0, durationMs / 2, Math.max(durationMs - 500, 0)].map((value) => Math.round(value));
+    return [0.15, 0.5, 0.85].slice(0, MAX_KEYFRAMES).map((point) => Math.round(durationMs * point)).filter((value, index, list) => list.indexOf(value) === index);
 }
 
 async function describeFrames(frames: ExtractedFrameFile[]): Promise<string[]> {
     const descriptions: string[] = [];
-
     for (const frame of frames) {
         const buffer = await fs.readFile(frame.absolutePath);
         const base64 = buffer.toString('base64');
-        const description = await describeImageWithGemini(
-            base64,
-            'image/jpeg',
-            `请描述这个视频关键帧的主要画面和可见文字。当前帧时间点：${formatDuration(frame.timestampMs)}。`,
-        );
-        descriptions.push(`${formatDuration(frame.timestampMs)}：${description.trim()}`);
+        const description = await describeImageWithGemini(base64, 'image/jpeg', `Describe the main visuals and any readable text in this key video frame. Frame timestamp: ${formatDuration(frame.timestampMs)}.`);
+        descriptions.push(`${formatDuration(frame.timestampMs)}: ${description.trim()}`);
     }
-
     return descriptions;
 }
 
 async function extractTranscript(absolutePath: string): Promise<string> {
     const tempAudioPath = path.join(TEMP_VIDEO_ROOT, `${Date.now()}-${randomUUID()}.wav`);
-
     try {
-        await execFileAsync('ffmpeg', [
-            '-y',
-            '-i',
-            absolutePath,
-            '-vn',
-            '-acodec',
-            'pcm_s16le',
-            '-ar',
-            '16000',
-            '-ac',
-            '1',
-            tempAudioPath,
-        ]);
-
+        await execFileAsync('ffmpeg', ['-y', '-i', absolutePath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', tempAudioPath]);
         const audioBuffer = await fs.readFile(tempAudioPath);
         const { text } = await transcribeWaveBuffer(audioBuffer, path.basename(tempAudioPath));
         return text.trim();
@@ -292,38 +244,479 @@ async function extractTranscript(absolutePath: string): Promise<string> {
     }
 }
 
-function buildVideoExtractedText(params: {
-    fileName: string;
-    durationMs?: number;
-    transcript: string;
-    transcriptAttempted: boolean;
-    frameDescriptions: string[];
-}): string {
-    const sections = [`视频文件：${params.fileName}`];
-
-    if (typeof params.durationMs === 'number' && params.durationMs > 0) {
-        sections.push(`视频时长：${formatDuration(params.durationMs)}`);
-    }
-
-    if (params.transcriptAttempted) {
-        if (params.transcript.trim()) {
-            sections.push(`语音转写：\n${params.transcript.trim()}`);
-        } else {
-            sections.push('语音转写：未提取到可用语音，或视频无明显对白。');
-        }
-    }
-
-    if (params.frameDescriptions.length > 0) {
-        sections.push(`关键帧观察：\n${params.frameDescriptions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`);
-    }
-
+function buildVideoExtractedText(params: { fileName: string; durationMs?: number; transcript: string; transcriptAttempted: boolean; frameDescriptions: string[] }): string {
+    const sections = [`Video file: ${params.fileName}`];
+    if (typeof params.durationMs === 'number' && params.durationMs > 0) sections.push(`Video duration: ${formatDuration(params.durationMs)}`);
+    if (params.transcriptAttempted) sections.push(params.transcript.trim() ? `Transcript:\n${params.transcript.trim()}` : 'Transcript: no usable speech was detected, or the video has no clear dialogue.');
+    if (params.frameDescriptions.length > 0) sections.push(`Key video frames:\n${params.frameDescriptions.map((item, index) => `${index + 1}. ${item}`).join('\n')}`);
     return sections.join('\n\n');
 }
 
 function sanitizeToken(token: string): string {
-    if (!/^[a-zA-Z0-9-]+$/.test(token)) {
-        throw new Error('Invalid temp video token.');
-    }
-
+    if (!/^[a-zA-Z0-9-]+$/.test(token)) throw new Error('Invalid temp video token.');
     return token;
+}
+
+function isPrivateIpv4Address(value: string): boolean {
+    const parts = value.split('.').map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) return false;
+    return parts[0] === 10 || parts[0] === 127 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31);
+}
+
+function isPrivateIpv6Address(value: string): boolean {
+    const normalized = value.toLowerCase();
+    return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:');
+}
+
+function isInternalNetworkHost(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === 'localhost' || normalized.endsWith('.internal') || normalized.endsWith('.local')) return true;
+    const ipVersion = net.isIP(normalized);
+    return ipVersion === 4 ? isPrivateIpv4Address(normalized) : ipVersion === 6 ? isPrivateIpv6Address(normalized) : false;
+}
+
+async function assertSafeRemoteVideoUrl(remoteUrl: string): Promise<void> {
+    const url = new URL(remoteUrl);
+    if (isInternalNetworkHost(url.hostname)) throw new AppError('Localhost, internal network, and local video URLs are not allowed.', 400);
+    const resolvedHosts = await lookup(url.hostname, { all: true, verbatim: true }).catch(() => []);
+    if (resolvedHosts.some((record) => isInternalNetworkHost(record.address))) throw new AppError('Remote video URLs that resolve to internal networks are not allowed.', 400);
+}
+
+function normalizeRemoteVideoUrl(input: string): string {
+    const extractedUrl = extractFirstUrlCandidate(input);
+    let url: URL;
+    try { url = new URL(extractedUrl); } catch { throw new AppError('Video URL is invalid.', 400); }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new AppError('Only http or https video URLs are supported.', 400);
+    return url.toString();
+}
+
+function extractFirstUrlCandidate(input: string): string {
+    const trimmed = input.trim();
+    const match = trimmed.match(/https?:\/\/[^\s<>"']+/i);
+    return match ? match[0].replace(/[)\]}>,.;!?]+$/u, '') : trimmed;
+}
+
+function detectRemoteVideoPlatform(remoteUrl: string): RemoteVideoPlatform {
+    const hostname = new URL(remoteUrl).hostname.toLowerCase();
+    if (hostname === 'youtu.be' || hostname === 'youtube.com' || hostname.endsWith('.youtube.com')) return 'youtube';
+    if (hostname === 'douyin.com' || hostname.endsWith('.douyin.com') || hostname === 'iesdouyin.com' || hostname.endsWith('.iesdouyin.com')) return 'douyin';
+    if (hostname === 'tiktok.com' || hostname.endsWith('.tiktok.com')) return 'tiktok';
+    return 'generic';
+}
+
+function summarizeRemoteVideoUrl(remoteUrl: string): string {
+    const url = new URL(remoteUrl);
+    const summary = `${url.origin}${url.pathname}`;
+    return summary.length > 160 ? `${summary.slice(0, 157)}...` : summary;
+}
+
+function formatRemoteVideoError(error: unknown): string {
+    if (error instanceof AppError || error instanceof Error) return error.message;
+    return typeof error === 'string' ? error : error ? String(error) : '';
+}
+
+async function downloadRemoteVideoViaProvider(context: RemoteVideoDownloadContext): Promise<RemoteVideoBinary | null> {
+    if (context.platform === 'douyin') return downloadDouyinRemoteVideo(context);
+    if (context.platform === 'tiktok' && isTikTokPlaywrightEnabled()) return downloadTikTokRemoteVideoWithPlaywright(context);
+    return null;
+}
+
+async function downloadDirectRemoteVideo(context: RemoteVideoDownloadContext): Promise<RemoteVideoBinary> {
+    return downloadRemoteBinaryFromUrl({ url: context.normalizedUrl, maxSize: context.maxSize, fileName: inferRemoteVideoFileName(context.normalizedUrl), remotePlatform: context.platform, downloadMethod: 'direct', requireVideoContent: true, headers: { 'User-Agent': 'Mozilla/5.0 CodexVideoFetcher/1.0' } });
+}
+
+async function downloadDouyinRemoteVideo(context: RemoteVideoDownloadContext): Promise<RemoteVideoBinary> {
+    const initialPage = await fetchRemoteVideoText(context.normalizedUrl, { referer: 'https://www.douyin.com/', userAgent: DOUYIN_MOBILE_UA });
+    const resolvedPageUrl = initialPage.response.url || context.normalizedUrl;
+    await assertSafeRemoteVideoUrl(resolvedPageUrl);
+    const videoId = extractDouyinVideoId(resolvedPageUrl) || extractDouyinVideoId(context.normalizedUrl) || extractDouyinVideoId(initialPage.text);
+    const candidateUrls = new Set<string>(extractDouyinVideoUrls(initialPage.text));
+    if (videoId) for (const url of await fetchDouyinApiVideoUrls(videoId)) candidateUrls.add(url);
+    for (const extraPage of await Promise.all([
+        fetchRemoteVideoText(resolvedPageUrl, { referer: 'https://www.douyin.com/', userAgent: DESKTOP_UA }).catch(() => null),
+        fetchRemoteVideoText(resolvedPageUrl, { referer: 'https://www.douyin.com/', userAgent: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' }).catch(() => null),
+    ])) {
+        if (!extraPage) continue;
+        for (const url of extractDouyinVideoUrls(extraPage.text)) candidateUrls.add(url);
+    }
+    for (const candidateUrl of candidateUrls) {
+        try {
+            return await downloadRemoteBinaryFromUrl({ url: candidateUrl, maxSize: context.maxSize, remotePlatform: 'douyin', downloadMethod: 'douyin-parser', fileName: videoId ? `${videoId}.mp4` : inferRemoteVideoFileName(candidateUrl), requireVideoContent: true, headers: { Referer: 'https://www.douyin.com/', 'User-Agent': DOUYIN_MOBILE_UA } });
+        } catch (error) {
+            console.warn('[RemoteVideo] douyin candidate failed', { candidate: summarizeRemoteVideoUrl(candidateUrl), reason: formatRemoteVideoError(error) });
+        }
+    }
+    throw new AppError('Could not resolve a playable Douyin video URL from this page.', 400);
+}
+
+async function fetchDouyinApiVideoUrls(videoId: string): Promise<string[]> {
+    const apiUrl = new URL('https://www.iesdouyin.com/web/api/v2/aweme/iteminfo/');
+    apiUrl.searchParams.set('item_ids', videoId);
+    const response = await fetch(apiUrl, { headers: { Referer: 'https://www.douyin.com/', 'User-Agent': DESKTOP_UA }, redirect: 'follow' });
+    if (!response.ok) return [];
+    const payload = await response.json().catch(() => null) as { item_list?: Array<{ video?: { play_addr?: { url_list?: string[] }; download_addr?: { url_list?: string[] } } }>; aweme_details?: Array<{ video?: { play_addr?: { url_list?: string[] }; download_addr?: { url_list?: string[] } } }> } | null;
+    if (!payload) return [];
+    const video = (payload.item_list || payload.aweme_details || [])[0]?.video;
+    return dedupeStrings([...(video?.play_addr?.url_list || []), ...(video?.download_addr?.url_list || [])].map((item) => normalizePossibleEscapedUrl(item)).filter(Boolean) as string[]);
+}
+
+async function downloadTikTokRemoteVideoWithPlaywright(context: RemoteVideoDownloadContext): Promise<RemoteVideoBinary> {
+    const browser = await getTikTokPlaywrightBrowser();
+    const browserContext = await browser.newContext({ locale: 'en-US', viewport: { width: 1440, height: 900 }, userAgent: DESKTOP_UA });
+    try {
+        await browserContext.route('**/*', async (route) => {
+            const type = route.request().resourceType();
+            if (type === 'image' || type === 'font' || type === 'stylesheet') { await route.abort(); return; }
+            await route.continue();
+        });
+        const page = await browserContext.newPage();
+        const candidateUrls = new Set<string>();
+        page.on('response', (response) => {
+            const responseUrl = response.url();
+            const contentType = response.headers()['content-type'] || '';
+            if (contentType.startsWith('video/') || /\.mp4(?:$|\?)/i.test(responseUrl) || /video\/tos/i.test(responseUrl)) candidateUrls.add(responseUrl);
+        });
+        const timeoutMs = readIntServerEnv('TIKTOK_PLAYWRIGHT_TIMEOUT_MS', DEFAULT_TIKTOK_PLAYWRIGHT_TIMEOUT_MS);
+        await page.goto(context.normalizedUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        await page.waitForTimeout(1500);
+        for (const url of await extractTikTokVideoUrlsFromPage(page)) candidateUrls.add(url);
+        if (candidateUrls.size === 0) {
+            const playButton = page.locator('button[aria-label*="Play"], button[data-e2e*="play"]').first();
+            if (await playButton.isVisible().catch(() => false)) { await playButton.click({ timeout: 2000 }).catch(() => undefined); await page.waitForTimeout(1200); }
+        }
+        const ordered = dedupeStrings([...candidateUrls, ...(await extractTikTokVideoUrlsFromPage(page))])
+            .sort((left, right) => scoreTikTokVideoCandidate(right) - scoreTikTokVideoCandidate(left));
+        if (ordered.length === 0) throw new AppError('Playwright could not locate a downloadable TikTok video URL from the page.', 400);
+        let bestCandidate: RemoteVideoBinary | null = null;
+        let bestScore = Number.NEGATIVE_INFINITY;
+        for (const candidateUrl of ordered) {
+            try {
+                if (isTikTokPlaceholderAssetUrl(candidateUrl)) continue;
+                const response = await page.request.get(candidateUrl, { headers: { Referer: context.normalizedUrl, 'User-Agent': DESKTOP_UA }, failOnStatusCode: false, timeout: timeoutMs });
+                if (!response.ok()) continue;
+                const resolvedUrl = response.url() || candidateUrl;
+                await assertSafeRemoteVideoUrl(resolvedUrl);
+                if (isTikTokPlaceholderAssetUrl(resolvedUrl)) continue;
+                const contentType = response.headers()['content-type'] || '';
+                const extension = path.extname(new URL(resolvedUrl).pathname).toLowerCase();
+                if (!(contentType.startsWith('video/') || REMOTE_VIDEO_EXTENSIONS.has(extension))) continue;
+                const buffer = Buffer.from(await response.body());
+                if (isLikelySubtitlePayload(buffer)) continue;
+                if (buffer.length > context.maxSize) throw new AppError(`Video size exceeds ${Math.round(context.maxSize / (1024 * 1024))}MB. Please use a shorter video link.`, 400);
+                const candidateScore = scoreTikTokVideoCandidate(resolvedUrl) + Math.min(buffer.length / 250_000, 60);
+                if (candidateScore > bestScore) {
+                    bestScore = candidateScore;
+                    bestCandidate = { buffer, fileName: inferRemoteVideoFileName(resolvedUrl), mimeType: contentType.split(';')[0].trim() || REMOTE_VIDEO_MIME_MAP[extension] || 'video/mp4', remotePlatform: 'tiktok', downloadMethod: 'tiktok-playwright' };
+                }
+            } catch (error) {
+                console.warn('[RemoteVideo] tiktok candidate failed', { candidate: summarizeRemoteVideoUrl(candidateUrl), reason: formatRemoteVideoError(error) });
+            }
+        }
+        if (bestCandidate) return bestCandidate;
+        throw new AppError('TikTok only exposed placeholder assets or subtitle files to the current server environment, not the real video stream.', 400);
+    } finally {
+        await browserContext.close().catch(() => undefined);
+    }
+}
+
+async function extractTikTokVideoUrlsFromPage(page: TikTokPage): Promise<string[]> {
+    return page.evaluate(() => {
+        const candidates = new Set<string>();
+        const normalize = (value: string): string | null => {
+            const trimmed = value.trim();
+            if (!trimmed || trimmed.startsWith('blob:')) return null;
+            return trimmed.replace(/\\u002F/gi, '/').replace(/\\u0026/gi, '&').replace(/\\\//g, '/');
+        };
+        for (const element of Array.from(document.querySelectorAll('video, source'))) {
+            const src = element.getAttribute('src');
+            const normalized = src ? normalize(src) : null;
+            if (normalized) candidates.add(normalized);
+        }
+        const html = document.documentElement.innerHTML;
+        for (const regex of [/"playAddr":"([^"]+)"/g, /"downloadAddr":"([^"]+)"/g, /"src":"([^"]+)"/g, /"url":"(https?:[^"]+)"/g]) {
+            for (const match of html.matchAll(regex)) {
+                const normalized = normalize(match[1]);
+                if (normalized) candidates.add(normalized);
+            }
+        }
+        return [...candidates];
+    });
+}
+
+async function loadPlaywrightModule(): Promise<TikTokPlaywrightModule> {
+    if (!cachedPlaywrightModulePromise) cachedPlaywrightModulePromise = import('playwright');
+    return cachedPlaywrightModulePromise;
+}
+
+async function getTikTokPlaywrightBrowser(): Promise<TikTokBrowser> {
+    if (!cachedTikTokBrowserPromise) {
+        cachedTikTokBrowserPromise = (async () => {
+            const playwright = await loadPlaywrightModule();
+            return playwright.chromium.launch({ headless: true, args: ['--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'] });
+        })().catch((error) => { cachedTikTokBrowserPromise = null; throw error; });
+    }
+    return cachedTikTokBrowserPromise;
+}
+
+function isTikTokPlaywrightEnabled(): boolean {
+    const value = readTrimmedServerEnv('TIKTOK_PLAYWRIGHT_ENABLED');
+    return value ? ['1', 'true', 'yes', 'on'].includes(value.toLowerCase()) : true;
+}
+
+function readIntServerEnv(key: string, fallbackValue: number): number {
+    const raw = readTrimmedServerEnv(key);
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
+}
+
+async function fetchRemoteVideoText(remoteUrl: string, options: { userAgent: string; referer?: string }): Promise<{ response: Response; text: string }> {
+    const response = await fetch(remoteUrl, { headers: { 'User-Agent': options.userAgent, ...(options.referer ? { Referer: options.referer } : {}) }, redirect: 'follow' });
+    if (!response.ok) throw new AppError(`Failed to fetch remote page: ${response.status} ${response.statusText}`, 400);
+    const resolvedUrl = response.url || remoteUrl;
+    await assertSafeRemoteVideoUrl(resolvedUrl);
+    return { response, text: await response.text() };
+}
+
+function extractDouyinVideoId(value: string): string | null {
+    for (const pattern of [/\/video\/(\d{8,})/i, /modal_id=(\d{8,})/i, /item_ids=(\d{8,})/i, /"aweme_id":"(\d{8,})"/i, /"itemId":"(\d{8,})"/i]) {
+        const match = value.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+function extractDouyinVideoUrls(html: string): string[] {
+    const candidates = new Set<string>();
+    for (const match of html.matchAll(/<script[^>]*id="RENDER_DATA"[^>]*>([\s\S]*?)<\/script>/gi)) for (const url of searchDouyinVideoUrls(match[1])) candidates.add(url);
+    for (const url of searchDouyinVideoUrls(html)) candidates.add(url);
+    return dedupeStrings([...candidates]);
+}
+
+function searchDouyinVideoUrls(value: string): string[] {
+    const candidates = new Set<string>();
+    const normalizedInputs = dedupeStrings([value, decodeURIComponentSafe(value), decodeHtmlEntities(value)]);
+    const patterns = [/"playAddr":"([^"]+)"/g, /"downloadAddr":"([^"]+)"/g, /"playApi":"([^"]+)"/g, /"src":"(https?:[^"]+)"/g, /https?:\\\/\\\/[^"'\\<>\s]+/g, /https?:\/\/[^"'<>\\s]+/g];
+    for (const input of normalizedInputs) {
+        for (const pattern of patterns) {
+            for (const match of input.matchAll(pattern)) {
+                const normalized = normalizePossibleEscapedUrl(match[1] || match[0]);
+                if (!normalized || !/^https?:\/\//i.test(normalized) || !/douyin|byte|bytedance|toutiao|tos-cn/i.test(normalized)) continue;
+                candidates.add(normalizeDouyinVideoUrl(normalized));
+            }
+        }
+    }
+    return [...candidates];
+}
+
+function normalizePossibleEscapedUrl(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const decoded = decodeHtmlEntities(decodeURIComponentSafe(trimmed)).replace(/\\u002F/gi, '/').replace(/\\u0026/gi, '&').replace(/\\\//g, '/').replace(/&amp;/gi, '&');
+    return decoded.startsWith('//') ? `https:${decoded}` : decoded;
+}
+
+function normalizeDouyinVideoUrl(remoteUrl: string): string {
+    const url = new URL(remoteUrl);
+    if (url.pathname.includes('/playwm/')) url.pathname = url.pathname.replace('/playwm/', '/play/');
+    url.searchParams.delete('watermark');
+    return url.toString();
+}
+
+function decodeURIComponentSafe(value: string): string {
+    try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function decodeHtmlEntities(value: string): string {
+    return value.replace(/&quot;/g, '"').replace(/&#34;/g, '"').replace(/&#x2F;/gi, '/').replace(/&#47;/g, '/').replace(/&amp;/g, '&');
+}
+
+function dedupeStrings(values: string[]): string[] {
+    return [...new Set(values.filter(Boolean))];
+}
+
+function scoreTikTokVideoCandidate(remoteUrl: string): number {
+    const normalized = remoteUrl.toLowerCase();
+    let score = 0;
+    if (/video\/tos|aweme\/v\d+\/play|playaddr|downloadaddr/.test(normalized)) score += 80;
+    if (/play|video/.test(normalized)) score += 15;
+    if (/playback1|website-login-static|webapp-desktop/.test(normalized)) score -= 300;
+    if (/logo|loading|splash|placeholder|cover|poster|avatar|icon|thumb|thumbnail/.test(normalized)) score -= 120;
+    if (/\.mp4(?:$|\?)/.test(normalized)) score += 5;
+    return score;
+}
+
+function isLikelySubtitlePayload(buffer: Buffer): boolean {
+    const head = buffer.subarray(0, 64).toString('utf8').trimStart();
+    return head.startsWith('WEBVTT');
+}
+
+async function downloadRemoteBinaryFromUrl(params: { url: string; maxSize: number; remotePlatform: RemoteVideoPlatform; downloadMethod: RemoteVideoDownloadMethod; fileName?: string; mimeType?: string; requireVideoContent: boolean; headers?: Record<string, string> }): Promise<RemoteVideoBinary> {
+    const response = await fetch(params.url, { headers: params.headers, redirect: 'follow' });
+    if (!response.ok) throw new AppError(`Failed to download remote video: ${response.status} ${response.statusText}`, 400);
+    const resolvedUrl = response.url || params.url;
+    await assertSafeRemoteVideoUrl(resolvedUrl);
+    const contentType = response.headers.get('content-type') || '';
+    const extension = path.extname(new URL(resolvedUrl).pathname).toLowerCase();
+    if (params.requireVideoContent && !(contentType.startsWith('video/') || REMOTE_VIDEO_EXTENSIONS.has(extension))) throw new Error('Resolved remote URL did not expose a direct video file.');
+    const contentLength = Number.parseInt(response.headers.get('content-length') || '', 10);
+    if (Number.isFinite(contentLength) && contentLength > params.maxSize) throw new AppError(`Video size exceeds ${Math.round(params.maxSize / (1024 * 1024))}MB. Please use a shorter video link.`, 400);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > params.maxSize) throw new AppError(`Video size exceeds ${Math.round(params.maxSize / (1024 * 1024))}MB. Please use a shorter video link.`, 400);
+    return { buffer, fileName: params.fileName || inferRemoteVideoFileName(resolvedUrl), mimeType: params.mimeType || contentType.split(';')[0].trim() || REMOTE_VIDEO_MIME_MAP[extension] || 'video/mp4', remotePlatform: params.remotePlatform, downloadMethod: params.downloadMethod };
+}
+
+async function downloadRemoteVideoWithYtDlp(context: RemoteVideoDownloadContext): Promise<RemoteVideoBinary> {
+    const invocation = await findYtDlpCommand();
+    if (!invocation) throw new AppError('The current environment cannot resolve this kind of video page link. Please use a direct mp4/webm URL or upload a local video.', 400);
+    const directory = path.join(TEMP_VIDEO_ROOT, `remote-${Date.now()}-${randomUUID()}`);
+    const outputTemplate = path.join(directory, 'source.%(ext)s');
+    await fs.mkdir(directory, { recursive: true });
+    try {
+        try {
+            const ytDlpArgs = await buildYtDlpDownloadArgs(invocation, context, outputTemplate, directory);
+            await execFileAsync(invocation.command, [...invocation.prefixArgs, ...ytDlpArgs]);
+        } catch (error) {
+            const stderr = typeof (error as { stderr?: unknown })?.stderr === 'string' ? (error as { stderr: string }).stderr.trim() : '';
+            const stdout = typeof (error as { stdout?: unknown })?.stdout === 'string' ? (error as { stdout: string }).stdout.trim() : '';
+            const detail = stderr || stdout || (error instanceof Error ? error.message : String(error || ''));
+            throw new AppError(buildYtDlpFailureMessage(context, detail), 400);
+        }
+        const entries = await fs.readdir(directory);
+        const fileName = entries.find((entry) => REMOTE_VIDEO_EXTENSIONS.has(path.extname(entry).toLowerCase()));
+        if (!fileName) {
+            if (entries.find((entry) => /\.(mp3|m4a|aac|wav|ogg|opus)$/i.test(entry))) throw new AppError('This link only exposed audio and no downloadable video track. TikTok-style pages may require browser cookies, browser automation, or a different server IP.', 400);
+            throw new AppError('Could not download a usable video from this link. Try another URL.', 400);
+        }
+        const buffer = await fs.readFile(path.join(directory, fileName));
+        if (buffer.length > context.maxSize) throw new AppError(`Video size exceeds ${Math.round(context.maxSize / (1024 * 1024))}MB. Please use a shorter video link.`, 400);
+        return { buffer, fileName, mimeType: REMOTE_VIDEO_MIME_MAP[path.extname(fileName).toLowerCase()] || 'video/mp4', remotePlatform: context.platform, downloadMethod: 'yt-dlp' };
+    } finally {
+        await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
+}
+
+async function findYtDlpCommand(): Promise<YtDlpInvocation | null> {
+    for (const candidate of [{ command: 'yt-dlp', prefixArgs: [] }, { command: 'yt-dlp.exe', prefixArgs: [] }, { command: 'python', prefixArgs: ['-m', 'yt_dlp'] }, { command: 'python3', prefixArgs: ['-m', 'yt_dlp'] }, { command: 'py', prefixArgs: ['-m', 'yt_dlp'] }] satisfies YtDlpInvocation[]) {
+        try { await execFileAsync(candidate.command, [...candidate.prefixArgs, '--version']); return candidate; } catch {}
+    }
+    return null;
+}
+
+async function buildYtDlpDownloadArgs(invocation: YtDlpInvocation, context: RemoteVideoDownloadContext, outputTemplate: string, scratchDirectory: string): Promise<string[]> {
+    const args = ['--no-update', '--no-playlist', '--merge-output-format', 'mp4', '-f', 'bv*+ba/bestvideo*+bestaudio/best'];
+    args.push(...(await buildYtDlpCookiesArgs(scratchDirectory)));
+    const proxy = readTrimmedServerEnv('YT_DLP_PROXY');
+    if (proxy) args.push('--proxy', proxy);
+    if (readBooleanServerEnv('YT_DLP_FORCE_IPV4')) args.push('--force-ipv4');
+    if (context.platform === 'youtube') {
+        args.push('--js-runtimes', 'node');
+        args.push('--remote-components', 'ejs:github');
+        args.push('--extractor-args', readTrimmedServerEnv('YT_DLP_YOUTUBE_EXTRACTOR_ARGS') || 'youtube:player_client=tv,android,mweb;formats=incomplete');
+    }
+    const extractorArgs = readTrimmedServerEnv('YT_DLP_EXTRACTOR_ARGS');
+    if (extractorArgs) args.push('--extractor-args', extractorArgs);
+    const impersonateTarget = await resolveYtDlpImpersonateTarget(invocation, context.normalizedUrl);
+    if (impersonateTarget) args.push('--impersonate', impersonateTarget);
+    for (const header of buildYtDlpHeaders(context.normalizedUrl)) args.push('--add-headers', header);
+    args.push('-o', outputTemplate, context.normalizedUrl);
+    return args;
+}
+
+async function buildYtDlpCookiesArgs(scratchDirectory: string): Promise<string[]> {
+    const cookiesFile = readTrimmedServerEnv('YT_DLP_COOKIES_FILE');
+    if (cookiesFile) return ['--cookies', cookiesFile];
+    const cookiesBase64 = readTrimmedServerEnv('YT_DLP_COOKIES_BASE64');
+    if (cookiesBase64) {
+        const decoded = Buffer.from(cookiesBase64, 'base64').toString('utf8').trim();
+        if (!decoded) throw new AppError('YT_DLP_COOKIES_BASE64 is configured but empty after decoding.', 500);
+        const generatedCookiesPath = path.join(scratchDirectory, 'cookies.txt');
+        await fs.writeFile(generatedCookiesPath, decoded, 'utf8');
+        return ['--cookies', generatedCookiesPath];
+    }
+    const cookiesFromBrowser = readTrimmedServerEnv('YT_DLP_COOKIES_FROM_BROWSER');
+    return cookiesFromBrowser ? ['--cookies-from-browser', cookiesFromBrowser] : [];
+}
+
+function buildYtDlpHeaders(remoteUrl: string): string[] {
+    const headers = new Set<string>();
+    const referer = readTrimmedServerEnv('YT_DLP_REFERER') || inferRemoteVideoReferer(remoteUrl);
+    if (referer) headers.add(`Referer: ${referer}`);
+    const userAgent = readTrimmedServerEnv('YT_DLP_USER_AGENT');
+    if (userAgent) headers.add(`User-Agent: ${userAgent}`);
+    for (const header of parseYtDlpExtraHeaders(readServerEnv('YT_DLP_EXTRA_HEADERS'))) headers.add(header);
+    return [...headers];
+}
+
+function parseYtDlpExtraHeaders(value: string | undefined): string[] {
+    return value ? value.split(/\r?\n/).map((header) => header.trim()).filter((header) => header.includes(':')) : [];
+}
+
+function inferRemoteVideoReferer(remoteUrl: string): string {
+    const url = new URL(remoteUrl);
+    return `${url.protocol}//${url.host}/`;
+}
+
+async function resolveYtDlpImpersonateTarget(invocation: YtDlpInvocation, remoteUrl: string): Promise<string | null> {
+    const explicit = readTrimmedServerEnv('YT_DLP_IMPERSONATE');
+    if (explicit) return explicit;
+    if (!shouldPreferYtDlpImpersonation(remoteUrl)) return null;
+    const availableTargets = await listAvailableYtDlpImpersonateTargets(invocation);
+    for (const target of ['chrome', 'edge', 'firefox', 'safari']) {
+        const matchedTarget = [...availableTargets].find((available) => available === target || available.startsWith(`${target}-`));
+        if (matchedTarget) return matchedTarget;
+    }
+    return null;
+}
+
+function shouldPreferYtDlpImpersonation(remoteUrl: string): boolean {
+    const hostname = new URL(remoteUrl).hostname.toLowerCase();
+    return ['tiktok.com', 'douyin.com', 'xiaohongshu.com', 'instagram.com'].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+}
+
+async function listAvailableYtDlpImpersonateTargets(invocation: YtDlpInvocation): Promise<Set<string>> {
+    if (!cachedYtDlpImpersonateTargetsPromise) {
+        cachedYtDlpImpersonateTargetsPromise = execFileAsync(invocation.command, [...invocation.prefixArgs, '--list-impersonate-targets']).then(({ stdout }) => parseYtDlpImpersonateTargets(stdout)).catch(() => new Set<string>());
+    }
+    return cachedYtDlpImpersonateTargetsPromise;
+}
+
+function parseYtDlpImpersonateTargets(output: string): Set<string> {
+    const targets = new Set<string>();
+    for (const rawLine of output.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('[') || line.startsWith('Client') || line.startsWith('-') || line.startsWith('WARNING:') || line.includes('(unavailable)')) continue;
+        const match = line.match(/^([A-Za-z0-9_-]+)/);
+        if (match) targets.add(match[1].toLowerCase());
+    }
+    return targets;
+}
+
+function readTrimmedServerEnv(key: string): string | null {
+    const value = readServerEnv(key)?.trim();
+    return value ? value : null;
+}
+
+function readBooleanServerEnv(key: string): boolean {
+    const value = readTrimmedServerEnv(key)?.toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes';
+}
+
+function buildYtDlpFailureMessage(context: RemoteVideoDownloadContext, detail: string): string {
+    const normalizedDetail = detail.trim();
+    if (context.platform === 'youtube') {
+        if (/no supported javascript runtime/i.test(normalizedDetail)) return 'yt-dlp could not extract this YouTube video because no supported JavaScript runtime was available. Install Node.js in the runtime and keep yt-dlp remote components enabled.';
+        if (/403|forbidden/i.test(normalizedDetail)) return 'yt-dlp hit a 403 while downloading this YouTube video. This usually means the server IP, cookies, or YouTube client profile is blocked. Configure cookies or a proxy, or retry from a different egress IP.';
+        if (/sabr|po token|missing a url|unable to download video data/i.test(normalizedDetail)) return `yt-dlp could not resolve a usable YouTube stream. ${normalizedDetail} Try refreshing yt-dlp remote components, setting YT_DLP_YOUTUBE_EXTRACTOR_ARGS, or using cookies/proxy.`;
+        return `yt-dlp could not extract this YouTube video. ${normalizedDetail}`.trim();
+    }
+    if (!shouldPreferYtDlpImpersonation(context.normalizedUrl)) return `yt-dlp could not extract a video from this link. ${normalizedDetail}`.trim();
+    if (/connection was reset|timed out|403|captcha|login|required|unable to download webpage/i.test(normalizedDetail)) return `yt-dlp could not extract a TikTok-style page video. ${normalizedDetail} Configure YT_DLP_COOKIES_FILE or YT_DLP_COOKIES_BASE64, and add YT_DLP_PROXY if the server IP is blocked.`;
+    return `yt-dlp could not extract a TikTok-style page video. ${normalizedDetail}`.trim();
+}
+
+function inferRemoteVideoFileName(remoteUrl: string): string {
+    const url = new URL(remoteUrl);
+    const baseName = path.basename(url.pathname) || 'remote-video';
+    return REMOTE_VIDEO_EXTENSIONS.has(path.extname(baseName).toLowerCase()) ? baseName : `${baseName || 'remote-video'}.mp4`;
 }

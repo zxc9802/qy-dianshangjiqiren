@@ -26,7 +26,7 @@ import {
 } from '../../../../lib/formatMessage';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
-import { deleteTempVideo, loadTempVideo } from '../../../../lib/server-chat-video';
+import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../../lib/server-chat-video';
 import {
     requestYunwuOpenAIChat,
     streamYunwuOpenAIChat,
@@ -66,6 +66,9 @@ const attachmentSchema = z.object({
     clientVideoId: z.string().max(255).optional(),
     videoLabel: z.string().max(32).optional(),
     source: z.enum(['current', 'history']).optional(),
+    remoteVideoUrl: z.string().url().max(4096).optional(),
+    remotePlatform: z.enum(['youtube', 'douyin', 'tiktok', 'generic']).optional(),
+    downloadMethod: z.enum(['direct', 'douyin-parser', 'tiktok-playwright', 'yt-dlp']).optional(),
     frames: z.array(z.object({
         url: z.string().min(1).max(2048),
         timestampMs: z.number().int().nonnegative(),
@@ -141,6 +144,9 @@ function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[])
         clientVideoId: attachment.clientVideoId?.trim(),
         videoLabel: attachment.videoLabel?.trim(),
         source: attachment.source,
+        remoteVideoUrl: attachment.remoteVideoUrl?.trim(),
+        remotePlatform: attachment.remotePlatform,
+        downloadMethod: attachment.downloadMethod,
         frames: attachment.frames?.map((frame) => ({
             url: frame.url,
             timestampMs: frame.timestampMs,
@@ -336,9 +342,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         const normalizedAttachments = normalizeIncomingAttachments(incomingAttachments);
         let inlineVideoIndex = 0;
-        const attachments: CurrentTurnAttachment[] = normalizedAttachments.map((attachment) => {
+        const attachments: CurrentTurnAttachment[] = await Promise.all(normalizedAttachments.map(async (attachment) => {
             if (attachment.kind !== 'video') {
                 return attachment;
+            }
+
+            if (attachment.remoteVideoUrl) {
+                const remoteVideo = await downloadRemoteVideo(attachment.remoteVideoUrl, {
+                    preprocess: responseModel !== 'gemini',
+                });
+                return {
+                    ...attachment,
+                    fileName: attachment.fileName || remoteVideo.fileName,
+                    fileSize: attachment.fileSize > 0 ? attachment.fileSize : remoteVideo.fileSize,
+                    mimeType: attachment.mimeType || remoteVideo.mimeType,
+                    extractedText: attachment.extractedText || remoteVideo.extractedText,
+                    previewUrl: attachment.previewUrl || remoteVideo.previewUrl,
+                    durationMs: attachment.durationMs ?? remoteVideo.durationMs,
+                    transcript: attachment.transcript || remoteVideo.transcript,
+                    frames: attachment.frames?.length ? attachment.frames : remoteVideo.frames,
+                    remotePlatform: remoteVideo.remotePlatform,
+                    downloadMethod: remoteVideo.downloadMethod,
+                    inlineVideoData: {
+                        fileName: remoteVideo.fileName,
+                        mimeType: remoteVideo.mimeType,
+                        data: remoteVideo.buffer.toString('base64'),
+                    },
+                };
             }
 
             const inlineVideoData = inlineVideoUploads[inlineVideoIndex];
@@ -352,13 +382,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 ...attachment,
                 inlineVideoData,
             };
-        });
+        }));
         const hasAttachmentPayload = attachments.length > 0;
         tempVideoTokensToCleanup = attachments
             .filter((attachment) => attachment.kind === 'video' && attachment.tempVideoToken)
             .map((attachment) => attachment.tempVideoToken as string);
-        const currentVideoAttachmentCount = attachments.filter((attachment) => attachment.kind === 'video').length;
-        if (responseModel === 'gemini' && currentVideoAttachmentCount > 0 && inlineVideoUploads.length < currentVideoAttachmentCount) {
+        const unresolvedGeminiVideos = attachments.filter((attachment) => attachment.kind === 'video' && !attachment.inlineVideoData && !attachment.tempVideoToken).length;
+        if (responseModel === 'gemini' && unresolvedGeminiVideos > 0) {
             throw new AppError('Gemini 未收到当前视频文件，请重新上传后重试。', 400);
         }
 

@@ -106,6 +106,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                             transcript: normalizedAttachment.transcript,
                             clientVideoId: normalizedAttachment.clientVideoId,
                             videoLabel: normalizedAttachment.videoLabel,
+                            remoteVideoUrl: normalizedAttachment.remoteVideoUrl,
+                            remotePlatform: normalizedAttachment.remotePlatform,
+                            downloadMethod: normalizedAttachment.downloadMethod,
                             frames: normalizedAttachment.frames,
                         };
                     }),

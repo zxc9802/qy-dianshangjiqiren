@@ -1,4 +1,6 @@
 export type ChatAttachmentKind = 'document' | 'image' | 'video';
+export type RemoteVideoPlatform = 'youtube' | 'douyin' | 'tiktok' | 'generic';
+export type RemoteVideoDownloadMethod = 'direct' | 'douyin-parser' | 'tiktok-playwright' | 'yt-dlp';
 
 export interface ChatAttachmentFrame {
     url: string;
@@ -19,10 +21,13 @@ export interface ChatAttachmentUpload {
     clientVideoId?: string;
     videoLabel?: string;
     source?: 'current' | 'history';
+    remoteVideoUrl?: string;
+    remotePlatform?: RemoteVideoPlatform;
+    downloadMethod?: RemoteVideoDownloadMethod;
 }
 
 export interface StoredChatAttachmentMetadata {
-    version: 1 | 2;
+    version: 1 | 2 | 3;
     kind: ChatAttachmentKind;
     mimeType?: string;
     extractedText: string;
@@ -31,13 +36,16 @@ export interface StoredChatAttachmentMetadata {
     frames?: ChatAttachmentFrame[];
     clientVideoId?: string;
     videoLabel?: string;
+    remoteVideoUrl?: string;
+    remotePlatform?: RemoteVideoPlatform;
+    downloadMethod?: RemoteVideoDownloadMethod;
 }
 
 export interface ChatAttachmentRecord extends ChatAttachmentUpload {
     fileUrl: string;
 }
 
-const ATTACHMENT_METADATA_VERSION = 2;
+const ATTACHMENT_METADATA_VERSION = 3;
 
 function normalizeFrame(frame: unknown): ChatAttachmentFrame | null {
     if (typeof frame !== 'object' || frame === null) {
@@ -176,6 +184,9 @@ export function serializeAttachmentMetadata(attachment: ChatAttachmentUpload): s
         })),
         clientVideoId: attachment.clientVideoId,
         videoLabel: attachment.videoLabel,
+        remoteVideoUrl: attachment.remoteVideoUrl,
+        remotePlatform: attachment.remotePlatform,
+        downloadMethod: attachment.downloadMethod,
     };
 
     return JSON.stringify(payload);
@@ -192,7 +203,7 @@ export function parseAttachmentMetadata(
 
     try {
         const parsed = JSON.parse(parsedText) as Partial<StoredChatAttachmentMetadata>;
-        if ((parsed.version !== 1 && parsed.version !== ATTACHMENT_METADATA_VERSION) || typeof parsed.kind !== 'string') {
+        if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== ATTACHMENT_METADATA_VERSION) || typeof parsed.kind !== 'string') {
             return null;
         }
 
@@ -210,6 +221,9 @@ export function parseAttachmentMetadata(
                 : [],
             clientVideoId: typeof parsed.clientVideoId === 'string' ? parsed.clientVideoId : undefined,
             videoLabel: typeof parsed.videoLabel === 'string' ? parsed.videoLabel : undefined,
+            remoteVideoUrl: typeof parsed.remoteVideoUrl === 'string' ? parsed.remoteVideoUrl : undefined,
+            remotePlatform: typeof parsed.remotePlatform === 'string' ? parsed.remotePlatform as RemoteVideoPlatform : undefined,
+            downloadMethod: typeof parsed.downloadMethod === 'string' ? parsed.downloadMethod as RemoteVideoDownloadMethod : undefined,
         };
     } catch {
         const inferredKind: ChatAttachmentKind = fileType.startsWith('image/')
@@ -250,6 +264,9 @@ export function normalizeAttachmentRecord(input: {
         transcript: metadata?.transcript,
         clientVideoId: metadata?.clientVideoId,
         videoLabel: metadata?.videoLabel,
+        remoteVideoUrl: metadata?.remoteVideoUrl,
+        remotePlatform: metadata?.remotePlatform,
+        downloadMethod: metadata?.downloadMethod,
         frames,
         fileUrl: input.fileUrl,
     };
