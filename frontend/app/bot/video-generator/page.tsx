@@ -13,6 +13,19 @@ function readStoredToken(): string {
     return window.localStorage.getItem('token') || '';
 }
 
+function sanitizeVideoWorkspaceUrl(rawUrl: string): string {
+    try {
+        const parsed = new URL(rawUrl, window.location.origin);
+        if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) {
+            parsed.protocol = 'https:';
+            parsed.host = 'shiping.zeabur.app';
+        }
+        return parsed.toString();
+    } catch {
+        return 'https://shiping.zeabur.app';
+    }
+}
+
 export default function VideoGeneratorBotPage() {
     const router = useRouter();
     const { isAuthenticated, isLoading, token, loadUser } = useAuthStore();
@@ -60,7 +73,7 @@ export default function VideoGeneratorBotPage() {
                     throw new Error(payload?.error || payload?.message || 'Unable to open the video workspace.');
                 }
 
-                window.location.replace(payload.url as string);
+                window.location.replace(sanitizeVideoWorkspaceUrl(payload.url as string));
             } catch (nextError) {
                 const message = nextError instanceof Error ? nextError.message : 'Unable to open the video workspace.';
                 hasStartedRef.current = false;
