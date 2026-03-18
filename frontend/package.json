@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
-    "start": "npx prisma db push --skip-generate --accept-data-loss || true && next start",
+    "start": "npx prisma db push --accept-data-loss || true && next start",
     "postinstall": "prisma generate",
     "admin:sync": "node scripts/sync-admin.cjs",
     "knowledge:import-qiya": "node scripts/import-qiya-enterprise-knowledge.mjs",
