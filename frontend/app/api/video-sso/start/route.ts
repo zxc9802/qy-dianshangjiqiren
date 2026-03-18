@@ -15,9 +15,10 @@ export async function POST(req: NextRequest) {
         const user = await getAuthUser(req);
         const body = await readRequestBody(req) as { redirectPath?: unknown };
         const ticket = await createVideoSsoTicket(user.id, parseVideoRedirectPath(body.redirectPath));
+        const mainAppUrl = req.nextUrl.origin;
 
         return Response.json({
-            url: buildVideoSsoUrl(ticket.id),
+            url: buildVideoSsoUrl(ticket.id, { mainAppUrl }),
             expiresAt: ticket.expiresAt,
         });
     } catch (error) {

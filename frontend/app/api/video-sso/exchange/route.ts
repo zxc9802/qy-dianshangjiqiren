@@ -1,31 +1,38 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { AppError, errorResponse } from '@/app/lib/auth';
+import { errorResponse, signToken } from '@/app/lib/auth';
 import {
     consumeVideoSsoTicket,
-    getVideoSsoSecretHeaderName,
-    isValidVideoSsoInternalSecret,
 } from '@/app/lib/video-sso';
+import {
+    createVideoClientPreflightResponse,
+    jsonWithVideoClientCors,
+    withVideoClientCors,
+} from '@/app/lib/video-site-cors';
 
 const exchangeSchema = z.object({
     ticket: z.string().trim().min(1, 'SSO ticket is required.'),
 });
 
 export async function POST(req: NextRequest) {
-    try {
-        const secretHeaderName = getVideoSsoSecretHeaderName();
-        if (!isValidVideoSsoInternalSecret(req.headers.get(secretHeaderName))) {
-            throw new AppError('Forbidden.', 403, 'VIDEO_SSO_FORBIDDEN');
-        }
+    const origin = req.headers.get('origin');
 
+    try {
         const data = exchangeSchema.parse(await req.json());
         const result = await consumeVideoSsoTicket(data.ticket);
 
-        return Response.json({
+        return jsonWithVideoClientCors({
             success: true,
-            data: result,
-        });
+            data: {
+                ...result,
+                token: signToken(result.user.id),
+            },
+        }, undefined, origin);
     } catch (error) {
-        return errorResponse(error);
+        return withVideoClientCors(errorResponse(error), origin);
     }
+}
+
+export function OPTIONS(req: NextRequest) {
+    return createVideoClientPreflightResponse(req);
 }

@@ -4,7 +4,7 @@ import { prisma } from './prisma';
 import { readServerEnv } from './server-env';
 
 const DEFAULT_MAIN_APP_URL = 'https://www.qycm.top';
-const DEFAULT_VIDEO_APP_URL = 'https://shipingongzutai.zeabur.app';
+const DEFAULT_VIDEO_APP_URL = 'https://shipingongzuo.zeabur.app';
 const VIDEO_SSO_SECRET_HEADER = 'x-video-sso-secret';
 const VIDEO_PRODUCT = 'video';
 const VIDEO_SSO_TICKET_TTL_MS = 60_000;
@@ -83,7 +83,7 @@ export function getVideoAppUrl(): string {
 }
 
 export function getMainAppVideoEntryUrl(): string {
-    return `${getMainAppUrl()}/bot/video-generator`;
+    return `${getMainAppUrl()}/bot/video-workbench`;
 }
 
 export function getVideoSsoSecretHeaderName(): string {
@@ -127,9 +127,10 @@ export function parseVideoRedirectPath(value: unknown): string | null {
     return redirectPath;
 }
 
-export function buildVideoSsoUrl(ticketId: string): string {
+export function buildVideoSsoUrl(ticketId: string, options?: { mainAppUrl?: string }): string {
     const url = new URL('/auth/sso', getVideoAppUrl());
     url.searchParams.set('ticket', ticketId);
+    url.searchParams.set('mainApp', options?.mainAppUrl || getMainAppUrl());
     return url.toString();
 }
 

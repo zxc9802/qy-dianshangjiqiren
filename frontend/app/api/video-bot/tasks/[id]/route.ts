@@ -1,81 +1,95 @@
-import { AppError, errorResponse, getAuthUser } from '@/app/lib/auth';
-import { deleteTask, getTask, updateTask } from '@/app/lib/video-bot/db';
-import { getAdapter } from '@/app/lib/video-bot/engines';
-import type { VideoBotTaskRecord, VideoBotTaskUpdate } from '@/app/lib/video-bot/types';
 import { NextRequest } from 'next/server';
+import { prisma } from '../../../../lib/prisma';
+import { AppError, errorResponse, getUserId } from '../../../../lib/auth';
+import {
+    normalizeUpdateVideoGenerationPayload,
+    normalizeVideoGeneration,
+} from '../../../../lib/video-generation-history';
+import {
+    createVideoClientPreflightResponse,
+    jsonWithVideoClientCors,
+    withVideoClientCors,
+} from '../../../../lib/video-site-cors';
 
-function mergeInputs(task: VideoBotTaskRecord, nextInputs?: Record<string, unknown>) {
-    if (!nextInputs) {
-        return undefined;
+async function loadOwnedRecord(id: string, userId: string) {
+    const record = await prisma.videoGeneration.findFirst({
+        where: { id, userId },
+    });
+
+    if (!record) {
+        throw new AppError('Video record not found.', 404);
     }
 
-    return {
-        ...task.inputs,
-        ...nextInputs,
-    };
+    return record;
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+    const origin = req.headers.get('origin');
+
     try {
-        const user = await getAuthUser(req);
+        const userId = await getUserId(req);
         const { id } = await context.params;
-        const task = getTask(id, user.id);
-        if (!task) {
-            throw new AppError('任务不存在。', 404);
-        }
-
-        const apiKey = req.headers.get('x-api-key')?.trim() || req.nextUrl.searchParams.get('apiKey')?.trim() || '';
-        if (apiKey && task.engineTaskId && task.status !== 'failed' && (task.status !== 'completed' || !task.videoUrl)) {
-            try {
-                const adapter = getAdapter(task.engine, apiKey);
-                const result = await adapter.queryTask(task.engineTaskId, task);
-                const nextInputs = mergeInputs(task, result.inputs as Record<string, unknown> | undefined);
-
-                const updates: VideoBotTaskUpdate = {
-                    status: result.videoUrl ? 'completed' : result.status,
-                    videoUrl: result.videoUrl ?? task.videoUrl ?? null,
-                    engineTaskId: result.engineTaskId ?? task.engineTaskId ?? null,
-                    model: result.model ?? task.model ?? null,
-                    inputs: nextInputs,
-                    error: result.status === 'failed' ? result.error ?? '任务执行失败。' : null,
-                    pollError: null,
-                    completedAt: result.videoUrl ? new Date().toISOString() : task.completedAt ?? null,
-                };
-
-                updateTask(task.id, updates);
-                return Response.json({
-                    ...task,
-                    ...updates,
-                    inputs: nextInputs ?? task.inputs,
-                });
-            } catch (error) {
-                const message = error instanceof Error ? error.message : '轮询任务状态失败。';
-                updateTask(task.id, { pollError: message });
-                return Response.json({
-                    ...task,
-                    pollError: message,
-                });
-            }
-        }
-
-        return Response.json(task);
+        const record = await loadOwnedRecord(id, userId);
+        return jsonWithVideoClientCors(normalizeVideoGeneration(record), undefined, origin);
     } catch (error) {
-        return errorResponse(error);
+        return withVideoClientCors(errorResponse(error), origin);
+    }
+}
+
+export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+    const origin = req.headers.get('origin');
+
+    try {
+        const userId = await getUserId(req);
+        const { id } = await context.params;
+        const current = await loadOwnedRecord(id, userId);
+        const updates = normalizeUpdateVideoGenerationPayload(await req.json());
+
+        const status = updates.videoUrl ? 'completed' : updates.status ?? current.status;
+        const completedAt = updates.completedAt !== undefined
+            ? updates.completedAt
+            : ((status === 'completed' || status === 'failed')
+                ? current.completedAt ?? new Date()
+                : current.completedAt);
+
+        const updated = await prisma.videoGeneration.update({
+            where: { id: current.id },
+            data: {
+                ...(updates.engine !== undefined ? { engine: updates.engine } : {}),
+                ...(updates.mode !== undefined ? { mode: updates.mode } : {}),
+                ...(updates.model !== undefined ? { model: updates.model } : {}),
+                ...(updates.prompt !== undefined ? { prompt: updates.prompt } : {}),
+                ...(updates.negativePrompt !== undefined ? { negativePrompt: updates.negativePrompt } : {}),
+                ...(updates.params !== undefined ? { params: updates.params } : {}),
+                ...(updates.inputs !== undefined ? { inputs: updates.inputs } : {}),
+                ...(updates.engineTaskId !== undefined ? { engineTaskId: updates.engineTaskId } : {}),
+                ...(updates.videoUrl !== undefined ? { videoUrl: updates.videoUrl } : {}),
+                ...(updates.errorMessage !== undefined ? { errorMessage: updates.errorMessage } : {}),
+                status,
+                completedAt,
+            },
+        });
+
+        return jsonWithVideoClientCors(normalizeVideoGeneration(updated), undefined, origin);
+    } catch (error) {
+        return withVideoClientCors(errorResponse(error), origin);
     }
 }
 
 export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-    try {
-        const user = await getAuthUser(req);
-        const { id } = await context.params;
-        const task = getTask(id, user.id);
-        if (!task) {
-            throw new AppError('任务不存在。', 404);
-        }
+    const origin = req.headers.get('origin');
 
-        deleteTask(id, user.id);
-        return Response.json({ success: true });
+    try {
+        const userId = await getUserId(req);
+        const { id } = await context.params;
+        const record = await loadOwnedRecord(id, userId);
+        await prisma.videoGeneration.delete({ where: { id: record.id } });
+        return jsonWithVideoClientCors({ success: true }, undefined, origin);
     } catch (error) {
-        return errorResponse(error);
+        return withVideoClientCors(errorResponse(error), origin);
     }
+}
+
+export function OPTIONS(req: NextRequest) {
+    return createVideoClientPreflightResponse(req);
 }

@@ -219,24 +219,6 @@ export const api = {
         });
     },
 
-    classifyConversationVideoIntent: (id: string, body: {
-        messageText: string;
-        latestVideo?: {
-            videoLabel?: string;
-            fileName: string;
-            extractedText?: string;
-            transcript?: string;
-        };
-        recentMessages?: Array<{
-            role: 'user' | 'assistant';
-            content: string;
-        }>;
-    }) =>
-        request<{ success: boolean; data: VideoIntentDecision }>(`/conversations/${id}/video-intent`, {
-            method: 'POST',
-            body: JSON.stringify(body),
-        }),
-
     migrateLocalData: (body: {
         conversations: LocalConversationItem[];
         favorites: LocalConversationItem[];
@@ -264,6 +246,23 @@ export const api = {
 
     deleteImageGeneration: (id: string) =>
         request<{ success: boolean }>(`/image-generations/${id}`, { method: 'DELETE' }),
+
+    // Video workbench
+    startVideoSso: (body?: { redirectPath?: string }) =>
+        request<{ url: string; expiresAt: string }>('/video-sso/start', {
+            method: 'POST',
+            body: JSON.stringify(body || {}),
+        }),
+
+    getVideoGenerationHistory: (params?: { limit?: number }) => {
+        const query: Record<string, string> = {};
+        if (typeof params?.limit === 'number') query.limit = String(params.limit);
+        const qs = new URLSearchParams(query).toString();
+        return request<VideoGenerationHistoryItem[]>(`/video-bot/tasks${qs ? `?${qs}` : ''}`);
+    },
+
+    deleteVideoGenerationHistoryItem: (id: string) =>
+        request<{ success: boolean }>(`/video-bot/tasks/${id}`, { method: 'DELETE' }),
 
     // Image prompt custom tags
     getImagePromptTags: () =>
@@ -449,12 +448,6 @@ export interface ChatAttachmentPayload {
     }>;
 }
 
-export interface VideoIntentDecision {
-    shouldInspectVideo: boolean;
-    confidence: 'high' | 'medium' | 'low';
-    reason: string;
-}
-
 export interface ImageGenerationRequest {
     prompt: string;
     negativePrompt?: string;
@@ -488,6 +481,25 @@ export interface ImageGenerationItem {
 export interface ImageGenerationListResponse {
     items: ImageGenerationItem[];
     nextCursor: string | null;
+}
+
+export interface VideoGenerationHistoryItem {
+    id: string;
+    engine: string;
+    mode: 'text2video' | 'image2video' | 'keyframe' | 'video2video' | string;
+    model: string | null;
+    prompt: string | null;
+    negativePrompt: string | null;
+    params: Record<string, unknown>;
+    inputs: Record<string, unknown>;
+    engineTaskId: string | null;
+    videoUrl: string | null;
+    status: 'queued' | 'processing' | 'completed' | 'failed' | string;
+    error?: string | null;
+    errorMessage?: string | null;
+    createdAt: string;
+    updatedAt: string;
+    completedAt: string | null;
 }
 
 export interface ImagePromptTagItem {
