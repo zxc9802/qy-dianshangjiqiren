@@ -96,17 +96,17 @@ const IMAGE_TOOL: BotInfo = {
   requiresAuth: false,
 };
 
-const VIDEO_TOOL: BotInfo = {
-  id: 'video-generator',
-  name: '视频生成实验室',
-  category: '视频实验室',
-  description: '切换 Yunwu 各类视频接口，查看烟测可用性，配置参数并提交任务。',
+const VIDEO_WORKBENCH_TOOL: BotInfo = {
+  id: 'video-workbench-trial',
+  name: '视频工作台',
+  category: '视频工作台',
+  description: '登录后进入试用版视频工作台，直接体验视频生成参数面板、预览区和工作台式操作界面。',
   icon: <Video size={22} />,
-  iconColor: '#0f766e',
-  path: '/bot/video-generator',
+  iconColor: '#c0841a',
+  path: '/bot/video-workbench',
   pointsPerUse: 0,
   isTrial: true,
-  requiresAuth: false,
+  requiresAuth: true,
 };
 
 const BOT_ICON_MAP: Record<string, ReactNode> = {
@@ -200,7 +200,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   requiresAuth: true,
 }));
 
-const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, VIDEO_TOOL];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, VIDEO_WORKBENCH_TOOL];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,
@@ -210,7 +210,8 @@ const CATEGORY_ICONS: Record<string, ReactNode> = {
   '财税': <Briefcase size={18} />,
   'AI陪跑教练': <Bot size={18} />,
   '绘图机器人': <Puzzle size={18} />,
-  '视频实验室': <Video size={18} />,
+  '视频工作台': <Video size={18} />,
+
 };
 
 export default function HomePage() {
@@ -353,7 +354,11 @@ export default function HomePage() {
   };
 
   const categories = useMemo(
-    () => Array.from(new Set([...BUILTIN_CATEGORY_ORDER, IMAGE_TOOL.category, VIDEO_TOOL.category])),
+    () => Array.from(new Set([
+      ...BUILTIN_CATEGORY_ORDER,
+      IMAGE_TOOL.category,
+      VIDEO_WORKBENCH_TOOL.category,
+    ])),
     [],
   );
   const filteredBots = ALL_HOMEPAGE_BOTS.filter((bot) => {
@@ -390,6 +395,10 @@ export default function HomePage() {
   };
 
   const openBot = (bot: BotInfo) => {
+    if (bot.id === 'video-workbench-trial') {
+      requireAuth(bot.path);
+      return;
+    }
     if (bot.requiresAuth) {
       requireAuth(bot.path);
       return;

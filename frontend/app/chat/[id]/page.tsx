@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -315,25 +315,6 @@ function hasPreviousVideoReference(text: string): boolean {
 
 function hasVideoAnalysisIntent(text: string): boolean {
     return /(视频|片子|镜头|画面|开头|开场|结尾|转场|字幕|配音|口播|bgm|BGM|配乐|节奏|卡点|分镜|封面|时长|逐帧|重看|复看|再看一遍|重新看|分析这个|拆解这个|优化这个视频)/.test(text);
-}
-
-function buildRecentVideoIntentMessages(messages: MessageItem[]): Array<{ role: 'user' | 'assistant'; content: string }> {
-    return messages
-        .filter((message) => message.id !== 'welcome' && message.kind !== 'image')
-        .slice(-6)
-        .map((message) => {
-            const normalizedContent = message.attachments?.length
-                ? stripAttachmentDisplayLabels(message.content, message.attachments)
-                : message.content;
-            const cleanContent = message.role === 'assistant'
-                ? stripSuggestionBlock(normalizedContent)
-                : normalizedContent;
-            return {
-                role: message.role,
-                content: cleanContent.trim().slice(0, 1500),
-            };
-        })
-        .filter((message) => message.content.length > 0);
 }
 
 function isLikelyRemoteVideoUrl(value: string): boolean {
@@ -1166,30 +1147,6 @@ export default function ChatPage() {
         });
     }, []);
 
-    const shouldInspectLatestVideoWithGemini = useCallback(async (params: {
-        conversationId: string;
-        messageText: string;
-        latestVideo: ConversationVideoCatalogItem;
-    }): Promise<boolean> => {
-        try {
-            const response = await api.classifyConversationVideoIntent(params.conversationId, {
-                messageText: params.messageText,
-                latestVideo: {
-                    videoLabel: params.latestVideo.videoLabel,
-                    fileName: params.latestVideo.fileName,
-                    extractedText: params.latestVideo.extractedText.slice(0, 2000),
-                    transcript: params.latestVideo.transcript?.slice(0, 2000),
-                },
-                recentMessages: buildRecentVideoIntentMessages(messages),
-            });
-
-            return response.data.shouldInspectVideo;
-        } catch (error) {
-            console.error('[Chat] classify video intent failed', error);
-            return false;
-        }
-    }, [messages]);
-
     const parseAttachedFile = async (file: File, model: ResponseModel) => {
         if (isDirectGeminiVideoBypassCandidate(file, model)) {
             return {
@@ -1349,48 +1306,7 @@ export default function ChatPage() {
                 return;
             }
 
-            let resolvedHistoryVideos = resolution.historyVideos;
-            const latestVideo = [...conversationVideos]
-                .sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt)
-                .at(-1);
-            const shouldModelJudgeLatestVideo = Boolean(
-                !options?.allowTextFallback
-                && preparedCurrentVideos.length === 0
-                && conversationId
-                && selectedConversationVideoIds.length === 0
-                && latestVideo
-                && resolvedHistoryVideos.length <= 1
-                && (!resolvedHistoryVideos[0] || resolvedHistoryVideos[0].clientVideoId === latestVideo.clientVideoId)
-                && collectExplicitVideoOrders(messageText).length === 0
-                && !hasCurrentVideoReference(messageText)
-                && !hasPreviousVideoReference(messageText)
-                && !isComparisonPrompt(messageText),
-            );
-
-            if (
-                shouldModelJudgeLatestVideo
-                && latestVideo
-            ) {
-                const shouldInspectLatestVideo = await shouldInspectLatestVideoWithGemini({
-                    conversationId: conversationId as string,
-                    messageText,
-                    latestVideo,
-                });
-
-                if (shouldInspectLatestVideo) {
-                    if (!canReuseConversationVideo(latestVideo)) {
-                        setVideoResolutionNotice({
-                            type: 'missing',
-                            message: `${latestVideo.videoLabel} 在当前设备已不可用，请重新上传，或仅按历史文字继续。`,
-                            allowTextFallback: true,
-                        });
-                        return;
-                    }
-                    resolvedHistoryVideos = [latestVideo];
-                } else {
-                    resolvedHistoryVideos = resolvedHistoryVideos.filter((video) => video.clientVideoId !== latestVideo.clientVideoId);
-                }
-            }
+            const resolvedHistoryVideos = resolution.historyVideos;
 
             for (const video of resolvedHistoryVideos) {
                 const localVideo = await getLocalConversationVideo(conversationScope, video.clientVideoId);
@@ -1750,7 +1666,6 @@ export default function ChatPage() {
         responseModel,
         router,
         selectedConversationVideoIds,
-        shouldInspectLatestVideoWithGemini,
         wfState,
         workflowFlag,
     ]);

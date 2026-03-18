@@ -23,6 +23,7 @@ model User {
   pointsTransactions       PointsTransaction[]
   workflows                Workflow[]
   imageGenerations         ImageGeneration[]
+  videoGenerations         VideoGeneration[]
   imagePromptTags          ImagePromptTag[]
   customBots               CustomBot[]
   invitationsSent          Invitation[]        @relation("Inviter")
@@ -106,6 +107,31 @@ model ImageGeneration {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("image_generations")
+}
+
+model VideoGeneration {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  engine         String
+  mode           String
+  model          String?
+  prompt         String?   @db.Text
+  negativePrompt String?   @map("negative_prompt") @db.Text
+  params         Json?
+  inputs         Json?
+  engineTaskId   String?   @map("engine_task_id")
+  videoUrl       String?   @map("video_url") @db.Text
+  status         String    @default("queued")
+  errorMessage   String?   @map("error_message") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  completedAt    DateTime? @map("completed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@map("video_generations")
 }
 
 model VerificationCode {

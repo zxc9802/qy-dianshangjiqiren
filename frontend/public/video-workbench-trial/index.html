@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>视频工作站入口</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at top, rgba(192, 132, 26, 0.16), transparent 34%),
+          linear-gradient(180deg, #fffaf0 0%, #f8fafc 100%);
+        color: #0f172a;
+      }
+
+      .card {
+        width: min(100%, 680px);
+        padding: 40px;
+        border-radius: 32px;
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        box-shadow: 0 32px 80px rgba(15, 23, 42, 0.12);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(192, 132, 26, 0.12);
+        color: #a16207;
+        font-weight: 700;
+      }
+
+      h1 {
+        margin: 22px 0 0;
+        font-size: clamp(30px, 5vw, 44px);
+        line-height: 1.08;
+        letter-spacing: -0.04em;
+      }
+
+      p {
+        margin: 18px 0 0;
+        font-size: 16px;
+        line-height: 1.75;
+        color: #475569;
+      }
+
+      .actions {
+        margin-top: 30px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0 22px;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff;
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      .link {
+        display: inline-flex;
+        align-items: center;
+        color: #64748b;
+        word-break: break-all;
+      }
+
+      @media (max-width: 720px) {
+        .card {
+          padding: 28px 22px;
+          border-radius: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="badge">视频工作站入口</div>
+      <h1>当前页面已切换为外部站点入口</h1>
+      <p>旧的视频工作站静态逻辑已经移除。点击下面按钮后，会直接跳转到新的视频工作站网站。</p>
+      <div class="actions">
+        <a class="button" href="https://shipingongzuo.zeabur.app" target="_blank" rel="noreferrer">
+          打开视频工作站
+        </a>
+        <a class="link" href="https://shipingongzuo.zeabur.app" target="_blank" rel="noreferrer">
+          https://shipingongzuo.zeabur.app
+        </a>
+      </div>
+    </main>
+  </body>
+</html>

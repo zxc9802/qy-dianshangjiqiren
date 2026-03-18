@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Bot } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import { useAuthStore } from '../stores/auth';
@@ -20,7 +20,9 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
 
     const router = useRouter();
+    const searchParams = useSearchParams();
     const { login, register } = useAuthStore();
+    const redirectTarget = searchParams.get('redirect') || '/';
 
     const setModeAndResetError = (nextMode: AuthMode) => {
         setMode(nextMode);
@@ -41,7 +43,7 @@ export default function LoginPage() {
                 await register(account, password, inviteCode, nickname, groupName);
             }
 
-            router.push('/');
+            router.push(redirectTarget);
         } catch (err) {
             if (err instanceof ApiError) {
                 if (err.code === 'INVITE_REQUIRED') {
