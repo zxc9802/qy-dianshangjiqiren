@@ -128,7 +128,7 @@ export function parseVideoRedirectPath(value: unknown): string | null {
 }
 
 export function buildVideoSsoUrl(ticketId: string, options?: { mainAppUrl?: string }): string {
-    const url = new URL('/auth/sso', getVideoAppUrl());
+    const url = new URL('/', getVideoAppUrl());
     url.searchParams.set('ticket', ticketId);
     url.searchParams.set('mainApp', options?.mainAppUrl || getMainAppUrl());
     return url.toString();
