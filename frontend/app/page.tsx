@@ -18,6 +18,7 @@ import {
   type ResponseModel,
 } from './lib/chat-models';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from './lib/pcmRecorder';
+import { api } from './lib/api';
 import styles from './page.module.css';
 import {
   Bot, Search, Sun, Moon, Home, Zap, ImageIcon, User, Trash2,
@@ -394,9 +395,15 @@ export default function HomePage() {
     return last ? last.content.replace(/\[文件:.*?\]/g, '[文件]').slice(0, 40) : '';
   };
 
-  const openBot = (bot: BotInfo) => {
+  const openBot = async (bot: BotInfo) => {
     if (bot.id === 'video-workbench-trial') {
-      requireAuth(bot.path);
+      if (!isAuthenticated) { router.push('/login'); return; }
+      try {
+        const result = await api.startVideoSso();
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      } catch {
+        router.push(bot.path);
+      }
       return;
     }
     if (bot.requiresAuth) {
