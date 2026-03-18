@@ -18,11 +18,11 @@ function sanitizeVideoWorkspaceUrl(rawUrl: string): string {
         const parsed = new URL(rawUrl, window.location.origin);
         if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) {
             parsed.protocol = 'https:';
-            parsed.host = 'shiping.zeabur.app';
+            parsed.host = 'shipingongzutai.zeabur.app';
         }
         return parsed.toString();
     } catch {
-        return 'https://shiping.zeabur.app';
+        return 'https://shipingongzutai.zeabur.app';
     }
 }
 

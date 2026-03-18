@@ -4,7 +4,7 @@ import { prisma } from './prisma';
 import { readServerEnv } from './server-env';
 
 const DEFAULT_MAIN_APP_URL = 'https://www.qycm.top';
-const DEFAULT_VIDEO_APP_URL = 'https://shiping.zeabur.app';
+const DEFAULT_VIDEO_APP_URL = 'https://shipingongzutai.zeabur.app';
 const VIDEO_SSO_SECRET_HEADER = 'x-video-sso-secret';
 const VIDEO_PRODUCT = 'video';
 const VIDEO_SSO_TICKET_TTL_MS = 60_000;
