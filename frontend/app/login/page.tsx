@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Bot } from 'lucide-react';
 import { ApiError } from '../lib/api';
@@ -9,7 +9,7 @@ import styles from './login.module.css';
 
 type AuthMode = 'login' | 'register';
 
-export default function LoginPage() {
+function LoginPageContent() {
     const [mode, setMode] = useState<AuthMode>('login');
     const [account, setAccount] = useState('');
     const [password, setPassword] = useState('');
@@ -200,5 +200,13 @@ export default function LoginPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense>
+            <LoginPageContent />
+        </Suspense>
     );
 }
