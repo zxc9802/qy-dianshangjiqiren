@@ -60,6 +60,22 @@ export async function storeUploadedVideo(params: { buffer: Buffer; fileName: str
 }
 
 function getProcessingErrorMessage(error: unknown): string {
+    if (error && typeof error === 'object') {
+        const stderr = typeof (error as { stderr?: unknown }).stderr === 'string'
+            ? (error as { stderr: string }).stderr.trim()
+            : '';
+        if (stderr) {
+            return stderr;
+        }
+
+        const stdout = typeof (error as { stdout?: unknown }).stdout === 'string'
+            ? (error as { stdout: string }).stdout.trim()
+            : '';
+        if (stdout) {
+            return stdout;
+        }
+    }
+
     if (error instanceof Error && error.message.trim()) {
         return error.message.trim();
     }
@@ -286,6 +302,7 @@ async function extractKeyframes(absolutePath: string, durationMs?: number): Prom
     const timestamps = buildFrameTimestamps(durationMs);
     const token = `${Date.now()}-${randomUUID()}`;
     const results: ExtractedFrameFile[] = [];
+    const failures: string[] = [];
     for (let index = 0; index < timestamps.length; index += 1) {
         const timestampMs = timestamps[index];
         const fileName = `${token}-${index + 1}.jpg`;
@@ -293,8 +310,15 @@ async function extractKeyframes(absolutePath: string, durationMs?: number): Prom
         try {
             await execFileAsync('ffmpeg', ['-y', '-ss', String(Math.max(0, timestampMs / 1000)), '-i', absolutePath, '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', absoluteFramePath]);
             results.push({ url: `/chat-video-frames/${fileName}`, timestampMs, absolutePath: absoluteFramePath });
-        } catch {}
+        } catch (error) {
+            failures.push(`${formatDuration(timestampMs)}: ${getProcessingErrorMessage(error)}`);
+        }
     }
+
+    if (results.length === 0 && failures.length > 0) {
+        throw new Error(failures.join(' | '));
+    }
+
     return results;
 }
 
