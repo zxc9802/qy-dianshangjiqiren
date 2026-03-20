@@ -116,7 +116,7 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'video-workbench-veo',
     name: 'VEO 视频工作台',
-    category: '瑙嗛宸ヤ綔鍙?',
+    category: '视频工作台',
     description: '登录后进入 VEO 模型视频工作台，保留原有视频站入口。',
     icon: <Video size={22} />,
     iconColor: '#0f766e',
@@ -129,7 +129,7 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'video-workbench-seedance',
     name: 'Seedance 2.0 视频工作台',
-    category: '瑙嗛宸ヤ綔鍙?',
+    category: '视频工作台',
     description: '登录后进入 Seedance 2.0 视频工作台，适合直接做 Seedance 模型生成。',
     icon: <Video size={22} />,
     iconColor: '#c0841a',

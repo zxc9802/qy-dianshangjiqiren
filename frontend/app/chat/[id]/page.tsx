@@ -425,14 +425,14 @@ function canReuseConversationVideo(video: ConversationVideoCatalogItem): boolean
 
 function getConversationVideoStateLabel(video: ConversationVideoCatalogItem): string {
     if (video.isAvailableLocally) {
-        return '鏈満鍙敤';
+        return '本机可用';
     }
 
     if (video.remoteVideoUrl) {
-        return '閾炬帴鍙噸鍙?';
+        return '链接可重取';
     }
 
-    return '闇€閲嶄紶';
+        return '需重传';
 }
 
 function chooseReferencedConversationVideos(params: {
