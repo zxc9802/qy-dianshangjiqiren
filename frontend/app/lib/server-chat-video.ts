@@ -32,7 +32,13 @@ const isTikTokPlaceholderAssetUrl = (remoteUrl: string): boolean => {
 interface TempVideoMeta { token: string; fileName: string; mimeType: string; createdAt: string; sourceFileName: string }
 interface ExtractedFrameFile extends ChatAttachmentFrame { absolutePath: string }
 export interface ProcessedVideoUpload { extractedText: string; transcript: string; durationMs?: number; previewUrl?: string; frames: ChatAttachmentFrame[]; tempVideoToken?: string }
-export interface ProcessUploadedVideoOptions { includeFrameDescriptions?: boolean; includeTranscript?: boolean }
+export interface ProcessUploadedVideoOptions {
+    includeFrameDescriptions?: boolean;
+    includeTranscript?: boolean;
+    requireFrames?: boolean;
+    requireFrameDescriptions?: boolean;
+    requireTranscript?: boolean;
+}
 export interface TempVideoData { buffer: Buffer; fileName: string; mimeType: string; absolutePath: string }
 export interface DownloadedRemoteVideo extends ProcessedVideoUpload { buffer: Buffer; fileName: string; mimeType: string; fileSize: number; remotePlatform: RemoteVideoPlatform; downloadMethod: RemoteVideoDownloadMethod }
 export interface DownloadRemoteVideoOptions extends ProcessUploadedVideoOptions { preprocess?: boolean }
@@ -53,8 +59,33 @@ export async function storeUploadedVideo(params: { buffer: Buffer; fileName: str
     return { tempVideoToken: temp.token };
 }
 
+function getProcessingErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim()) {
+        return error.message.trim();
+    }
+
+    if (typeof error === 'string' && error.trim()) {
+        return error.trim();
+    }
+
+    return 'Unknown error';
+}
+
+function buildProcessingStageError(fileName: string, stage: string, error: unknown): AppError {
+    return new AppError(
+        `视频预处理失败：${fileName} 在${stage}时出错。${getProcessingErrorMessage(error)}`,
+        500,
+    );
+}
+
 export async function processUploadedVideo(params: { buffer: Buffer; fileName: string; mimeType: string }, options: ProcessUploadedVideoOptions = {}): Promise<ProcessedVideoUpload> {
-    const { includeFrameDescriptions = true, includeTranscript = true } = options;
+    const {
+        includeFrameDescriptions = true,
+        includeTranscript = true,
+        requireFrames = false,
+        requireFrameDescriptions = false,
+        requireTranscript = false,
+    } = options;
     await cleanupStaleTempVideos();
     const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
     let durationMs: number | undefined;
@@ -62,12 +93,64 @@ export async function processUploadedVideo(params: { buffer: Buffer; fileName: s
     let transcript = '';
     let frameDescriptions: string[] = [];
     try {
-        durationMs = await probeVideoDurationMs(temp.absolutePath).catch(() => undefined);
-        if (includeFrameDescriptions) {
-            frames = await extractKeyframes(temp.absolutePath, durationMs).catch(() => []);
-            frameDescriptions = await describeFrames(frames).catch(() => []);
+        try {
+            durationMs = await probeVideoDurationMs(temp.absolutePath);
+        } catch (error) {
+            console.error('[VideoProcessing] Failed to probe duration', {
+                fileName: params.fileName,
+                error: getProcessingErrorMessage(error),
+            });
         }
-        if (includeTranscript) transcript = await extractTranscript(temp.absolutePath).catch(() => '');
+
+        if (includeFrameDescriptions) {
+            try {
+                frames = await extractKeyframes(temp.absolutePath, durationMs);
+            } catch (error) {
+                console.error('[VideoProcessing] Failed to extract keyframes', {
+                    fileName: params.fileName,
+                    error: getProcessingErrorMessage(error),
+                });
+                if (requireFrames || requireFrameDescriptions) {
+                    throw buildProcessingStageError(params.fileName, '抽取关键帧', error);
+                }
+            }
+
+            if (frames.length === 0 && (requireFrames || requireFrameDescriptions)) {
+                throw new AppError(
+                    `视频预处理失败：${params.fileName} 未抽取到关键帧。请检查部署环境中的 ffmpeg 是否可用。`,
+                    500,
+                );
+            }
+
+            if (frames.length > 0) {
+                try {
+                    frameDescriptions = await describeFrames(frames);
+                } catch (error) {
+                    console.error('[VideoProcessing] Failed to describe keyframes', {
+                        fileName: params.fileName,
+                        error: getProcessingErrorMessage(error),
+                    });
+                    if (requireFrameDescriptions) {
+                        throw buildProcessingStageError(params.fileName, '生成关键帧描述', error);
+                    }
+                }
+            }
+        }
+
+        if (includeTranscript) {
+            try {
+                transcript = await extractTranscript(temp.absolutePath);
+            } catch (error) {
+                console.error('[VideoProcessing] Failed to extract transcript', {
+                    fileName: params.fileName,
+                    error: getProcessingErrorMessage(error),
+                });
+                if (requireTranscript) {
+                    throw buildProcessingStageError(params.fileName, '语音转写', error);
+                }
+            }
+        }
+
         return {
             extractedText: buildVideoExtractedText({ fileName: params.fileName, durationMs, transcript: includeTranscript ? transcript : '', transcriptAttempted: includeTranscript, frameDescriptions }),
             transcript: includeTranscript ? transcript : '',

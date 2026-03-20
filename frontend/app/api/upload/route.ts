@@ -115,7 +115,9 @@ export async function POST(req: NextRequest) {
                 fileName: file.name,
                 mimeType,
             }, {
-                includeTranscript: false,
+                includeTranscript: true,
+                requireFrames: true,
+                requireFrameDescriptions: true,
             });
 
             return NextResponse.json({
