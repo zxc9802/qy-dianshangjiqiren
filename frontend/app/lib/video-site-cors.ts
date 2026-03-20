@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server';
-import { getVideoAppUrl } from './video-sso';
+import { getAllVideoAppUrls } from './video-sso';
 
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 
@@ -19,10 +19,11 @@ export function isAllowedVideoClientOrigin(origin: string | null): boolean {
 
     try {
         const candidate = new URL(origin);
-        const configured = new URL(getVideoAppUrl());
-
-        if (candidate.origin === configured.origin) {
-            return true;
+        for (const configuredUrl of getAllVideoAppUrls()) {
+            const configured = new URL(configuredUrl);
+            if (candidate.origin === configured.origin) {
+                return true;
+            }
         }
 
         if (process.env.NODE_ENV !== 'production' && LOCAL_DEV_HOSTS.has(candidate.hostname)) {

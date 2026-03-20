@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import { AppError } from './auth';
 import { prisma } from './prisma';
 import { readServerEnv } from './server-env';
+import { VIDEO_SITE_KEYS, VIDEO_SITE_METADATA, type VideoSiteKey } from './video-sites';
 
 const DEFAULT_MAIN_APP_URL = 'https://www.qycm.top';
-const DEFAULT_VIDEO_APP_URL = 'https://shipingongzuo.zeabur.app';
 const VIDEO_SSO_SECRET_HEADER = 'x-video-sso-secret';
 const VIDEO_PRODUCT = 'video';
 const VIDEO_SSO_TICKET_TTL_MS = 60_000;
@@ -78,12 +78,21 @@ export function getMainAppUrl(): string {
     return resolvePublicUrl(readServerEnv('MAIN_APP_URL'), DEFAULT_MAIN_APP_URL);
 }
 
-export function getVideoAppUrl(): string {
-    return resolvePublicUrl(readServerEnv('VIDEO_APP_URL'), DEFAULT_VIDEO_APP_URL);
+function getVideoAppEnvVar(site: VideoSiteKey): string {
+    return site === 'seedance' ? 'VIDEO_APP_URL_SEEDANCE' : 'VIDEO_APP_URL';
 }
 
-export function getMainAppVideoEntryUrl(): string {
-    return `${getMainAppUrl()}/bot/video-workbench`;
+export function getVideoAppUrl(site: VideoSiteKey = 'veo'): string {
+    const meta = VIDEO_SITE_METADATA[site];
+    return resolvePublicUrl(readServerEnv(getVideoAppEnvVar(site)), meta.defaultAppUrl);
+}
+
+export function getAllVideoAppUrls(): string[] {
+    return [...new Set(VIDEO_SITE_KEYS.map((site) => getVideoAppUrl(site)))];
+}
+
+export function getMainAppVideoEntryUrl(site: VideoSiteKey = 'veo'): string {
+    return `${getMainAppUrl()}${VIDEO_SITE_METADATA[site].entryPath}`;
 }
 
 export function getVideoSsoSecretHeaderName(): string {
@@ -127,8 +136,9 @@ export function parseVideoRedirectPath(value: unknown): string | null {
     return redirectPath;
 }
 
-export function buildVideoSsoUrl(ticketId: string, options?: { mainAppUrl?: string }): string {
-    const url = new URL('/', getVideoAppUrl());
+export function buildVideoSsoUrl(ticketId: string, options?: { mainAppUrl?: string; site?: VideoSiteKey }): string {
+    const site = options?.site || 'veo';
+    const url = new URL('/', getVideoAppUrl(site));
     url.searchParams.set('ticket', ticketId);
     url.searchParams.set('mainApp', options?.mainAppUrl || getMainAppUrl());
     return url.toString();

@@ -76,11 +76,26 @@
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.18);
 }
 
+.primaryButton:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+.spinner {
+  animation: spin 0.9s linear infinite;
+}
+
 .caption {
   margin: 14px 0 0;
   color: #64748b;
   font-size: 14px;
   word-break: break-all;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 720px) {

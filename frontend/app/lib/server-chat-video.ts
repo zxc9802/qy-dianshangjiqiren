@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import ffmpegStatic from 'ffmpeg-static';
+import ffprobeStatic from 'ffprobe-static';
 import { AppError } from './auth';
 import { ChatAttachmentFrame, formatDuration, type RemoteVideoDownloadMethod, type RemoteVideoPlatform } from './chat-attachments';
 import { describeImageWithGemini } from './server-gemini-media';
@@ -18,6 +21,23 @@ const TEMP_VIDEO_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_KEYFRAMES = 3;
 const DEFAULT_MAX_REMOTE_VIDEO_SIZE = 20 * 1024 * 1024;
 const DEFAULT_TIKTOK_PLAYWRIGHT_TIMEOUT_MS = 20_000;
+const RUNTIME_BIN_ROOT = path.join(process.cwd(), 'bin');
+const FFMPEG_COMMAND = resolveMediaBinaryPath(
+    'FFMPEG_PATH',
+    [
+        path.join(RUNTIME_BIN_ROOT, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+        typeof ffmpegStatic === 'string' ? ffmpegStatic : null,
+    ],
+    'ffmpeg',
+);
+const FFPROBE_COMMAND = resolveMediaBinaryPath(
+    'FFPROBE_PATH',
+    [
+        path.join(RUNTIME_BIN_ROOT, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'),
+        ffprobeStatic.path,
+    ],
+    'ffprobe',
+);
 const REMOTE_VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.m4v']);
 const REMOTE_VIDEO_MIME_MAP: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/x-m4v' };
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
@@ -87,7 +107,45 @@ function getProcessingErrorMessage(error: unknown): string {
     return 'Unknown error';
 }
 
+function resolveMediaBinaryPath(envKey: string, candidatePaths: Array<string | null | undefined>, fallbackCommand: string): string {
+    const envValue = readServerEnv(envKey)?.trim();
+    if (envValue) {
+        return envValue;
+    }
+
+    for (const candidatePath of candidatePaths) {
+        if (candidatePath?.trim() && existsSync(candidatePath)) {
+            return candidatePath;
+        }
+    }
+
+    return fallbackCommand;
+}
+
+function createProcessingStageError(fileName: string, stage: string, error: unknown): AppError {
+    return new AppError(
+        `视频预处理失败：${fileName} 在${stage}时出错。${getProcessingErrorMessage(error)}`,
+        500,
+    );
+    return new AppError(
+        `视频预处理失败：${fileName} 在${stage}时出错。${getProcessingErrorMessage(error)}`,
+        500,
+    );
+}
+
+function createMissingKeyframesError(fileName: string): AppError {
+    return new AppError(
+        `视频预处理失败：${fileName} 未抽取到关键帧。请检查部署环境中的 ffmpeg 是否可用。`,
+        500,
+    );
+    return new AppError(
+        `视频预处理失败：${fileName} 未抽取到关键帧。请检查部署环境中的 ffmpeg 是否可用。`,
+        500,
+    );
+}
+
 function buildProcessingStageError(fileName: string, stage: string, error: unknown): AppError {
+    return createProcessingStageError(fileName, stage, error);
     return new AppError(
         `视频预处理失败：${fileName} 在${stage}时出错。${getProcessingErrorMessage(error)}`,
         500,
@@ -127,11 +185,13 @@ export async function processUploadedVideo(params: { buffer: Buffer; fileName: s
                     error: getProcessingErrorMessage(error),
                 });
                 if (requireFrames || requireFrameDescriptions) {
+                    throw createProcessingStageError(params.fileName, '提取关键帧', error);
                     throw buildProcessingStageError(params.fileName, '抽取关键帧', error);
                 }
             }
 
             if (frames.length === 0 && (requireFrames || requireFrameDescriptions)) {
+                throw createMissingKeyframesError(params.fileName);
                 throw new AppError(
                     `视频预处理失败：${params.fileName} 未抽取到关键帧。请检查部署环境中的 ffmpeg 是否可用。`,
                     500,
@@ -147,6 +207,7 @@ export async function processUploadedVideo(params: { buffer: Buffer; fileName: s
                         error: getProcessingErrorMessage(error),
                     });
                     if (requireFrameDescriptions) {
+                        throw createProcessingStageError(params.fileName, '生成关键帧描述', error);
                         throw buildProcessingStageError(params.fileName, '生成关键帧描述', error);
                     }
                 }
@@ -162,6 +223,7 @@ export async function processUploadedVideo(params: { buffer: Buffer; fileName: s
                     error: getProcessingErrorMessage(error),
                 });
                 if (requireTranscript) {
+                    throw createProcessingStageError(params.fileName, '语音转写', error);
                     throw buildProcessingStageError(params.fileName, '语音转写', error);
                 }
             }
@@ -291,7 +353,7 @@ async function createTempVideo(buffer: Buffer, fileName: string, mimeType: strin
 }
 
 async function probeVideoDurationMs(absolutePath: string): Promise<number> {
-    const { stdout } = await execFileAsync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', absolutePath]);
+    const { stdout } = await execFileAsync(FFPROBE_COMMAND, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', absolutePath]);
     const seconds = Number.parseFloat(stdout.trim());
     if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Unable to determine video duration.');
     return Math.round(seconds * 1000);
@@ -308,7 +370,7 @@ async function extractKeyframes(absolutePath: string, durationMs?: number): Prom
         const fileName = `${token}-${index + 1}.jpg`;
         const absoluteFramePath = path.join(PERSISTED_FRAME_ROOT, fileName);
         try {
-            await execFileAsync('ffmpeg', ['-y', '-ss', String(Math.max(0, timestampMs / 1000)), '-i', absolutePath, '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', absoluteFramePath]);
+            await execFileAsync(FFMPEG_COMMAND, ['-y', '-ss', String(Math.max(0, timestampMs / 1000)), '-i', absolutePath, '-frames:v', '1', '-vf', "scale='min(768,iw)':-2", '-q:v', '4', absoluteFramePath]);
             results.push({ url: `/chat-video-frames/${fileName}`, timestampMs, absolutePath: absoluteFramePath });
         } catch (error) {
             failures.push(`${formatDuration(timestampMs)}: ${getProcessingErrorMessage(error)}`);
@@ -342,7 +404,7 @@ async function describeFrames(frames: ExtractedFrameFile[]): Promise<string[]> {
 async function extractTranscript(absolutePath: string): Promise<string> {
     const tempAudioPath = path.join(TEMP_VIDEO_ROOT, `${Date.now()}-${randomUUID()}.wav`);
     try {
-        await execFileAsync('ffmpeg', ['-y', '-i', absolutePath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', tempAudioPath]);
+        await execFileAsync(FFMPEG_COMMAND, ['-y', '-i', absolutePath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', tempAudioPath]);
         const audioBuffer = await fs.readFile(tempAudioPath);
         const { text } = await transcribeWaveBuffer(audioBuffer, path.basename(tempAudioPath));
         return text.trim();

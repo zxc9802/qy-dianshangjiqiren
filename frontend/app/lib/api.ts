@@ -1,4 +1,5 @@
 const API_BASE = '/api';
+export type VideoSiteKey = 'veo' | 'seedance';
 
 export class ApiError extends Error {
     status: number;
@@ -248,7 +249,7 @@ export const api = {
         request<{ success: boolean }>(`/image-generations/${id}`, { method: 'DELETE' }),
 
     // Video workbench
-    startVideoSso: (body?: { redirectPath?: string }) =>
+    startVideoSso: (body?: { redirectPath?: string; site?: VideoSiteKey }) =>
         request<{ url: string; expiresAt: string }>('/video-sso/start', {
             method: 'POST',
             body: JSON.stringify(body || {}),

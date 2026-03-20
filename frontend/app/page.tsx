@@ -17,6 +17,7 @@ import {
   RESPONSE_MODEL_STORAGE_PREFIX,
   type ResponseModel,
 } from './lib/chat-models';
+import { VIDEO_SITE_METADATA, type VideoSiteKey } from './lib/video-sites';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from './lib/pcmRecorder';
 import { api } from './lib/api';
 import styles from './page.module.css';
@@ -42,6 +43,7 @@ interface BotInfo {
   isTrial: boolean;
   path: string;
   requiresAuth: boolean;
+  videoSite?: VideoSiteKey;
 }
 
 const WF_TEMPLATES = [
@@ -109,6 +111,35 @@ const VIDEO_WORKBENCH_TOOL: BotInfo = {
   isTrial: true,
   requiresAuth: true,
 };
+
+const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
+  {
+    id: 'video-workbench-veo',
+    name: 'VEO 视频工作台',
+    category: '瑙嗛宸ヤ綔鍙?',
+    description: '登录后进入 VEO 模型视频工作台，保留原有视频站入口。',
+    icon: <Video size={22} />,
+    iconColor: '#0f766e',
+    path: VIDEO_SITE_METADATA.veo.entryPath,
+    pointsPerUse: 0,
+    isTrial: true,
+    requiresAuth: true,
+    videoSite: 'veo',
+  },
+  {
+    id: 'video-workbench-seedance',
+    name: 'Seedance 2.0 视频工作台',
+    category: '瑙嗛宸ヤ綔鍙?',
+    description: '登录后进入 Seedance 2.0 视频工作台，适合直接做 Seedance 模型生成。',
+    icon: <Video size={22} />,
+    iconColor: '#c0841a',
+    path: VIDEO_SITE_METADATA.seedance.entryPath,
+    pointsPerUse: 0,
+    isTrial: true,
+    requiresAuth: true,
+    videoSite: 'seedance',
+  },
+];
 
 const BOT_ICON_MAP: Record<string, ReactNode> = {
   bot: <Bot size={22} />,
@@ -201,7 +232,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   requiresAuth: true,
 }));
 
-const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, VIDEO_WORKBENCH_TOOL];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, ...VIDEO_WORKBENCH_TOOLS];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,
@@ -358,7 +389,7 @@ export default function HomePage() {
     () => Array.from(new Set([
       ...BUILTIN_CATEGORY_ORDER,
       IMAGE_TOOL.category,
-      VIDEO_WORKBENCH_TOOL.category,
+      ...VIDEO_WORKBENCH_TOOLS.map((tool) => tool.category),
     ])),
     [],
   );
@@ -396,10 +427,10 @@ export default function HomePage() {
   };
 
   const openBot = async (bot: BotInfo) => {
-    if (bot.id === 'video-workbench-trial') {
+    if (bot.videoSite) {
       if (!isAuthenticated) { router.push('/login'); return; }
       try {
-        const result = await api.startVideoSso();
+        const result = await api.startVideoSso({ site: bot.videoSite });
         window.open(result.url, '_blank', 'noopener,noreferrer');
       } catch {
         router.push(bot.path);

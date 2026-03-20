@@ -4,8 +4,9 @@ nixPkgs = ["ffmpeg", "chromium", "python311", "python311Packages.pip"]
 [phases.build]
 cmds = [
   "python3 -m pip install -r requirements.txt",
-  "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium"
+  "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium",
+  "mkdir -p bin && cp \"$(command -v ffmpeg)\" bin/ffmpeg && cp \"$(command -v ffprobe)\" bin/ffprobe && chmod +x bin/ffmpeg bin/ffprobe"
 ]
 
 [start]
-cmd = "npm run start"
+cmd = "PATH=\"$PWD/bin:$PATH\" FFMPEG_PATH=\"$PWD/bin/ffmpeg\" FFPROBE_PATH=\"$PWD/bin/ffprobe\" npm run start"
