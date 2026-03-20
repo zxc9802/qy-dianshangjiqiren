@@ -728,6 +728,7 @@ export default function ChatPage() {
     const { user } = useAuthStore();
     const isAdmin = user?.role === 'admin';
     const adminBotKind: 'builtin' | 'custom' = botId.startsWith('custom-') ? 'custom' : 'builtin';
+    const canUseVideoBreakdownAttachments = isVideoBreakdownBot && !imageModeEnabled;
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -950,18 +951,18 @@ export default function ChatPage() {
     }, [conversationVideos]);
 
     useEffect(() => {
-        if (responseModel !== 'gemini' || imageModeEnabled || !isVideoBreakdownBot) {
+        if (!canUseVideoBreakdownAttachments) {
             setSelectedConversationVideoIds([]);
             setConversationVideoPickerOpen(false);
             setVideoResolutionNotice(null);
         }
-    }, [imageModeEnabled, isVideoBreakdownBot, responseModel]);
+    }, [canUseVideoBreakdownAttachments]);
 
     useEffect(() => {
-        if (!(isVideoBreakdownBot && responseModel === 'gemini' && !imageModeEnabled)) {
+        if (!canUseVideoBreakdownAttachments) {
             setConversationVideoPickerOpen(false);
         }
-    }, [imageModeEnabled, isVideoBreakdownBot, responseModel]);
+    }, [canUseVideoBreakdownAttachments]);
 
     useEffect(() => {
         if (!conversationVideoPickerOpen || typeof window === 'undefined') {
@@ -1198,7 +1199,6 @@ export default function ChatPage() {
         const isImageRequest = imageModeEnabled;
         const hasFiles = !isImageRequest && attachedFiles.length > 0;
         const hasManualHistoryVideos = !isImageRequest
-            && responseModel === 'gemini'
             && isVideoBreakdownBot
             && selectedConversationVideoIds.length > 0;
         if ((!rawText.trim() && !hasFiles && !hasManualHistoryVideos) || isStreaming || isUploading) return;
@@ -1232,7 +1232,7 @@ export default function ChatPage() {
             }
         }
 
-        const detectedRemoteVideoUrls = !isImageRequest && responseModel === 'gemini' && isVideoBreakdownBot
+        const detectedRemoteVideoUrls = !isImageRequest && isVideoBreakdownBot
             ? extractRemoteVideoUrls(rawText).slice(0, Math.max(0, MAX_ATTACHMENTS - parsedAttachments.length))
             : [];
         const messageText = stripRemoteVideoUrls(rawText, detectedRemoteVideoUrls);
@@ -1292,7 +1292,7 @@ export default function ChatPage() {
         }
 
         const referencedHistoryAttachments: AttachedFile[] = [];
-        if (!isImageRequest && responseModel === 'gemini' && isVideoBreakdownBot) {
+        if (!isImageRequest && isVideoBreakdownBot) {
             const resolution = chooseReferencedConversationVideos({
                 text: messageText,
                 manualSelectedIds: selectedConversationVideoIds,
@@ -1815,7 +1815,7 @@ export default function ChatPage() {
     const assistantMessages = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image');
     const showLoadingBubble = isLoadingConversation && !isStreaming && messages.length <= 1;
     const showStreamingBubble = isStreaming;
-    const showConversationVideoLibrary = isVideoBreakdownBot && responseModel === 'gemini' && !imageModeEnabled;
+    const showConversationVideoLibrary = canUseVideoBreakdownAttachments;
 
     const togglePinMsg = (id: string) => setSelectedMsgIds((current) => {
         const next = new Set(current);
@@ -2390,7 +2390,7 @@ export default function ChatPage() {
                                                                 </div>
                                                                 <div className={styles.conversationVideoName}>{video.fileName}</div>
                                                                 <div className={styles.conversationVideoSummary}>
-                                                                    {summaryText || '可作为历史视频重新交给 Gemini 直接分析。'}
+                                                                    {summaryText || '可作为历史视频参与本轮分析。'}
                                                                 </div>
                                                             </button>
                                                         );
@@ -2465,7 +2465,7 @@ export default function ChatPage() {
                     <button
                         onClick={() => void sendMessage(inputText)}
                         className={styles.sendBtn}
-                        disabled={(!inputText.trim() && attachedFiles.length === 0 && !(responseModel === 'gemini' && isVideoBreakdownBot && selectedConversationVideoIds.length > 0)) || isStreaming || isTranscribing || isUploading}
+                        disabled={(!inputText.trim() && attachedFiles.length === 0 && !(isVideoBreakdownBot && selectedConversationVideoIds.length > 0)) || isStreaming || isTranscribing || isUploading}
                     >
                         {imageModeEnabled ? <ImageIcon size={18} /> : <Send size={18} />}
                     </button>

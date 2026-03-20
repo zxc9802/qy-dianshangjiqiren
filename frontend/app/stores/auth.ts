@@ -14,11 +14,34 @@ interface AuthState {
     loadUser: () => Promise<void>;
 }
 
+function readStoredToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('token');
+}
+
+function readStoredUser(): UserInfo | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'string') {
+            return null;
+        }
+        return parsed as UserInfo;
+    } catch {
+        return null;
+    }
+}
+
+const initialToken = readStoredToken();
+const initialUser = initialToken ? readStoredUser() : null;
+
 export const useAuthStore = create<AuthState>((set) => ({
-    user: null,
-    token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
-    isLoading: true,
-    isAuthenticated: false,
+    user: initialUser,
+    token: initialToken,
+    isLoading: Boolean(initialToken && !initialUser),
+    isAuthenticated: Boolean(initialToken && initialUser),
 
     login: async (account, password) => {
         const res = await api.login({ account, password });
@@ -54,11 +77,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     },
 
     loadUser: async () => {
-        const token = localStorage.getItem('token');
+        const token = readStoredToken();
         if (!token) {
-            set({ isLoading: false, isAuthenticated: false });
+            set({ user: null, token: null, isLoading: false, isAuthenticated: false });
             return;
         }
+
+        const cachedUser = readStoredUser();
+        if (cachedUser) {
+            set({ user: cachedUser, token, isAuthenticated: true, isLoading: false });
+        } else {
+            set((state) => ({ ...state, token, isLoading: true }));
+        }
+
         try {
             const res = await api.getMe();
             const user = res.data;
