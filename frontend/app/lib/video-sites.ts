@@ -1,21 +1,14 @@
-export const VIDEO_SITE_KEYS = ['veo', 'seedance'] as const;
+export const VIDEO_SITE_KEYS = ['seedance'] as const;
 
 export type VideoSiteKey = (typeof VIDEO_SITE_KEYS)[number];
 
 export const VIDEO_SITE_METADATA = {
-    veo: {
-        key: 'veo',
-        name: 'VEO 视频工作台',
-        shortName: 'VEO',
-        entryPath: '/bot/video-workbench',
-        defaultAppUrl: 'https://spgzt.qyaijingxuan.top',
-    },
     seedance: {
         key: 'seedance',
-        name: 'Seedance 2.0 视频工作台',
-        shortName: 'Seedance 2.0',
-        entryPath: '/bot/video-workbench-seedance',
-        defaultAppUrl: 'https://seeda.zeabur.app',
+        name: '视频工作台',
+        shortName: '视频工作台',
+        entryPath: '/bot/video-workbench',
+        defaultAppUrl: 'https://disanfang.qyaijingxuan.top',
     },
 } as const satisfies Record<VideoSiteKey, {
     key: VideoSiteKey;
@@ -29,6 +22,6 @@ export function isVideoSiteKey(value: unknown): value is VideoSiteKey {
     return typeof value === 'string' && VIDEO_SITE_KEYS.includes(value as VideoSiteKey);
 }
 
-export function parseVideoSiteKey(value: unknown, fallback: VideoSiteKey = 'veo'): VideoSiteKey {
+export function parseVideoSiteKey(value: unknown, fallback: VideoSiteKey = 'seedance'): VideoSiteKey {
     return isVideoSiteKey(value) ? value : fallback;
 }

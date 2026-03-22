@@ -1,5 +1,5 @@
 const API_BASE = '/api';
-export type VideoSiteKey = 'veo' | 'seedance';
+export type VideoSiteKey = 'seedance';
 
 export class ApiError extends Error {
     status: number;

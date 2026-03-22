@@ -78,20 +78,20 @@ export function getMainAppUrl(): string {
     return resolvePublicUrl(readServerEnv('MAIN_APP_URL'), DEFAULT_MAIN_APP_URL);
 }
 
-function getVideoAppEnvVar(site: VideoSiteKey): string {
-    return site === 'seedance' ? 'VIDEO_APP_URL_SEEDANCE' : 'VIDEO_APP_URL';
+function getVideoAppEnvVar(): string {
+    return 'VIDEO_APP_URL_SEEDANCE';
 }
 
-export function getVideoAppUrl(site: VideoSiteKey = 'veo'): string {
+export function getVideoAppUrl(site: VideoSiteKey = 'seedance'): string {
     const meta = VIDEO_SITE_METADATA[site];
-    return resolvePublicUrl(readServerEnv(getVideoAppEnvVar(site)), meta.defaultAppUrl);
+    return resolvePublicUrl(readServerEnv(getVideoAppEnvVar()), meta.defaultAppUrl);
 }
 
 export function getAllVideoAppUrls(): string[] {
     return [...new Set(VIDEO_SITE_KEYS.map((site) => getVideoAppUrl(site)))];
 }
 
-export function getMainAppVideoEntryUrl(site: VideoSiteKey = 'veo'): string {
+export function getMainAppVideoEntryUrl(site: VideoSiteKey = 'seedance'): string {
     return `${getMainAppUrl()}${VIDEO_SITE_METADATA[site].entryPath}`;
 }
 
@@ -137,7 +137,7 @@ export function parseVideoRedirectPath(value: unknown): string | null {
 }
 
 export function buildVideoSsoUrl(ticketId: string, options?: { mainAppUrl?: string; site?: VideoSiteKey }): string {
-    const site = options?.site || 'veo';
+    const site = options?.site || 'seedance';
     const url = new URL('/', getVideoAppUrl(site));
     url.searchParams.set('ticket', ticketId);
     url.searchParams.set('mainApp', options?.mainAppUrl || getMainAppUrl());

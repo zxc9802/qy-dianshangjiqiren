@@ -13,17 +13,11 @@ const VIDEO_WORKBENCH_COPY: Record<VideoSiteKey, {
     description: string;
     buttonLabel: string;
 }> = {
-    veo: {
-        badge: 'VEO 模型工作台入口',
-        title: '登录主站后，直达 VEO 视频工作台',
-        description: '主站负责校验登录态并签发一次性 SSO ticket，点击后会自动进入 VEO 模型视频站。',
-        buttonLabel: '打开 VEO 视频工作台',
-    },
     seedance: {
-        badge: 'Seedance 2.0 工作台入口',
-        title: '登录主站后，直达 Seedance 2.0 视频工作台',
-        description: '主站负责校验登录态并签发一次性 SSO ticket，点击后会自动进入 Seedance 2.0 视频站。',
-        buttonLabel: '打开 Seedance 2.0 工作台',
+        badge: '视频工作台入口',
+        title: '登录主站后，直达视频工作台',
+        description: '主站负责校验登录态并签发一次性 SSO ticket，点击后会自动进入视频站。',
+        buttonLabel: '打开视频工作台',
     },
 };
 
