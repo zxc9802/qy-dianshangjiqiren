@@ -1,7 +1,7 @@
-import { redirect } from 'next/navigation';
+import VideoWorkbenchClient from '../video-workbench/VideoWorkbenchClient';
 
 export const dynamic = 'force-dynamic';
 
 export default function LegacyVideoWorkbenchSeedancePage() {
-    redirect('/bot/video-workbench');
+    return <VideoWorkbenchClient site="seedance" />;
 }
