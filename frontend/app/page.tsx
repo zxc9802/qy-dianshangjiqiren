@@ -402,12 +402,16 @@ export default function HomePage() {
 
   const openBot = async (bot: BotInfo) => {
     if (bot.videoSite) {
-      if (!isAuthenticated) { router.push('/login'); return; }
+      const launchPath = `${bot.path}?autostart=1`;
+      if (!isAuthenticated) {
+        router.push(`/login?redirect=${encodeURIComponent(launchPath)}`);
+        return;
+      }
       try {
         const result = await api.startVideoSso({ site: bot.videoSite });
         window.open(result.url, '_blank', 'noopener,noreferrer');
       } catch {
-        router.push(bot.path);
+        router.push(launchPath);
       }
       return;
     }

@@ -238,13 +238,72 @@ Error generating stack: `+c.message+`
       const MAIN_APP = 'https://www.qycm.top';
       const LS_TOKEN = '__veo_token';
       const LS_USER  = '__veo_user';
+      const LS_MAIN_APP = '__veo_main_app';
+
+      function normalizeMainAppUrl(value) {
+        if (!value || typeof value !== 'string') return '';
+        try {
+          const url = new URL(value.trim());
+          return url.origin.replace(/\/+$/, '');
+        } catch {
+          return '';
+        }
+      }
+
+      function getMainAppBase() {
+        const params = new URLSearchParams(location.search);
+        const fromQuery = normalizeMainAppUrl(params.get('mainApp'));
+        if (fromQuery) {
+          localStorage.setItem(LS_MAIN_APP, fromQuery);
+          return fromQuery;
+        }
+        const fromStorage = normalizeMainAppUrl(localStorage.getItem(LS_MAIN_APP));
+        return fromStorage || MAIN_APP;
+      }
+
+      function getCurrentRedirectPath() {
+        const relative = `${location.pathname}${location.search}${location.hash}`;
+        if (!relative || relative === '/') return '';
+        return relative;
+      }
+
+      function buildMainAppLaunchPath() {
+        const url = new URL('/bot/video-workbench', getMainAppBase());
+        url.searchParams.set('autostart', '1');
+        url.searchParams.set('openMode', 'replace');
+        const redirectPath = getCurrentRedirectPath();
+        if (redirectPath) {
+          url.searchParams.set('redirectPath', redirectPath);
+        }
+        return `${url.pathname}${url.search}`;
+      }
+
+      function buildMainAppLoginUrl() {
+        const url = new URL('/login', getMainAppBase());
+        url.searchParams.set('redirect', buildMainAppLaunchPath());
+        return url.toString();
+      }
+
+      function clearAuth() {
+        localStorage.removeItem(LS_TOKEN);
+        localStorage.removeItem(LS_USER);
+      }
+
+      function redirectToMainAppLogin() {
+        location.replace(buildMainAppLoginUrl());
+      }
 
       /* ─── SSO Authentication ─── */
       async function handleSsoTicket() {
         const params = new URLSearchParams(location.search);
         const ticket = params.get('ticket');
-        const mainApp = params.get('mainApp') || MAIN_APP;
-        if (!ticket) return;
+        const mainApp = getMainAppBase();
+        if (!ticket) {
+          if (!getToken()) {
+            redirectToMainAppLogin();
+          }
+          return;
+        }
         try {
           const res = await fetch(mainApp + '/api/video-sso/exchange', {
             method: 'POST',
@@ -256,10 +315,15 @@ Error generating stack: `+c.message+`
           const payload = json.data || json;
           if (payload.token) localStorage.setItem(LS_TOKEN, payload.token);
           if (payload.user) localStorage.setItem(LS_USER, JSON.stringify(payload.user));
-          // Clean URL
-          const clean = location.pathname;
+          const clean = typeof payload.redirectPath === 'string' && payload.redirectPath.startsWith('/')
+            ? payload.redirectPath
+            : location.pathname;
           history.replaceState(null, '', clean);
-        } catch (e) { console.warn('[VeoBridge] SSO:', e); }
+        } catch (e) {
+          console.warn('[VeoBridge] SSO:', e);
+          clearAuth();
+          redirectToMainAppLogin();
+        }
       }
 
       function getToken() { return localStorage.getItem(LS_TOKEN); }
@@ -268,17 +332,25 @@ Error generating stack: `+c.message+`
       }
 
       /* ─── API helpers ─── */
+      async function ensureApiOk(res, method) {
+        if (res.status === 401) {
+          clearAuth();
+          redirectToMainAppLogin();
+          throw new Error('AUTH_REQUIRED');
+        }
+        if (!res.ok) throw new Error(method + ' ' + res.status);
+      }
       async function apiGet(path) {
         const token = getToken();
-        const res = await fetch(MAIN_APP + path, {
+        const res = await fetch(getMainAppBase() + path, {
           headers: token ? { 'Authorization': 'Bearer ' + token } : {},
         });
-        if (!res.ok) throw new Error('API GET ' + res.status);
+        await ensureApiOk(res, 'API GET');
         return res.json();
       }
       async function apiPost(path, body) {
         const token = getToken();
-        const res = await fetch(MAIN_APP + path, {
+        const res = await fetch(getMainAppBase() + path, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -286,21 +358,21 @@ Error generating stack: `+c.message+`
           },
           body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error('API POST ' + res.status);
+        await ensureApiOk(res, 'API POST');
         return res.json();
       }
       async function apiDelete(path) {
         const token = getToken();
-        const res = await fetch(MAIN_APP + path, {
+        const res = await fetch(getMainAppBase() + path, {
           method: 'DELETE',
           headers: token ? { 'Authorization': 'Bearer ' + token } : {},
         });
-        if (!res.ok) throw new Error('API DELETE ' + res.status);
+        await ensureApiOk(res, 'API DELETE');
         return res.json();
       }
       async function apiPatch(path, body) {
         const token = getToken();
-        const res = await fetch(MAIN_APP + path, {
+        const res = await fetch(getMainAppBase() + path, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -308,7 +380,7 @@ Error generating stack: `+c.message+`
           },
           body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error('API PATCH ' + res.status);
+        await ensureApiOk(res, 'API PATCH');
         return res.json();
       }
 
@@ -508,7 +580,7 @@ Error generating stack: `+c.message+`
         } else {
           area.innerHTML = `<div class="vb-no-login">未登录 · <a id="vb-login-link">前往主站登录</a></div>`;
           const link = area.querySelector('#vb-login-link');
-          if (link) link.addEventListener('click', () => { window.open(MAIN_APP + '/login', '_blank'); });
+          if (link) link.addEventListener('click', () => { redirectToMainAppLogin(); });
         }
       }
 
