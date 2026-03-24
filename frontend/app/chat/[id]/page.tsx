@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
@@ -102,6 +102,7 @@ const DRAFT_CONVERSATION_SCOPE_PREFIX = 'draft-video-scope';
 const IMAGE_MODE_ASPECT_RATIO = '1:1';
 const TABLE_COPY_LABEL = '复制表格';
 const TABLE_COPIED_LABEL = '已复制表格';
+const STREAMING_RENDER_INTERVAL_MS = 90;
 
 interface ConversationVideoCatalogItem {
     clientVideoId: string;
@@ -701,7 +702,7 @@ export default function ChatPage() {
     const launcherDraftKeyRef = useRef<string | null>(null);
     const draftConversationScopeRef = useRef<string | null>(null);
     const conversationVideoPickerRef = useRef<HTMLDivElement>(null);
-    const streamingFrameRef = useRef<number | null>(null);
+    const streamingFlushTimerRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
     const tableCopyResetTimerRef = useRef<number | null>(null);
     const copiedTableButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -730,11 +731,14 @@ export default function ChatPage() {
     const adminBotKind: 'builtin' | 'custom' = botId.startsWith('custom-') ? 'custom' : 'builtin';
     const canUseVideoBreakdownAttachments = isVideoBreakdownBot && !imageModeEnabled;
 
-    const scrollToBottom = useCallback(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        messagesEndRef.current?.scrollIntoView({ behavior });
     }, []);
 
     useEffect(() => () => {
+        if (streamingFlushTimerRef.current !== null) {
+            window.clearTimeout(streamingFlushTimerRef.current);
+        }
         if (tableCopyResetTimerRef.current !== null) {
             window.clearTimeout(tableCopyResetTimerRef.current);
         }
@@ -746,8 +750,16 @@ export default function ChatPage() {
     }, []);
 
     useEffect(() => {
-        scrollToBottom();
-    }, [messages, streamingText, scrollToBottom]);
+        scrollToBottom('smooth');
+    }, [messages, scrollToBottom]);
+
+    useEffect(() => {
+        if (!streamingText) {
+            return;
+        }
+
+        scrollToBottom('auto');
+    }, [streamingText, scrollToBottom]);
 
     useEffect(() => {
         void loadConversations().catch((error) => console.error('[Chat] load conversations failed', error));
@@ -1016,15 +1028,37 @@ export default function ChatPage() {
         }),
         [messages],
     );
+    const deferredStreamingText = useDeferredValue(streamingText);
     const renderedStreamingText = useMemo(
-        () => (streamingText ? formatMessage(streamingText, true) : ''),
-        [streamingText],
+        () => (deferredStreamingText ? formatMessage(deferredStreamingText, true) : ''),
+        [deferredStreamingText],
     );
-
     const flushStreamingText = useCallback(() => {
-        streamingFrameRef.current = null;
-        setStreamingText(stripSuggestionBlock(pendingStreamingTextRef.current));
+        if (typeof window !== 'undefined' && streamingFlushTimerRef.current !== null) {
+            window.clearTimeout(streamingFlushTimerRef.current);
+        }
+
+        streamingFlushTimerRef.current = null;
+        const nextStreamingText = stripSuggestionBlock(pendingStreamingTextRef.current);
+        startTransition(() => {
+            setStreamingText(nextStreamingText);
+        });
     }, []);
+
+    const scheduleStreamingTextFlush = useCallback(() => {
+        if (typeof window === 'undefined') {
+            flushStreamingText();
+            return;
+        }
+
+        if (streamingFlushTimerRef.current !== null) {
+            return;
+        }
+
+        streamingFlushTimerRef.current = window.setTimeout(() => {
+            flushStreamingText();
+        }, STREAMING_RENDER_INTERVAL_MS);
+    }, [flushStreamingText]);
 
     const clearAttachments = useCallback(() => {
         attachedFiles.forEach((file) => {
@@ -1540,9 +1574,9 @@ export default function ChatPage() {
                             fullText += event.content;
                             pendingStreamingTextRef.current = fullText;
                             if (typeof window === 'undefined') {
-                                setStreamingText(stripSuggestionBlock(fullText));
-                            } else if (streamingFrameRef.current === null) {
-                                streamingFrameRef.current = window.requestAnimationFrame(flushStreamingText);
+                                flushStreamingText();
+                            } else {
+                                scheduleStreamingTextFlush();
                             }
                         } else if (event.type === 'suggestions' && Array.isArray(event.content)) {
                             setSuggestions(event.content);
@@ -1609,11 +1643,8 @@ export default function ChatPage() {
 
             const finalText = stripSuggestionBlock(fullText).trim();
             if (finalText) {
-                if (typeof window !== 'undefined' && streamingFrameRef.current !== null) {
-                    window.cancelAnimationFrame(streamingFrameRef.current);
-                }
-                streamingFrameRef.current = null;
                 pendingStreamingTextRef.current = finalText;
+                flushStreamingText();
                 const assistantTimestamp = Date.now();
                 setMessages((current) => [
                     ...current,
@@ -1629,10 +1660,10 @@ export default function ChatPage() {
                 { id: `err-${Date.now()}`, role: 'assistant', content: `出错了：${message}`, timestamp: Date.now() },
             ]);
         } finally {
-            if (typeof window !== 'undefined' && streamingFrameRef.current !== null) {
-                window.cancelAnimationFrame(streamingFrameRef.current);
+            if (typeof window !== 'undefined' && streamingFlushTimerRef.current !== null) {
+                window.clearTimeout(streamingFlushTimerRef.current);
             }
-            streamingFrameRef.current = null;
+            streamingFlushTimerRef.current = null;
             pendingStreamingTextRef.current = '';
             setIsStreaming(false);
             setStreamingText('');
@@ -1665,6 +1696,7 @@ export default function ChatPage() {
         refreshConversationVideos,
         responseModel,
         router,
+        scheduleStreamingTextFlush,
         selectedConversationVideoIds,
         wfState,
         workflowFlag,
@@ -2185,7 +2217,13 @@ export default function ChatPage() {
                         <div className={`${styles.message} ${styles.assistantMsg}`}>
                             <div className={styles.msgBubble}>
                                 {streamingText ? (
-                                    <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
+                                    renderedStreamingText ? (
+                                        <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
+                                    ) : (
+                                        <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
+                                            {streamingText}
+                                        </div>
+                                    )
                                 ) : imageModeEnabled ? (
                                     <div className={styles.imagePending}>
                                         <div className={styles.thinking}>

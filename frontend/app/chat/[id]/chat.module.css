@@ -577,6 +577,10 @@
     white-space: normal;
 }
 
+.streamingMsgContent {
+    white-space: pre-wrap;
+}
+
 .msgContent table {
     border-collapse: collapse;
     width: 100%;
