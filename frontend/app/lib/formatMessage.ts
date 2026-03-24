@@ -145,12 +145,39 @@ function formatCodeBlock(code: string): string {
     return `<pre><code>${escaped}</code></pre>`;
 }
 
+const COMPLETE_SUGGESTION_BLOCK_PATTERNS = [
+    /(?:\n|^)\s*```json\s*(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})\s*```\s*$/i,
+    /(?:\n|^)\s*(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})\s*$/i,
+];
+
+const PARTIAL_SUGGESTION_BLOCK_PATTERNS = [
+    /(?:\n|^)\s*```json\s*\{\s*"suggestions"\s*:\s*\[[\s\S]*$/i,
+    /(?:\n|^)\s*\{\s*"suggestions"\s*:\s*\[[\s\S]*$/i,
+];
+
+function findSuggestionBlock(text: string): RegExpMatchArray | null {
+    for (const pattern of COMPLETE_SUGGESTION_BLOCK_PATTERNS) {
+        const match = text.match(pattern);
+        if (match) {
+            return match;
+        }
+    }
+
+    return null;
+}
+
 export function stripSuggestionBlock(text: string): string {
-    return text
-        .replace(/```json\s*\{[\s\S]*?"suggestions"[\s\S]*?\}\s*```/gi, '')
-        .replace(/\n?```json[\s\S]*$/gi, '')
-        .replace(/\n?\{\s*"suggestions"\s*:\s*\[[\s\S]*$/g, '')
-        .trimEnd();
+    let nextText = text.trimEnd();
+
+    for (const pattern of PARTIAL_SUGGESTION_BLOCK_PATTERNS) {
+        nextText = nextText.replace(pattern, '').trimEnd();
+    }
+
+    for (const pattern of COMPLETE_SUGGESTION_BLOCK_PATTERNS) {
+        nextText = nextText.replace(pattern, '').trimEnd();
+    }
+
+    return nextText;
 }
 
 export function extractMarkdownTables(text: string): string[] {
@@ -348,8 +375,7 @@ export function formatMessage(text: string, options: FormatMessageOptions = {}):
 }
 
 export function extractSuggestions(text: string): string[] {
-    const match = text.match(/```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/i)
-        || text.match(/(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})/);
+    const match = findSuggestionBlock(text.trimEnd());
 
     if (!match) {
         return [];
