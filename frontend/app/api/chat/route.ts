@@ -6,7 +6,10 @@ import { DEFAULT_RESPONSE_MODEL, type ResponseModel } from '../../lib/chat-model
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
 import { readBackendUrl } from '../../lib/server-env';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
-import { requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const GLOBAL_RULES = `
 # 全局规则
@@ -93,14 +96,12 @@ async function streamByResponseModel(
             content: item.content,
         }));
 
-        const fullText = await requestYunwuOpenAIChat({
+        await streamYunwuOpenAIChat({
             systemPrompt,
             messages: openAIMessages,
             temperature: 1,
+            onText,
         });
-        if (fullText) {
-            onText(fullText);
-        }
         return;
     }
 
@@ -160,25 +161,6 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        if (responseModel === 'gpt-5.4') {
-            const openAIMessages: OpenAIChatMessage[] = filteredMessages.map((item) => ({
-                role: item.role === 'assistant' ? 'assistant' : 'user',
-                content: item.content,
-            }));
-            const fullText = await requestYunwuOpenAIChat({
-                systemPrompt: fullSystemPrompt,
-                messages: openAIMessages,
-                temperature: 1,
-            });
-
-            return Response.json({
-                success: true,
-                data: {
-                    content: fullText,
-                },
-            });
-        }
-
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             async start(controller) {
@@ -200,8 +182,10 @@ export async function POST(req: NextRequest) {
         return new Response(stream, {
             headers: {
                 'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
+                'Cache-Control': 'no-cache, no-transform',
                 Connection: 'keep-alive',
+                'Content-Encoding': 'none',
+                'X-Accel-Buffering': 'no',
             },
         });
     } catch (error) {

@@ -28,7 +28,6 @@ import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../../lib/server-chat-video';
 import {
-    requestYunwuOpenAIChat,
     streamYunwuOpenAIChat,
     type OpenAIChatMessage,
 } from '../../../../lib/yunwu-openai-chat';
@@ -38,6 +37,9 @@ import {
     type GeminiChatPart,
 } from '../../../../lib/yunwu-gemini-chat';
 import { generateImageViaBackend } from '../../../image-generations/proxy';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const GLOBAL_RULES = `
 # Global interaction rules
@@ -551,57 +553,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             }));
 
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
-        const shouldStreamVideoBreakdownGpt = inputType !== 'image'
+        const shouldStreamGpt = inputType !== 'image' && responseModel === 'gpt-5.4';
+        const shouldStreamVideoBreakdownGpt = shouldStreamGpt
             && responseModel === 'gpt-5.4'
             && bot.kind === 'builtin'
             && bot.routeId === VIDEO_BREAKDOWN_BOT_ID
             && (inputType === 'video' || attachments.some((attachment) => attachment.kind === 'video'));
-
-        if (inputType !== 'image' && responseModel === 'gpt-5.4' && !shouldStreamVideoBreakdownGpt) {
-            const fullResponse = await requestYunwuOpenAIChat({
-                systemPrompt,
-                messages: [
-                    ...historyMessages,
-                    { role: 'user', content: currentPromptText },
-                ],
-                temperature: 0.8,
-                maxTokens: 8192,
-            });
-
-            const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
-
-            await prisma.$transaction(async (tx) => {
-                await tx.message.create({
-                    data: {
-                        conversationId,
-                        role: 'assistant',
-                        content: cleanResponse,
-                        suggestions: suggestions.length ? JSON.stringify(suggestions) : null,
-                    },
-                });
-
-                await tx.conversation.update({
-                    where: { id: conversationId },
-                    data: {
-                        title: shouldSetInitialTitle
-                            ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
-                            : conversation.title,
-                        updatedAt: new Date(),
-                    },
-                });
-            });
-
-            await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
-
-            return Response.json({
-                success: true,
-                data: {
-                    kind: 'text',
-                    content: cleanResponse,
-                    suggestions,
-                },
-            });
-        }
 
         const encoder = new TextEncoder();
 
@@ -724,12 +681,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                     };
 
-                    if (shouldStreamVideoBreakdownGpt) {
+                    if (shouldStreamGpt) {
                         startHeartbeat();
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: 'status',
-                            content: VIDEO_BREAKDOWN_STREAM_STATUS,
-                        })}\n\n`));
+                        if (shouldStreamVideoBreakdownGpt) {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                                type: 'status',
+                                content: VIDEO_BREAKDOWN_STREAM_STATUS,
+                            })}\n\n`));
+                        }
 
                         await streamYunwuOpenAIChat({
                             systemPrompt,
@@ -817,6 +776,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache, no-transform',
                 Connection: 'keep-alive',
+                'Content-Encoding': 'none',
+                'X-Accel-Buffering': 'no',
             },
         });
     } catch (error) {
