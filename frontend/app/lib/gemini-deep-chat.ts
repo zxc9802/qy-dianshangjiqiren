@@ -39,6 +39,14 @@ function normalizeRequestUrl(rawUrl?: string): string {
     return url;
 }
 
+function attachApiKeyToUrl(rawUrl: string, apiKey: string): string {
+    const url = new URL(rawUrl);
+    if (!url.searchParams.has('key')) {
+        url.searchParams.set('key', apiKey);
+    }
+    return url.toString();
+}
+
 function buildGeminiContents(messages: GeminiChatMessage[]) {
     return messages
         .map((message) => {
@@ -84,18 +92,19 @@ export async function streamGeminiDeepThinkingChat({
     topP = 0.95,
     maxOutputTokens = 8192,
 }: StreamOptions): Promise<void> {
-    const apiKey = readServerEnv('GEMINI_DEEP_CHAT_API_KEY');
+    const apiKey = readServerEnv('GEMINI_DEEP_CHAT_API_KEY')?.trim();
     if (!apiKey) {
         throw new AppError('Missing Gemini deep thinking API key configuration', 500);
     }
 
-    const apiUrl = normalizeStreamUrl(readServerEnv('GEMINI_DEEP_CHAT_API_URL'));
+    const apiUrl = attachApiKeyToUrl(normalizeStreamUrl(readServerEnv('GEMINI_DEEP_CHAT_API_URL')), apiKey);
     const contents = buildGeminiContents(messages);
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${apiKey}`,
+            'x-goog-api-key': apiKey,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -167,18 +176,19 @@ export async function requestGeminiDeepThinkingChat({
     topP = 0.8,
     maxOutputTokens = 512,
 }: RequestOptions): Promise<string> {
-    const apiKey = readServerEnv('GEMINI_DEEP_CHAT_API_KEY');
+    const apiKey = readServerEnv('GEMINI_DEEP_CHAT_API_KEY')?.trim();
     if (!apiKey) {
         throw new AppError('Missing Gemini deep thinking API key configuration', 500);
     }
 
-    const apiUrl = normalizeRequestUrl(readServerEnv('GEMINI_DEEP_CHAT_API_URL'));
+    const apiUrl = attachApiKeyToUrl(normalizeRequestUrl(readServerEnv('GEMINI_DEEP_CHAT_API_URL')), apiKey);
     const contents = buildGeminiContents(messages);
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${apiKey}`,
+            'x-goog-api-key': apiKey,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
