@@ -102,7 +102,7 @@ const DRAFT_CONVERSATION_SCOPE_PREFIX = 'draft-video-scope';
 const IMAGE_MODE_ASPECT_RATIO = '1:1';
 const TABLE_COPY_LABEL = '复制表格';
 const TABLE_COPIED_LABEL = '已复制表格';
-const STREAMING_RENDER_INTERVAL_MS = 90;
+const STREAMING_RENDER_INTERVAL_MS = 140;
 
 interface ConversationVideoCatalogItem {
     clientVideoId: string;
@@ -697,12 +697,14 @@ export default function ChatPage() {
     const [imageStatusText, setImageStatusText] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const skipHydrationConversationIdRef = useRef<string | null>(null);
     const launcherDraftKeyRef = useRef<string | null>(null);
     const draftConversationScopeRef = useRef<string | null>(null);
     const conversationVideoPickerRef = useRef<HTMLDivElement>(null);
     const streamingFlushTimerRef = useRef<number | null>(null);
+    const streamingScrollFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
     const tableCopyResetTimerRef = useRef<number | null>(null);
     const copiedTableButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -732,12 +734,42 @@ export default function ChatPage() {
     const canUseVideoBreakdownAttachments = isVideoBreakdownBot && !imageModeEnabled;
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        const container = messagesContainerRef.current;
+        if (container) {
+            if (behavior === 'smooth' && typeof container.scrollTo === 'function') {
+                container.scrollTo({ top: container.scrollHeight, behavior });
+                return;
+            }
+
+            container.scrollTop = container.scrollHeight;
+            return;
+        }
+
         messagesEndRef.current?.scrollIntoView({ behavior });
     }, []);
+
+    const scheduleScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+        if (typeof window === 'undefined') {
+            scrollToBottom(behavior);
+            return;
+        }
+
+        if (streamingScrollFrameRef.current !== null) {
+            return;
+        }
+
+        streamingScrollFrameRef.current = window.requestAnimationFrame(() => {
+            streamingScrollFrameRef.current = null;
+            scrollToBottom(behavior);
+        });
+    }, [scrollToBottom]);
 
     useEffect(() => () => {
         if (streamingFlushTimerRef.current !== null) {
             window.clearTimeout(streamingFlushTimerRef.current);
+        }
+        if (streamingScrollFrameRef.current !== null) {
+            window.cancelAnimationFrame(streamingScrollFrameRef.current);
         }
         if (tableCopyResetTimerRef.current !== null) {
             window.clearTimeout(tableCopyResetTimerRef.current);
@@ -750,16 +782,16 @@ export default function ChatPage() {
     }, []);
 
     useEffect(() => {
-        scrollToBottom('smooth');
-    }, [messages, scrollToBottom]);
+        scheduleScrollToBottom('smooth');
+    }, [messages, scheduleScrollToBottom]);
 
     useEffect(() => {
         if (!streamingText) {
             return;
         }
 
-        scrollToBottom('auto');
-    }, [streamingText, scrollToBottom]);
+        scheduleScrollToBottom('auto');
+    }, [streamingText, scheduleScrollToBottom]);
 
     useEffect(() => {
         void loadConversations().catch((error) => console.error('[Chat] load conversations failed', error));
@@ -2081,7 +2113,7 @@ export default function ChatPage() {
                 </div>
             )}
 
-            <div className={styles.messagesContainer}>
+            <div ref={messagesContainerRef} className={styles.messagesContainer}>
                 <div className={styles.messages}>
                     {wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1] && (
                         <div className={styles.wfContextCard}>
@@ -2245,7 +2277,7 @@ export default function ChatPage() {
                             </div>
                         </div>
                     )}
-                    <div ref={messagesEndRef} />
+                    <div ref={messagesEndRef} className={styles.scrollAnchor} />
                 </div>
             </div>
 

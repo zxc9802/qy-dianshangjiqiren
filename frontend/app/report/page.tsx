@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import html2canvas from 'html2canvas';
+import JSZip from 'jszip';
+import { jsPDF } from 'jspdf';
 import { formatMessage } from '../lib/formatMessage';
 import {
     Loader2,
-    Camera,
+    Download,
     Calendar,
     Bot,
     MessageSquare,
@@ -32,6 +34,139 @@ interface ReportData {
 
 function renderMarkdown(md: string): string {
     return formatMessage(md, { tableClassName: 'report-table' });
+}
+
+const REPORT_EXPORT_SCALE = 2;
+const REPORT_EXPORT_SLICE_HEIGHT = 3200;
+const REPORT_MAX_SINGLE_IMAGE_HEIGHT = 28000;
+const REPORT_MAX_PDF_SLICES = 48;
+const REPORT_EXPORT_BACKGROUND = '#f8fafc';
+
+function sanitizeDownloadName(name: string): string {
+    const normalized = name
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return normalized || '分析报告';
+}
+
+function waitForNextFrame(): Promise<void> {
+    return new Promise((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+    });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                reject(new Error('Canvas export failed'));
+                return;
+            }
+
+            resolve(blob);
+        }, 'image/png');
+    });
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function getPdfPageOrientation(canvas: HTMLCanvasElement): 'portrait' | 'landscape' {
+    return canvas.width > canvas.height ? 'landscape' : 'portrait';
+}
+
+function exportPdfFromSlices(slices: HTMLCanvasElement[], fileName: string) {
+    const firstSlice = slices[0];
+    const firstFormat = [firstSlice.width, firstSlice.height] as [number, number];
+    const pdf = new jsPDF({
+        orientation: getPdfPageOrientation(firstSlice),
+        unit: 'px',
+        format: firstFormat,
+        compress: true,
+        hotfixes: ['px_scaling'],
+    });
+
+    slices.forEach((slice, index) => {
+        const format = [slice.width, slice.height] as [number, number];
+        if (index > 0) {
+            pdf.addPage(format, getPdfPageOrientation(slice));
+        }
+
+        pdf.addImage(slice, 'PNG', 0, 0, slice.width, slice.height, undefined, 'FAST');
+    });
+
+    downloadBlob(pdf.output('blob'), `${fileName}.pdf`);
+}
+
+async function captureReportSlices(element: HTMLDivElement): Promise<HTMLCanvasElement[]> {
+    await document.fonts?.ready;
+
+    const elementRect = element.getBoundingClientRect();
+    const captureWidth = Math.ceil(elementRect.width);
+    const host = document.createElement('div');
+    const viewport = document.createElement('div');
+    const clone = element.cloneNode(true) as HTMLDivElement;
+
+    host.style.position = 'fixed';
+    host.style.left = '-100000px';
+    host.style.top = '0';
+    host.style.pointerEvents = 'none';
+    host.style.opacity = '0';
+    host.style.zIndex = '-1';
+    host.style.background = REPORT_EXPORT_BACKGROUND;
+
+    viewport.style.width = `${captureWidth}px`;
+    viewport.style.overflow = 'hidden';
+    viewport.style.background = REPORT_EXPORT_BACKGROUND;
+
+    clone.querySelectorAll('.no-print').forEach((node) => node.remove());
+    clone.style.width = `${captureWidth}px`;
+    clone.style.margin = '0';
+    clone.style.transformOrigin = 'top left';
+
+    viewport.appendChild(clone);
+    host.appendChild(viewport);
+    document.body.appendChild(host);
+
+    try {
+        await waitForNextFrame();
+        const totalHeight = Math.ceil(clone.scrollHeight);
+        const slices: HTMLCanvasElement[] = [];
+
+        for (let offset = 0; offset < totalHeight; offset += REPORT_EXPORT_SLICE_HEIGHT) {
+            const sliceHeight = Math.min(REPORT_EXPORT_SLICE_HEIGHT, totalHeight - offset);
+            viewport.style.height = `${sliceHeight}px`;
+            clone.style.transform = `translateY(-${offset}px)`;
+
+            await waitForNextFrame();
+
+            const sliceCanvas = await html2canvas(viewport, {
+                scale: REPORT_EXPORT_SCALE,
+                useCORS: true,
+                backgroundColor: REPORT_EXPORT_BACKGROUND,
+                width: captureWidth,
+                height: sliceHeight,
+                windowWidth: captureWidth,
+                windowHeight: sliceHeight,
+                scrollX: 0,
+                scrollY: 0,
+            });
+
+            slices.push(sliceCanvas);
+        }
+
+        return slices;
+    } finally {
+        host.remove();
+    }
 }
 
 export default function ReportPage() {
@@ -84,17 +219,52 @@ export default function ReportPage() {
         if (!pageRef.current) return;
         setSaving(true);
         try {
-            const canvas = await html2canvas(pageRef.current, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: '#f8fafc',
-                windowWidth: 1280,
-            });
-            const link = document.createElement('a');
-            link.download = `${report?.title || '分析报告'}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        } catch {
+            const baseName = sanitizeDownloadName(report?.title || '分析报告');
+            const slices = await captureReportSlices(pageRef.current);
+            if (!slices.length) {
+                throw new Error('No exportable content');
+            }
+
+            const totalCanvasHeight = slices.reduce((sum, canvas) => sum + canvas.height, 0);
+            if (totalCanvasHeight <= REPORT_MAX_SINGLE_IMAGE_HEIGHT) {
+                const mergedCanvas = document.createElement('canvas');
+                mergedCanvas.width = slices[0].width;
+                mergedCanvas.height = totalCanvasHeight;
+
+                const context = mergedCanvas.getContext('2d');
+                if (!context) {
+                    throw new Error('Canvas context unavailable');
+                }
+
+                let offsetY = 0;
+                for (const slice of slices) {
+                    context.drawImage(slice, 0, offsetY);
+                    offsetY += slice.height;
+                }
+
+                const mergedBlob = await canvasToBlob(mergedCanvas);
+                downloadBlob(mergedBlob, `${baseName}.png`);
+                return;
+            }
+
+            if (slices.length <= REPORT_MAX_PDF_SLICES) {
+                exportPdfFromSlices(slices, baseName);
+                alert('报告较长，已自动导出为 PDF。');
+                return;
+            }
+
+            const zip = new JSZip();
+            for (const [index, slice] of slices.entries()) {
+                const blob = await canvasToBlob(slice);
+                const fileIndex = String(index + 1).padStart(2, '0');
+                zip.file(`${baseName}-${fileIndex}.png`, blob);
+            }
+
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            downloadBlob(zipBlob, `${baseName}-长图分片.zip`);
+            alert('报告过长，已自动拆分为多张图片打包下载。');
+        } catch (error) {
+            console.error('[Report] save image failed', error);
             alert('保存报告图片失败，请重试');
         } finally {
             setSaving(false);
@@ -149,7 +319,7 @@ export default function ReportPage() {
                         opacity: saving ? 0.7 : 1,
                     }}
                 >
-                    {saving ? <><Loader2 size={14} className="animate-spin" /> 保存中...</> : <><Camera size={14} /> 保存图片</>}
+                    {saving ? <><Loader2 size={14} className="animate-spin" /> 导出中...</> : <><Download size={14} /> 下载报告</>}
                 </button>
                 <button
                     onClick={handleClose}
