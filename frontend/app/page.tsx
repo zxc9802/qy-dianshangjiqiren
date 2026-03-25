@@ -15,8 +15,10 @@ import {
   DEFAULT_RESPONSE_MODEL,
   RESPONSE_MODEL_OPTIONS,
   RESPONSE_MODEL_STORAGE_PREFIX,
+  isResponseModel,
   type ResponseModel,
 } from './lib/chat-models';
+import { putLaunchChatDraft } from './lib/launch-chat-drafts';
 import { VIDEO_SITE_METADATA, type VideoSiteKey } from './lib/video-sites';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from './lib/pcmRecorder';
 import { api } from './lib/api';
@@ -29,7 +31,7 @@ import {
   Flag, Smartphone, BarChart3, Calculator, GitBranch, Shield,
   Wallet, AlertTriangle, Settings, SearchIcon, FlaskConical, Brain,
   Package, BookOpen, Landmark, Menu, Plus, Sprout, ChevronDown, ChevronRight,
-  Mic, Send, Loader2, Video,
+  Mic, Paperclip, Send, Loader2, Video, X,
 } from 'lucide-react';
 
 interface BotInfo {
@@ -114,6 +116,20 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
     videoSite: 'seedance',
   },
 ];
+
+const HOMEPAGE_MAX_ATTACHMENTS = 10;
+const HOMEPAGE_ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v';
+
+function getHomepageAttachmentKind(file: File): 'document' | 'image' | 'video' {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+    return 'image';
+  }
+  if (['mp4', 'mov', 'webm', 'm4v'].includes(ext)) {
+    return 'video';
+  }
+  return 'document';
+}
 
 const BOT_ICON_MAP: Record<string, ReactNode> = {
   bot: <Bot size={22} />,
@@ -229,12 +245,14 @@ export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [generalPrompt, setGeneralPrompt] = useState('');
+  const [generalAttachedFiles, setGeneralAttachedFiles] = useState<File[]>([]);
   const [generalResponseModel, setGeneralResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
   const [isGeneralRecording, setIsGeneralRecording] = useState(false);
   const [isGeneralTranscribing, setIsGeneralTranscribing] = useState(false);
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const generalRecorderRef = useRef<Pcm16Recorder | null>(null);
+  const generalFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -249,7 +267,7 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`);
-    if (saved === 'gpt-5.4' || saved === 'gemini') {
+    if (isResponseModel(saved)) {
       setGeneralResponseModel(saved);
       return;
     }
@@ -280,26 +298,74 @@ export default function HomePage() {
     return false;
   }, [isAuthenticated, router]);
 
-  const buildGenericChatUrl = useCallback((draft?: string) => {
+  const buildGenericChatUrl = useCallback((draft?: string, launchDraftId?: string | null) => {
     const query = new URLSearchParams();
     query.set('rm', generalResponseModel);
     if (draft?.trim()) {
       query.set('draft', draft.trim());
     }
+    if (launchDraftId) {
+      query.set('ld', launchDraftId);
+    }
     return `/chat/${GENERIC_CHAT_BOT_ID}?${query.toString()}`;
   }, [generalResponseModel]);
 
-  const openGenericChat = useCallback((draft?: string) => {
+  const openGenericChat = useCallback(async (draft?: string) => {
     if (!ensureAuthenticated()) return;
-    router.push(buildGenericChatUrl(draft));
-  }, [buildGenericChatUrl, ensureAuthenticated, router]);
+    let launchDraftId: string | null = null;
 
-  const submitGenericChat = useCallback(() => {
+    if (generalAttachedFiles.length > 0) {
+      try {
+        const draftRecord = await putLaunchChatDraft({
+          prompt: draft?.trim() || '',
+          files: generalAttachedFiles,
+        });
+        launchDraftId = draftRecord.id;
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '附件暂存失败，请重试');
+        return;
+      }
+    }
+
+    setGeneralPrompt('');
+    setGeneralAttachedFiles([]);
+    router.push(buildGenericChatUrl(draft, launchDraftId));
+  }, [buildGenericChatUrl, ensureAuthenticated, generalAttachedFiles, router]);
+
+  const submitGenericChat = useCallback(async () => {
     const text = generalPrompt.trim();
     if (!ensureAuthenticated()) return;
-    setGeneralPrompt('');
-    openGenericChat(text);
-  }, [ensureAuthenticated, generalPrompt, openGenericChat]);
+    if (!text && generalAttachedFiles.length === 0) {
+      return;
+    }
+    await openGenericChat(text);
+  }, [ensureAuthenticated, generalAttachedFiles.length, generalPrompt, openGenericChat]);
+
+  const handleGeneralFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    event.target.value = '';
+
+    try {
+      if (generalAttachedFiles.length >= HOMEPAGE_MAX_ATTACHMENTS) {
+        throw new Error(`一次最多上传 ${HOMEPAGE_MAX_ATTACHMENTS} 个文件`);
+      }
+
+      const availableSlots = HOMEPAGE_MAX_ATTACHMENTS - generalAttachedFiles.length;
+      const nextFiles = files.slice(0, availableSlots);
+      setGeneralAttachedFiles((current) => [...current, ...nextFiles]);
+
+      if (files.length > availableSlots) {
+        alert(`一次最多上传 ${HOMEPAGE_MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '文件上传失败');
+    }
+  }, [generalAttachedFiles.length]);
+
+  const removeGeneralAttachment = useCallback((index: number) => {
+    setGeneralAttachedFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  }, []);
 
   const toggleGeneralVoice = useCallback(async () => {
     if (!ensureAuthenticated()) return;
@@ -328,7 +394,7 @@ export default function HomePage() {
           throw new Error(data.error || '语音识别失败');
         }
 
-        router.push(buildGenericChatUrl(transcript));
+        await openGenericChat(transcript);
       } catch (error) {
         alert(error instanceof Error ? error.message : '语音识别失败');
       } finally {
@@ -343,7 +409,7 @@ export default function HomePage() {
     } catch (error) {
       alert(error instanceof Error ? error.message : '无法访问麦克风');
     }
-  }, [buildGenericChatUrl, ensureAuthenticated, isGeneralRecording, router]);
+  }, [ensureAuthenticated, isGeneralRecording, openGenericChat]);
 
   const launchWorkflow = (tpl: typeof WF_TEMPLATES[0]) => {
     if (!isAuthenticated) { router.push('/login'); return; }
@@ -438,6 +504,8 @@ export default function HomePage() {
       </div>
     </div>
   );
+
+  const canSubmitGeneralChat = generalPrompt.trim().length > 0 || generalAttachedFiles.length > 0;
 
   if (isLoading) return <div className={styles.loading}><div className={styles.spinner} /></div>;
 
@@ -567,14 +635,22 @@ export default function HomePage() {
             </div>
 
             <div className={styles.generalComposerCard}>
+              <input
+                ref={generalFileInputRef}
+                type="file"
+                multiple
+                accept={HOMEPAGE_ATTACHMENT_ACCEPT}
+                onChange={handleGeneralFileUpload}
+                style={{ display: 'none' }}
+              />
               <textarea
                 value={generalPrompt}
                 onChange={(event) => setGeneralPrompt(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
-                    if (generalPrompt.trim()) {
-                      submitGenericChat();
+                    if (canSubmitGeneralChat) {
+                      void submitGenericChat();
                     }
                   }
                 }}
@@ -585,14 +661,59 @@ export default function HomePage() {
                 rows={2}
               />
 
+              {generalAttachedFiles.length > 0 && (
+                <div className={styles.generalComposerAttachmentList}>
+                  {generalAttachedFiles.map((file, index) => {
+                    const kind = getHomepageAttachmentKind(file);
+                    const icon = kind === 'image'
+                      ? <ImageIcon size={14} />
+                      : kind === 'video'
+                        ? <Video size={14} />
+                        : <FileText size={14} />;
+
+                    return (
+                      <div key={`${file.name}-${file.size}-${index}`} className={styles.generalComposerAttachmentChip}>
+                        <span className={styles.generalComposerAttachmentIcon}>{icon}</span>
+                        <span className={styles.generalComposerAttachmentName}>{file.name}</span>
+                        <button
+                          type="button"
+                          className={styles.generalComposerAttachmentRemove}
+                          onClick={() => removeGeneralAttachment(index)}
+                          aria-label={`移除 ${file.name}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className={styles.generalComposerFooter}>
+                <div className={styles.generalComposerFooterStart}>
+                  <button
+                    type="button"
+                    className={styles.generalComposerUploadBtn}
+                    onClick={() => generalFileInputRef.current?.click()}
+                    disabled={isGeneralRecording || isGeneralTranscribing}
+                  >
+                    <Paperclip size={16} />
+                    {generalAttachedFiles.length > 0
+                      ? `已选 ${generalAttachedFiles.length} 个附件`
+                      : '上传附件'}
+                  </button>
+                </div>
                 <div className={styles.generalComposerControls}>
                   <div className={styles.generalComposerModelSwitcher}>
                     <select
                       aria-label="通用聊天回答模型"
                       className={styles.generalComposerModelSelect}
                       value={generalResponseModel}
-                      onChange={(event) => setGeneralResponseModel(event.target.value as ResponseModel)}
+                      onChange={(event) => {
+                        if (isResponseModel(event.target.value)) {
+                          setGeneralResponseModel(event.target.value);
+                        }
+                      }}
                       disabled={isGeneralRecording || isGeneralTranscribing}
                     >
                       {RESPONSE_MODEL_OPTIONS.map((option) => (
@@ -618,11 +739,11 @@ export default function HomePage() {
                     type="button"
                     className={styles.generalComposerSendBtn}
                     onClick={() => {
-                      if (generalPrompt.trim()) {
-                        submitGenericChat();
+                      if (canSubmitGeneralChat) {
+                        void submitGenericChat();
                         return;
                       }
-                      openGenericChat();
+                      void openGenericChat();
                     }}
                     disabled={isGeneralRecording || isGeneralTranscribing}
                   >

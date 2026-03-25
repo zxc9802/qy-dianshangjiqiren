@@ -19,11 +19,12 @@ import {
 } from '../../../../lib/conversation-message-codec';
 import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
 import { VIDEO_BREAKDOWN_BOT_ID } from '../../../../lib/builtin-bots';
-import { DEFAULT_RESPONSE_MODEL } from '../../../../lib/chat-models';
+import { DEFAULT_RESPONSE_MODEL, RESPONSE_MODEL_VALUES } from '../../../../lib/chat-models';
 import {
     extractSuggestions as extractSharedSuggestions,
     stripSuggestionBlock as stripSharedSuggestionBlock,
 } from '../../../../lib/formatMessage';
+import { streamGeminiDeepThinkingChat } from '../../../../lib/gemini-deep-chat';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../../lib/server-chat-video';
@@ -82,7 +83,7 @@ const messageRequestSchema = z.object({
     displayContent: z.string().optional(),
     inputType: z.enum(['text', 'voice', 'file', 'image', 'video']).default('text'),
     aspectRatio: z.string().min(3).max(10).optional(),
-    responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
+    responseModel: z.enum(RESPONSE_MODEL_VALUES).default(DEFAULT_RESPONSE_MODEL),
     attachments: z.array(attachmentSchema).max(10).default([]),
 });
 
@@ -553,9 +554,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             }));
 
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
-        const shouldStreamGpt = inputType !== 'image' && responseModel === 'gpt-5.4';
-        const shouldStreamVideoBreakdownGpt = shouldStreamGpt
-            && responseModel === 'gpt-5.4'
+        const shouldStreamOpenAI = inputType !== 'image' && responseModel === 'gpt-5.4';
+        const shouldStreamVideoBreakdownGpt = shouldStreamOpenAI
             && bot.kind === 'builtin'
             && bot.routeId === VIDEO_BREAKDOWN_BOT_ID
             && (inputType === 'video' || attachments.some((attachment) => attachment.kind === 'video'));
@@ -681,7 +681,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                     };
 
-                    if (shouldStreamGpt) {
+                    if (shouldStreamOpenAI) {
                         startHeartbeat();
                         if (shouldStreamVideoBreakdownGpt) {
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -698,6 +698,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             ],
                             temperature: 0.8,
                             maxTokens: 8192,
+                            onText: (textChunk) => {
+                                if (!textChunk) {
+                                    return;
+                                }
+
+                                fullResponse += textChunk;
+                                flushVisibleText();
+                            },
+                        });
+                    } else if (responseModel === 'gemini-deep-thinking') {
+                        const deepThinkingMessages: GeminiChatMessage[] = historyMessages.map((message) => ({
+                            role: message.role,
+                            content: typeof message.content === 'string' ? message.content : '',
+                        }));
+                        deepThinkingMessages.push({
+                            role: 'user',
+                            content: currentPromptText,
+                        });
+
+                        await streamGeminiDeepThinkingChat({
+                            systemPrompt,
+                            messages: deepThinkingMessages,
+                            temperature: 0.8,
+                            topP: 0.95,
+                            maxOutputTokens: 8192,
                             onText: (textChunk) => {
                                 if (!textChunk) {
                                     return;

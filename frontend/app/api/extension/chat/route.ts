@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getUserId, errorResponse } from '../../../lib/auth';
-import { DEFAULT_RESPONSE_MODEL } from '../../../lib/chat-models';
+import { DEFAULT_RESPONSE_MODEL, RESPONSE_MODEL_VALUES } from '../../../lib/chat-models';
 import {
     buildExtensionContents,
     resolveExtensionBot,
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
             mode: z.enum(['summary', 'chat']).default('chat'),
             messages: z.array(chatMessageSchema).default([]),
             pageContext: pageContextSchema.optional(),
-            responseModel: z.enum(['gemini', 'gpt-5.4']).default(DEFAULT_RESPONSE_MODEL),
+            responseModel: z.enum(RESPONSE_MODEL_VALUES).default(DEFAULT_RESPONSE_MODEL),
         }).parse(await req.json());
 
         const { bot, systemPrompt } = await resolveExtensionBot(

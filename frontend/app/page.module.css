@@ -541,9 +541,100 @@
 
 .generalComposerFooter {
   display: flex;
-  justify-content: flex-end;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
   margin-top: auto;
   padding-top: 18px;
+}
+
+.generalComposerFooterStart {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.generalComposerUploadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(241, 245, 249, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  transition: transform var(--duration-fast) var(--ease-spring),
+    background var(--duration-fast) var(--ease-smooth),
+    border-color var(--duration-fast) var(--ease-smooth),
+    color var(--duration-fast) var(--ease-smooth);
+}
+
+.generalComposerUploadBtn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(219, 234, 254, 0.95);
+  border-color: rgba(96, 165, 250, 0.28);
+  color: #1d4ed8;
+}
+
+.generalComposerUploadBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.generalComposerAttachmentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.generalComposerAttachmentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.generalComposerAttachmentIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  flex-shrink: 0;
+}
+
+.generalComposerAttachmentName {
+  max-width: min(280px, 45vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.generalComposerAttachmentRemove {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #64748b;
+  transition: background var(--duration-fast) var(--ease-smooth),
+    color var(--duration-fast) var(--ease-smooth);
+}
+
+.generalComposerAttachmentRemove:hover {
+  background: rgba(226, 232, 240, 0.9);
+  color: #0f172a;
 }
 
 .generalComposerModelSwitcher {
@@ -904,11 +995,26 @@
 
   .generalComposerFooter {
     padding-top: 20px;
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .generalComposerControls {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .generalComposerFooterStart {
+    width: 100%;
+  }
+
+  .generalComposerUploadBtn {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .generalComposerAttachmentName {
+    max-width: calc(100vw - 140px);
   }
 
   .generalComposerModelSwitcher {

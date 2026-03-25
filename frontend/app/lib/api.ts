@@ -1,3 +1,5 @@
+import type { ResponseModel } from './chat-models';
+
 const API_BASE = '/api';
 export type VideoSiteKey = 'seedance';
 
@@ -203,7 +205,7 @@ export const api = {
         displayContent?: string;
         inputType?: 'text' | 'voice' | 'file' | 'image' | 'video';
         aspectRatio?: string;
-        responseModel?: 'gemini' | 'gpt-5.4';
+        responseModel?: ResponseModel;
         attachments?: ChatAttachmentPayload[];
     } | FormData) => {
         const token = getToken();

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DEFAULT_RESPONSE_MODEL, isResponseModel } from '../../lib/chat-models';
 import { processUploadedVideo } from '../../lib/server-chat-video';
 import { describeImageWithGemini } from '../../lib/server-gemini-media';
 import { readServerEnv } from '../../lib/server-env';
@@ -74,7 +75,8 @@ export async function POST(req: NextRequest) {
     try {
         const formData = await req.formData();
         const file = formData.get('file');
-        const responseModel = formData.get('responseModel') === 'gpt-5.4' ? 'gpt-5.4' : 'gemini';
+        const rawResponseModel = formData.get('responseModel');
+        const responseModel = isResponseModel(rawResponseModel) ? rawResponseModel : DEFAULT_RESPONSE_MODEL;
 
         if (!(file instanceof File)) {
             return NextResponse.json({ error: '未选择文件' }, { status: 400 });

@@ -3,6 +3,7 @@ import { AppError } from './auth';
 import { BUILTIN_BOT_MAP } from './builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from './builtin-knowledge';
 import { DEFAULT_RESPONSE_MODEL, type ResponseModel } from './chat-models';
+import { streamGeminiDeepThinkingChat } from './gemini-deep-chat';
 import { getSystemPromptByBotId } from './server-bot-prompts';
 import { streamYunwuGeminiChat } from './yunwu-gemini-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from './yunwu-openai-chat';
@@ -202,6 +203,20 @@ export async function streamExtensionCompletion(
             systemPrompt,
             messages: contents,
             temperature: 0.8,
+            onText,
+        });
+        return;
+    }
+
+    if (responseModel === 'gemini-deep-thinking') {
+        await streamGeminiDeepThinkingChat({
+            systemPrompt,
+            messages: contents.map((message) => ({
+                role: message.role,
+                content: typeof message.content === 'string' ? message.content : '',
+            })),
+            temperature: 0.8,
+            topP: 0.95,
             onText,
         });
         return;

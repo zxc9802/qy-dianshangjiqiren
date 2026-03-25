@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { AppError } from '../../lib/auth';
 import { BUILTIN_BOT_MAP } from '../../lib/builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
-import { DEFAULT_RESPONSE_MODEL, type ResponseModel } from '../../lib/chat-models';
+import { DEFAULT_RESPONSE_MODEL, isResponseModel, type ResponseModel } from '../../lib/chat-models';
+import { streamGeminiDeepThinkingChat } from '../../lib/gemini-deep-chat';
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
 import { readBackendUrl } from '../../lib/server-env';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
@@ -105,6 +106,20 @@ async function streamByResponseModel(
         return;
     }
 
+    if (responseModel === 'gemini-deep-thinking') {
+        await streamGeminiDeepThinkingChat({
+            systemPrompt,
+            messages: messages.map((item) => ({
+                role: item.role === 'assistant' ? 'assistant' : 'user',
+                content: item.content,
+            })),
+            temperature: 1,
+            topP: 1,
+            onText,
+        });
+        return;
+    }
+
     await streamYunwuGeminiChat({
         systemPrompt,
         messages: messages.map((item) => ({
@@ -130,7 +145,7 @@ export async function POST(req: NextRequest) {
         };
 
         const botIdString = String(body.botId ?? '').trim();
-        const responseModel = body.responseModel === 'gpt-5.4' ? 'gpt-5.4' : DEFAULT_RESPONSE_MODEL;
+        const responseModel = isResponseModel(body.responseModel) ? body.responseModel : DEFAULT_RESPONSE_MODEL;
         const normalizedMessages = normalizeMessages(body.messages, body.conversationHistory, body.message);
         const builtinFallbackPrompt = BUILTIN_BOT_MAP[botIdString]?.systemPromptFallback;
         const fallbackPrompt = typeof body.systemPrompt === 'string' && body.systemPrompt.trim()

@@ -18,8 +18,10 @@ import {
 } from '../../lib/chat-attachments';
 import {
     DEFAULT_RESPONSE_MODEL,
+    getResponseModelLabel,
     RESPONSE_MODEL_OPTIONS,
     RESPONSE_MODEL_STORAGE_PREFIX,
+    isResponseModel,
     type ResponseModel,
 } from '../../lib/chat-models';
 import {
@@ -28,6 +30,7 @@ import {
     migrateConversationVideoScope,
     putLocalConversationVideo,
 } from '../../lib/local-conversation-videos';
+import { consumeLaunchChatDraft } from '../../lib/launch-chat-drafts';
 import {
     formatMessage as formatRichMessage,
     stripSuggestionBlock as stripRichSuggestionBlock,
@@ -409,6 +412,21 @@ function isDirectGeminiVideoBypassCandidate(file: File, model: ResponseModel): b
     return file.type.startsWith('video/') || ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
 }
 
+function createAttachedFileFromLocalFile(file: File): AttachedFile {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+    const isVideo = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
+
+    return {
+        file,
+        name: file.name,
+        previewUrl: isImage ? URL.createObjectURL(file) : null,
+        isImage,
+        isVideo,
+        kind: isVideo ? 'video' : isImage ? 'image' : 'document',
+    };
+}
+
 function dedupeConversationVideos(videos: ConversationVideoCatalogItem[]): ConversationVideoCatalogItem[] {
     const seen = new Set<string>();
     return videos.filter((video) => {
@@ -660,11 +678,11 @@ export default function ChatPage() {
     const workflowFlag = searchParams.get('wf');
     const urlName = searchParams.get('name');
     const launcherDraft = searchParams.get('draft')?.trim() || '';
-    const requestedResponseModel = searchParams.get('rm') === 'gpt-5.4'
-        ? 'gpt-5.4'
-        : searchParams.get('rm') === 'gemini'
-            ? 'gemini'
-            : null;
+    const launchDraftId = searchParams.get('ld')?.trim() || '';
+    const rawRequestedResponseModel = searchParams.get('rm');
+    const requestedResponseModel = isResponseModel(rawRequestedResponseModel)
+        ? rawRequestedResponseModel
+        : null;
     const builtinBot = BUILTIN_BOT_MAP[botId];
     const fallbackBotName = BOT_NAMES[botId] || urlName || 'AI助手';
     const fallbackWelcome = builtinBot?.welcome
@@ -693,6 +711,7 @@ export default function ChatPage() {
     const [imageModeEnabled, setImageModeEnabled] = useState(false);
     const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
     const [isStreaming, setIsStreaming] = useState(false);
+    const [isHydratingLaunchDraft, setIsHydratingLaunchDraft] = useState(Boolean(launchDraftId));
     const [streamingText, setStreamingText] = useState('');
     const [imageStatusText, setImageStatusText] = useState('');
     const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -701,6 +720,7 @@ export default function ChatPage() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const skipHydrationConversationIdRef = useRef<string | null>(null);
     const launcherDraftKeyRef = useRef<string | null>(null);
+    const hydratedLaunchDraftIdRef = useRef<string | null>(null);
     const draftConversationScopeRef = useRef<string | null>(null);
     const conversationVideoPickerRef = useRef<HTMLDivElement>(null);
     const streamingFlushTimerRef = useRef<number | null>(null);
@@ -830,7 +850,7 @@ export default function ChatPage() {
             return;
         }
         const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`);
-        if (saved === 'gpt-5.4' || saved === 'gemini') {
+        if (isResponseModel(saved)) {
             setResponseModel(saved);
             return;
         }
@@ -841,6 +861,54 @@ export default function ChatPage() {
         if (typeof window === 'undefined') return;
         window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`, responseModel);
     }, [botId, responseModel]);
+
+    useEffect(() => {
+        if (!launchDraftId) {
+            hydratedLaunchDraftIdRef.current = null;
+            setIsHydratingLaunchDraft(false);
+            return;
+        }
+
+        if (hydratedLaunchDraftIdRef.current === launchDraftId) {
+            return;
+        }
+
+        let cancelled = false;
+        setIsHydratingLaunchDraft(true);
+
+        void consumeLaunchChatDraft(launchDraftId)
+            .then((draft) => {
+                if (cancelled || !draft?.files?.length) {
+                    return;
+                }
+
+                setAttachedFiles((current) => {
+                    const availableSlots = Math.max(0, MAX_ATTACHMENTS - current.length);
+                    const nextFiles = draft.files.slice(0, availableSlots).map(createAttachedFileFromLocalFile);
+
+                    if (draft.files.length > availableSlots && typeof window !== 'undefined') {
+                        window.alert(`一次最多上传 ${MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
+                    }
+
+                    return [...current, ...nextFiles];
+                });
+            })
+            .catch((error) => {
+                console.error('[Chat] Failed to restore launch draft attachments', error);
+            })
+            .finally(() => {
+                if (cancelled) {
+                    return;
+                }
+
+                hydratedLaunchDraftIdRef.current = launchDraftId;
+                setIsHydratingLaunchDraft(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [launchDraftId]);
 
     useEffect(() => {
         if (!conversationId) {
@@ -1735,21 +1803,24 @@ export default function ChatPage() {
     ]);
 
     useEffect(() => {
-        if (!launcherDraft) {
+        if (!launcherDraft && !launchDraftId) {
             launcherDraftKeyRef.current = null;
             return;
         }
         if (conversationId || isLoadingConversation || isStreaming) return;
+        if (isHydratingLaunchDraft) return;
         if (requestedResponseModel && responseModel !== requestedResponseModel) return;
 
-        const draftKey = `${botId}:${responseModel}:${launcherDraft}`;
+        const draftKey = `${botId}:${responseModel}:${launchDraftId}:${launcherDraft}`;
         if (launcherDraftKeyRef.current === draftKey) return;
 
         launcherDraftKeyRef.current = draftKey;
         void sendMessage(launcherDraft);
     }, [
+        launchDraftId,
         botId,
         conversationId,
+        isHydratingLaunchDraft,
         isLoadingConversation,
         isStreaming,
         launcherDraft,
@@ -1794,19 +1865,9 @@ export default function ChatPage() {
             }
 
             const availableSlots = MAX_ATTACHMENTS - attachedFiles.length;
-            const nextFiles: AttachedFile[] = files.slice(0, availableSlots).map((file) => {
-                const ext = file.name.split('.').pop()?.toLowerCase() || '';
-                const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
-                const isVideo = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
-                return {
-                    file,
-                    name: file.name,
-                    previewUrl: isImage ? URL.createObjectURL(file) : null,
-                    isImage,
-                    isVideo,
-                    kind: isVideo ? 'video' : isImage ? 'image' : 'document',
-                };
-            });
+            const nextFiles: AttachedFile[] = files
+                .slice(0, availableSlots)
+                .map(createAttachedFileFromLocalFile);
 
             setAttachedFiles((current) => [...current, ...nextFiles]);
 
@@ -2394,7 +2455,11 @@ export default function ChatPage() {
                                 aria-label="回答模型"
                                 className={styles.modelSelect}
                                 value={responseModel}
-                                onChange={(event) => setResponseModel(event.target.value as ResponseModel)}
+                                onChange={(event) => {
+                                    if (isResponseModel(event.target.value)) {
+                                        setResponseModel(event.target.value);
+                                    }
+                                }}
                                 disabled={isStreaming || isUploading || isTranscribing}
                             >
                                 {RESPONSE_MODEL_OPTIONS.map((option) => (
@@ -2483,7 +2548,7 @@ export default function ChatPage() {
                             ? (imageStatusText || '正在生成图片，通常需要 10 到 40 秒。')
                             : imageModeEnabled
                             ? '当前输入会直接调用绘图能力，回答模型切换不会影响绘图结果。'
-                            : `当前回答模型：${responseModel === 'gpt-5.4' ? 'GPT-5.4' : 'Gemini'}，可实时切换。`}
+                            : `当前回答模型：${getResponseModelLabel(responseModel)}，可实时切换。`}
                     </span>
                 </div>
                 <div className={styles.inputWrapper}>
