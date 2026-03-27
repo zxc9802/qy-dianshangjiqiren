@@ -1,0 +1,142 @@
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-muted-foreground);
+}
+
+.control {
+    position: relative;
+}
+
+.searchIcon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-muted-foreground);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.input {
+    width: 100%;
+    padding: 12px 42px 12px 40px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    background: var(--color-card);
+    color: var(--color-foreground);
+    transition: border-color var(--duration-fast) var(--ease-smooth),
+        box-shadow var(--duration-fast) var(--ease-smooth);
+}
+
+.input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px hsla(var(--color-primary-raw), 0.12);
+}
+
+.toggleButton {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    color: var(--color-muted-foreground);
+    transition: background var(--duration-fast) var(--ease-smooth),
+        color var(--duration-fast) var(--ease-smooth);
+}
+
+.toggleButton:hover:not(:disabled) {
+    background: var(--color-accent);
+    color: var(--color-foreground);
+}
+
+.toggleButton:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.chevron {
+    transition: transform var(--duration-fast) var(--ease-smooth);
+}
+
+.chevronOpen {
+    transform: rotate(180deg);
+}
+
+.dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-card);
+    box-shadow: var(--shadow-md), 0 20px 40px rgba(15, 23, 42, 0.12);
+    z-index: 30;
+    padding: 6px;
+}
+
+.option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    color: var(--color-foreground);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-smooth),
+        color var(--duration-fast) var(--ease-smooth);
+}
+
+.option:hover,
+.optionActive {
+    background: var(--color-accent);
+}
+
+.optionSelected {
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+}
+
+.optionTag {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: hsla(var(--color-primary-raw), 0.12);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+.emptyState {
+    padding: 12px;
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+}
+
+.helperText {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+}
+
+.helperError {
+    color: var(--color-danger);
+}

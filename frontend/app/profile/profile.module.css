@@ -337,8 +337,10 @@
 
 .editRow {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
+    flex-wrap: wrap;
     gap: 8px;
+    width: min(100%, 480px);
 }
 
 .editInput {
@@ -349,6 +351,11 @@
     width: 160px;
     background: var(--color-card);
     color: var(--color-foreground);
+}
+
+.editSelect {
+    flex: 1 1 260px;
+    min-width: 220px;
 }
 
 .saveBtn {

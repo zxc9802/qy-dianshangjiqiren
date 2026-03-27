@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
+import { isAllowedGroupName, isAllowedMemberName } from '../../lib/member-directory';
 import {
     signToken,
     AppError,
@@ -79,6 +80,18 @@ function normalizeProfileValue(value: string | undefined): string {
     return value?.trim() || '';
 }
 
+function assertAllowedNickname(nickname: string) {
+    if (!isAllowedMemberName(nickname)) {
+        throw new AppError('Please select a valid name from the list.', 400, 'PROFILE_NAME_INVALID');
+    }
+}
+
+function assertAllowedGroupName(groupName: string) {
+    if (!isAllowedGroupName(groupName)) {
+        throw new AppError('Please select a valid group from the list.', 400, 'PROFILE_GROUP_INVALID');
+    }
+}
+
 function parseRequestBody<T>(schema: z.ZodSchema<T>, body: unknown): T {
     const result = schema.safeParse(body);
     if (!result.success) {
@@ -153,6 +166,11 @@ async function handleRegister(body: unknown) {
     const data = parseRequestBody(registerSchema, body);
     const account = normalizeAccount(data.account);
     const inviteCode = normalizeInviteCode(data.inviteCode);
+    const nextNickname = normalizeProfileValue(data.nickname);
+    const nextGroupName = normalizeProfileValue(data.groupName);
+
+    assertAllowedNickname(nextNickname);
+    assertAllowedGroupName(nextGroupName);
 
     const user = await prisma.$transaction(async (tx) => {
         const existing = await tx.user.findUnique({
@@ -184,8 +202,8 @@ async function handleRegister(body: unknown) {
                     data: {
                         accessGrantedAt: new Date(),
                         isVerified: true,
-                        nickname: normalizeProfileValue(data.nickname),
-                        groupName: normalizeProfileValue(data.groupName),
+                        nickname: nextNickname,
+                        groupName: nextGroupName,
                     },
                     select: {
                         id: true,
@@ -209,8 +227,8 @@ async function handleRegister(body: unknown) {
                 isVerified: true,
                 role: 'member',
                 accessGrantedAt: new Date(),
-                nickname: normalizeProfileValue(data.nickname),
-                groupName: normalizeProfileValue(data.groupName),
+                nickname: nextNickname,
+                groupName: nextGroupName,
             },
             select: {
                 id: true,
@@ -314,6 +332,9 @@ async function handleActivate(body: unknown) {
         if (!nextGroupName) {
             throw new AppError('Group is required for activation.', 400, 'PROFILE_GROUP_REQUIRED');
         }
+
+        assertAllowedNickname(nextNickname);
+        assertAllowedGroupName(nextGroupName);
 
         await consumeInviteCode(tx, inviteCode, existing.id);
 

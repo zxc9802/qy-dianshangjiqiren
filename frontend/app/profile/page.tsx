@@ -1,9 +1,11 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Settings, ShieldCheck } from 'lucide-react';
-import { api } from '../lib/api';
+import SearchableSelect from '../components/SearchableSelect';
+import { api, ApiError } from '../lib/api';
+import { FIXED_MEMBER_NAMES } from '../lib/member-directory';
 import { useAuthStore } from '../stores/auth';
 import styles from './profile.module.css';
 
@@ -40,7 +42,11 @@ export default function ProfilePage() {
             setIsEditing(false);
             setFeedback({ type: 'success', message: '姓名已保存。' });
         } catch (error) {
-            setFeedback({ type: 'error', message: error instanceof Error ? error.message : '姓名保存失败。' });
+            if (error instanceof ApiError && error.code === 'PROFILE_NAME_INVALID') {
+                setFeedback({ type: 'error', message: '姓名不在固定名单中，请重新搜索并选择。' });
+            } else {
+                setFeedback({ type: 'error', message: error instanceof Error ? error.message : '姓名保存失败。' });
+            }
         } finally {
             setIsSaving(false);
         }
@@ -99,15 +105,22 @@ export default function ProfilePage() {
                         <span className={styles.settingLabel}>姓名</span>
                         {isEditing ? (
                             <div className={styles.editRow}>
-                                <input
-                                    className={styles.editInput}
-                                    value={nickname}
-                                    onChange={(event) => setNickname(event.target.value)}
-                                    autoFocus
-                                    maxLength={20}
-                                    disabled={isSaving}
-                                />
-                                <button className={styles.saveBtn} onClick={() => void handleSaveNickname()} disabled={isSaving}>
+                                <div className={styles.editSelect}>
+                                    <SearchableSelect
+                                        label="姓名"
+                                        options={FIXED_MEMBER_NAMES}
+                                        value={nickname}
+                                        onChange={(nextValue) => {
+                                            setNickname(nextValue);
+                                            setFeedback(null);
+                                        }}
+                                        placeholder="输入姓名关键词后选择"
+                                        helperText="姓名只能从固定 28 人名单中搜索选择。"
+                                        noResultsText="未搜索到名单内姓名，不能自定义输入。"
+                                        disabled={isSaving}
+                                    />
+                                </div>
+                                <button className={styles.saveBtn} onClick={() => void handleSaveNickname()} disabled={isSaving || !nickname.trim()}>
                                     {isSaving ? '保存中...' : '保存'}
                                 </button>
                                 <button
@@ -158,4 +171,3 @@ export default function ProfilePage() {
         </div>
     );
 }
-
