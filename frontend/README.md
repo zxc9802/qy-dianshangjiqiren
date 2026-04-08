@@ -20,6 +20,36 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Main Site SSO Entrances
+
+This frontend now exposes two main-site protected child-app launch flows:
+
+- `/bot/video-workbench` for the video workbench child site
+- `/bot/kb-chat` for the kb-chat knowledge bot child site
+
+For kb-chat, configure at least:
+
+```bash
+MAIN_APP_URL=https://www.qycm.top
+KB_CHAT_APP_URL=https://qyzsk.qyaijingxuan.top
+JWT_SECRET=change-me
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ecommerce_ai
+```
+
+Expected flow:
+
+1. User logs into the main site.
+2. Main site creates a one-time SSO ticket through `/api/kb-chat-sso/start`.
+3. The child site redirects back with `ticket`.
+4. The child site calls `/api/kb-chat-sso/exchange` to exchange the ticket for user info and a signed token payload.
+
+The `kb-chat` child app should point its env vars at:
+
+```bash
+MAIN_APP_KB_CHAT_ENTRY_PATH=/bot/kb-chat
+MAIN_APP_KB_CHAT_SSO_EXCHANGE_PATH=/api/kb-chat-sso/exchange
+```
+
 ## Remote Video Links
 
 This app can fetch page-video links such as TikTok, YouTube, Xiaohongshu, or Bilibili before sending the video to Gemini.

@@ -101,6 +101,19 @@ const IMAGE_TOOL: BotInfo = {
   requiresAuth: false,
 };
 
+const KB_CHAT_TOOL: BotInfo = {
+  id: 'kb-chat',
+  name: '起芽知识库机器人',
+  category: '管理工具',
+  description: '登录主站后直达企业知识库问答机器人，支持内部知识、上传资料与报告生成。',
+  icon: <BookOpen size={22} />,
+  iconColor: '#0f766e',
+  path: '/bot/kb-chat?autostart=1&openMode=replace',
+  pointsPerUse: 0,
+  isTrial: false,
+  requiresAuth: true,
+};
+
 const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'video-workbench',
@@ -222,7 +235,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   requiresAuth: true,
 }));
 
-const ALL_HOMEPAGE_BOTS: BotInfo[] = [...HOMEPAGE_BOTS, IMAGE_TOOL, ...VIDEO_WORKBENCH_TOOLS];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [KB_CHAT_TOOL, ...HOMEPAGE_BOTS, IMAGE_TOOL, ...VIDEO_WORKBENCH_TOOLS];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,

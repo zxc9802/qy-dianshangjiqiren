@@ -124,7 +124,7 @@ function LoginPageContent() {
                     <h1 className={styles.brandTitle}>电商 AI 智能平台</h1>
                     <p className={styles.brandSub}>企业内部使用，新成员通过邀请码完成注册并同步开通成员权限。</p>
                     <div className={styles.features}>
-                        <span className={styles.featureTag}>34 个预置机器人</span>
+                        <span className={styles.featureTag}>35 个正式版机器人</span>
                         <span className={styles.featureTag}>支持自定义工作流</span>
                         <span className={styles.featureTag}>插件与主站账号同步</span>
                     </div>
