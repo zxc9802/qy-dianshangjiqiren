@@ -78,13 +78,17 @@ export function getMainAppUrl(): string {
     return resolvePublicUrl(readServerEnv('MAIN_APP_URL'), DEFAULT_MAIN_APP_URL);
 }
 
-function getVideoAppEnvValue(): string | undefined {
+function getVideoAppEnvValue(site: VideoSiteKey): string | undefined {
+    if (site === 'tiktok') {
+        return readServerEnv('VIDEO_APP_URL_TIKTOK') || readServerEnv('VIDEO_APP_URL') || readServerEnv('VIDEO_APP_URL_SEEDANCE');
+    }
+
     return readServerEnv('VIDEO_APP_URL_SEEDANCE') || readServerEnv('VIDEO_APP_URL');
 }
 
 export function getVideoAppUrl(site: VideoSiteKey = 'seedance'): string {
     const meta = VIDEO_SITE_METADATA[site];
-    return resolvePublicUrl(getVideoAppEnvValue(), meta.defaultAppUrl);
+    return resolvePublicUrl(getVideoAppEnvValue(site), meta.defaultAppUrl);
 }
 
 export function getAllVideoAppUrls(): string[] {
