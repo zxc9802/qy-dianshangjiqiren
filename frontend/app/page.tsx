@@ -128,6 +128,19 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
     requiresAuth: true,
     videoSite: 'seedance',
   },
+  {
+    id: 'tiktok-studio',
+    name: 'TikTok Studio',
+    category: '视频工作台',
+    description: '登录后进入 TikTok Studio，体验 TikTok 专用的视频生成与工作台式操作入口。',
+    icon: <Video size={22} />,
+    iconColor: '#0284c7',
+    path: VIDEO_SITE_METADATA.tiktok.entryPath,
+    pointsPerUse: 0,
+    isTrial: true,
+    requiresAuth: true,
+    videoSite: 'tiktok',
+  },
 ];
 
 const HOMEPAGE_MAX_ATTACHMENTS = 10;

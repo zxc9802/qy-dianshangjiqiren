@@ -12,6 +12,7 @@ const videoSitesPath = path.join(appRoot, 'lib', 'video-sites.ts')
 const apiPath = path.join(appRoot, 'lib', 'api.ts')
 const launcherPath = path.join(appRoot, 'bot', 'tiktok-studio', 'page.tsx')
 const clientPath = path.join(appRoot, 'bot', 'video-workbench', 'VideoWorkbenchClient.tsx')
+const homePagePath = path.join(appRoot, 'page.tsx')
 const videoSsoPath = path.join(appRoot, 'lib', 'video-sso.ts')
 const apiModulePath = path.join(appRoot, 'lib', 'api.ts')
 const nodeRequire = createRequire(import.meta.url)
@@ -124,6 +125,17 @@ test('the shared launcher redirects back to the active site after login', async 
   const source = await readFile(clientPath, 'utf8')
 
   assert.match(source, /return `\$\{siteMeta\.entryPath\}\?\$\{params\.toString\(\)\}`;/)
+})
+
+test('the homepage trial video tools include a TikTok Studio entry', async () => {
+  const source = await readFile(homePagePath, 'utf8')
+
+  assert.match(source, /id:\s*'tiktok-studio'/)
+  assert.match(source, /name:\s*'TikTok Studio'/)
+  assert.match(source, /category:\s*'视频工作台'/)
+  assert.match(source, /path:\s*VIDEO_SITE_METADATA\.tiktok\.entryPath/)
+  assert.match(source, /videoSite:\s*'tiktok'/)
+  assert.match(source, /isTrial:\s*true/)
 })
 
 test('video SSO builds a site-specific external host', async () => {
