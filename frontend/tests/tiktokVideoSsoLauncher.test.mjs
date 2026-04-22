@@ -13,6 +13,7 @@ const apiPath = path.join(appRoot, 'lib', 'api.ts')
 const launcherPath = path.join(appRoot, 'bot', 'tiktok-studio', 'page.tsx')
 const clientPath = path.join(appRoot, 'bot', 'video-workbench', 'VideoWorkbenchClient.tsx')
 const videoSsoPath = path.join(appRoot, 'lib', 'video-sso.ts')
+const apiModulePath = path.join(appRoot, 'lib', 'api.ts')
 const nodeRequire = createRequire(import.meta.url)
 
 async function loadVideoSsoModule(envOverrides = {}) {
@@ -54,14 +55,14 @@ async function loadVideoSsoModule(envOverrides = {}) {
           name: '视频工作台',
           shortName: '视频工作台',
           entryPath: '/bot/video-workbench',
-          defaultAppUrl: 'https://seedance.example.test',
+          defaultAppUrl: 'https://disanfang.qyaijingxuan.top',
         },
         tiktok: {
           key: 'tiktok',
           name: 'TikTok Studio',
           shortName: 'TikTok Studio',
           entryPath: '/bot/tiktok-studio',
-          defaultAppUrl: 'https://tiktok.example.test',
+          defaultAppUrl: 'https://titok.qyaijingxuan.top',
         },
       },
     },
@@ -77,6 +78,22 @@ async function loadVideoSsoModule(envOverrides = {}) {
 
   const factory = new Function('require', 'module', 'exports', compiled)
   factory(localRequire, module, module.exports)
+  return module.exports
+}
+
+async function loadApiModule() {
+  const source = await readFile(apiModulePath, 'utf8')
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+  }).outputText
+
+  const module = { exports: {} }
+  const factory = new Function('require', 'module', 'exports', compiled)
+  factory(nodeRequire, module, module.exports)
   return module.exports
 }
 
@@ -130,4 +147,61 @@ test('video SSO builds a site-specific external host', async () => {
   assert.equal(tiktokUrl.searchParams.get('ticket'), 'tiktok-ticket')
   assert.equal(seedanceUrl.searchParams.get('mainApp'), 'https://main.example.test')
   assert.equal(tiktokUrl.searchParams.get('mainApp'), 'https://main.example.test')
+})
+
+test('tiktok video SSO uses the tiktok default host instead of legacy seedance envs', async () => {
+  const { getVideoAppUrl } = await loadVideoSsoModule({
+    VIDEO_APP_URL_SEEDANCE: 'https://seedance-env.example.test',
+    VIDEO_APP_URL: 'https://legacy.example.test',
+  })
+
+  assert.equal(getVideoAppUrl('seedance'), 'https://seedance-env.example.test')
+  assert.equal(getVideoAppUrl('tiktok'), 'https://titok.qyaijingxuan.top')
+})
+
+test('startVideoSso does not force a bare login redirect on 401', async () => {
+  const { api, ApiError } = await loadApiModule()
+
+  const originalWindow = globalThis.window
+  const originalFetch = globalThis.fetch
+  const originalLocalStorage = globalThis.localStorage
+  const storage = new Map([
+    ['token', 'test-token'],
+    ['user', '{"id":"user-1"}'],
+  ])
+
+  globalThis.window = {
+    location: { href: '/bot/tiktok-studio?autostart=1' },
+    localStorage: {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => { storage.set(key, String(value)) },
+      removeItem: (key) => { storage.delete(key) },
+      clear: () => { storage.clear() },
+    },
+  }
+  globalThis.localStorage = globalThis.window.localStorage
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 401,
+    headers: {
+      get: () => 'application/json',
+    },
+    json: async () => ({ message: 'Unauthorized' }),
+    text: async () => 'Unauthorized',
+  })
+
+  try {
+    await assert.rejects(
+      api.startVideoSso({ site: 'tiktok' }),
+      (error) => error instanceof ApiError && error.status === 401 && error.message === 'Unauthorized',
+    )
+    assert.equal(globalThis.window.location.href, '/bot/tiktok-studio?autostart=1')
+    assert.equal(storage.has('token'), false)
+    assert.equal(storage.has('user'), false)
+  } finally {
+    globalThis.window = originalWindow
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  }
 })

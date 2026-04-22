@@ -73,7 +73,11 @@ function getToken(): string | null {
     return localStorage.getItem('token');
 }
 
-async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+    url: string,
+    options: RequestInit = {},
+    requestOptions: { redirectOnUnauthorized?: boolean } = {},
+): Promise<T> {
     const token = getToken();
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
 
@@ -93,7 +97,9 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
         if (res.status === 401 && typeof window !== 'undefined') {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
-            window.location.href = '/login';
+            if (requestOptions.redirectOnUnauthorized !== false) {
+                window.location.href = '/login';
+            }
         }
         const message = typeof data === 'string'
             ? data
@@ -255,6 +261,8 @@ export const api = {
         request<{ url: string; expiresAt: string }>('/video-sso/start', {
             method: 'POST',
             body: JSON.stringify(body || {}),
+        }, {
+            redirectOnUnauthorized: false,
         }),
 
     getVideoGenerationHistory: (params?: { limit?: number }) => {

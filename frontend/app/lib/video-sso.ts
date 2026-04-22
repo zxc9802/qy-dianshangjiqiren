@@ -80,7 +80,7 @@ export function getMainAppUrl(): string {
 
 function getVideoAppEnvValue(site: VideoSiteKey): string | undefined {
     if (site === 'tiktok') {
-        return readServerEnv('VIDEO_APP_URL_TIKTOK') || readServerEnv('VIDEO_APP_URL') || readServerEnv('VIDEO_APP_URL_SEEDANCE');
+        return readServerEnv('VIDEO_APP_URL_TIKTOK');
     }
 
     return readServerEnv('VIDEO_APP_URL_SEEDANCE') || readServerEnv('VIDEO_APP_URL');
