@@ -1,7 +1,7 @@
 import type { ResponseModel } from './chat-models';
 
 const API_BASE = '/api';
-export type VideoSiteKey = 'seedance';
+export type VideoSiteKey = 'seedance' | 'tiktok';
 
 export class ApiError extends Error {
     status: number;

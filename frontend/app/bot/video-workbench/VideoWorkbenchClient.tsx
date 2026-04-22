@@ -20,6 +20,12 @@ const VIDEO_WORKBENCH_COPY: Record<VideoSiteKey, {
         description: '主站负责校验登录态并签发一次性 SSO ticket，进入视频工作台后会自动关联主站账号与历史记录。',
         buttonLabel: '打开视频工作台',
     },
+    tiktok: {
+        badge: 'TikTok Studio入口',
+        title: '登录主站后，直达 TikTok Studio',
+        description: '主站负责校验登录态并签发一次性 SSO ticket，进入 TikTok Studio 后会自动关联主站账号与历史记录。',
+        buttonLabel: '打开 TikTok Studio',
+    },
 };
 
 interface VideoWorkbenchClientProps {

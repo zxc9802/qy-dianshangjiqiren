@@ -1,4 +1,4 @@
-export const VIDEO_SITE_KEYS = ['seedance'] as const;
+export const VIDEO_SITE_KEYS = ['seedance', 'tiktok'] as const;
 
 export type VideoSiteKey = (typeof VIDEO_SITE_KEYS)[number];
 
@@ -9,6 +9,13 @@ export const VIDEO_SITE_METADATA = {
         shortName: '视频工作台',
         entryPath: '/bot/video-workbench',
         defaultAppUrl: 'https://disanfang.qyaijingxuan.top',
+    },
+    tiktok: {
+        key: 'tiktok',
+        name: 'TikTok Studio',
+        shortName: 'TikTok Studio',
+        entryPath: '/bot/tiktok-studio',
+        defaultAppUrl: 'https://titok.qyaijingxuan.top',
     },
 } as const satisfies Record<VideoSiteKey, {
     key: VideoSiteKey;
