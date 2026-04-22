@@ -63,8 +63,8 @@ export default function VideoWorkbenchClient({ site }: VideoWorkbenchClientProps
         if (redirectPath) {
             params.set('redirectPath', redirectPath);
         }
-        return `/bot/video-workbench?${params.toString()}`;
-    }, [openMode, redirectPath]);
+        return `${siteMeta.entryPath}?${params.toString()}`;
+    }, [openMode, redirectPath, siteMeta.entryPath]);
 
     const handleOpenStudio = useCallback(async (mode: 'popup' | 'replace' = 'popup') => {
         setLaunchError(null);

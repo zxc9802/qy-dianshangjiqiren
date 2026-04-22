@@ -9,6 +9,7 @@ const appRoot = path.join(__dirname, '..', 'app')
 const videoSitesPath = path.join(appRoot, 'lib', 'video-sites.ts')
 const apiPath = path.join(appRoot, 'lib', 'api.ts')
 const launcherPath = path.join(appRoot, 'bot', 'tiktok-studio', 'page.tsx')
+const clientPath = path.join(appRoot, 'bot', 'video-workbench', 'VideoWorkbenchClient.tsx')
 
 test('video site metadata includes the tiktok launcher target', async () => {
   const source = await readFile(videoSitesPath, 'utf8')
@@ -31,4 +32,10 @@ test('the tiktok launcher page delegates to the shared video workbench client', 
 
   assert.match(source, /import VideoWorkbenchClient from '\.\.\/video-workbench\/VideoWorkbenchClient';/)
   assert.match(source, /<VideoWorkbenchClient site="tiktok" \/>/)
+})
+
+test('the shared launcher redirects back to the active site after login', async () => {
+  const source = await readFile(clientPath, 'utf8')
+
+  assert.match(source, /return `\$\{siteMeta\.entryPath\}\?\$\{params\.toString\(\)\}`;/)
 })
