@@ -153,6 +153,62 @@ model VideoGeneration {
   @@map("video_generations")
 }
 
+model VideoUsageLog {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String    @map("user_id")
+  userEmail            String?   @map("user_email")
+  userNickname         String?   @map("user_nickname")
+  userGroup            String?   @map("user_group")
+  channel              String
+  providerId           String?   @map("provider_id")
+  model                String?
+  generationMode       String?   @map("generation_mode")
+  prompt               String?
+  aspectRatio          String?   @map("aspect_ratio")
+  resolution           String?
+  duration             Int?
+  sampleCount          Int?      @default(1) @map("sample_count")
+  requestParams        Json?     @map("request_params")
+  engineTaskId         String?   @map("engine_task_id")
+  upstreamRequestId    String?   @map("upstream_request_id")
+  upstreamTraceId      String?   @map("upstream_trace_id")
+  upstreamUrl          String?   @map("upstream_url")
+  status               String    @default("submitted")
+  errorMessage         String?   @map("error_message")
+  videoUrl             String?   @map("video_url")
+  unitPrice            Decimal?  @map("unit_price") @db.Decimal(10, 4)
+  estimatedCost        Decimal?  @map("estimated_cost") @db.Decimal(10, 4)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz(6)
+  larkBackupRecordId   String?   @map("lark_backup_record_id")
+  larkBackupSyncedAt   DateTime? @map("lark_backup_synced_at") @db.Timestamptz(6)
+  larkBackupError      String?   @map("lark_backup_error")
+
+  @@index([userId], map: "idx_usage_logs_user_id")
+  @@index([channel], map: "idx_usage_logs_channel")
+  @@index([model], map: "idx_usage_logs_model")
+  @@index([status], map: "idx_usage_logs_status")
+  @@index([createdAt], map: "idx_usage_logs_created_at")
+  @@index([engineTaskId], map: "idx_usage_logs_engine_task_id")
+  @@index([larkBackupRecordId], map: "idx_usage_logs_lark_backup_record_id")
+  @@map("video_usage_logs")
+}
+
+model ModelPricing {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  channel   String
+  model     String
+  priceType String   @default("per_call") @map("price_type")
+  unitPrice Decimal  @default(0) @map("unit_price") @db.Decimal(10, 4)
+  currency  String   @default("CNY")
+  note      String?
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([channel, model], map: "model_pricing_channel_model_key")
+  @@map("model_pricing")
+}
+
 model VerificationCode {
   id        String   @id @default(uuid())
   email     String

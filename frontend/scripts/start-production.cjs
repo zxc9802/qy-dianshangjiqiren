@@ -12,6 +12,10 @@ const nextBinPath = path.join(projectRoot, 'node_modules', 'next', 'dist', 'bin'
 
 const env = { ...process.env };
 
+function isEnabled(value) {
+    return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
 if (fs.existsSync(binDir)) {
     env.PATH = env.PATH ? `${binDir}${path.delimiter}${env.PATH}` : binDir;
 }
@@ -24,14 +28,24 @@ if (!env.FFPROBE_PATH && fs.existsSync(ffprobePath)) {
     env.FFPROBE_PATH = ffprobePath;
 }
 
-const prismaResult = spawnSync('npx', ['prisma', 'db', 'push', '--accept-data-loss'], {
-    stdio: 'inherit',
-    shell: true,
-    env,
-});
+if (isEnabled(env.PRISMA_DB_PUSH_ON_START)) {
+    const prismaResult = spawnSync('npx', ['prisma', 'db', 'push'], {
+        stdio: 'inherit',
+        shell: true,
+        env,
+    });
 
-if (prismaResult.error) {
-    console.warn('[start-production] prisma db push failed to start:', prismaResult.error.message);
+    if (prismaResult.error) {
+        console.error('[start-production] prisma db push failed to start:', prismaResult.error.message);
+        process.exit(1);
+    }
+
+    if (prismaResult.status !== 0) {
+        console.error('[start-production] prisma db push failed; refusing to start with a mismatched schema.');
+        process.exit(prismaResult.status ?? 1);
+    }
+} else {
+    console.log('[start-production] Skipping prisma db push. Set PRISMA_DB_PUSH_ON_START=true to run a non-destructive schema sync explicitly.');
 }
 
 const useLocalNextBin = fs.existsSync(nextBinPath);
