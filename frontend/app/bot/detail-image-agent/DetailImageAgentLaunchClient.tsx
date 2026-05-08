@@ -24,6 +24,13 @@ class DetailImageAgentLaunchError extends Error {
     }
 }
 
+function getSsoErrorMessage(value: string | null): string | null {
+    if (value === 'ticket_exchange_failed') {
+        return '图片工具登录交换失败，请确认图片工具服务的 SSO 环境变量已配置后再重试。';
+    }
+    return null;
+}
+
 function normalizeRedirectPath(value: string | null): string | undefined {
     if (!value) return undefined;
     const trimmed = value.trim();
@@ -38,13 +45,12 @@ function readStoredToken(): string | null {
     return window.localStorage.getItem('token');
 }
 
-async function startDetailImageAgentSso(body?: { redirectPath?: string }) {
-    const token = readStoredToken();
+async function startDetailImageAgentSso(token: string, body?: { redirectPath?: string }) {
     const response = await fetch('/api/detail-image-agent-sso/start', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(body || {}),
     });
@@ -74,6 +80,7 @@ export default function DetailImageAgentLaunchClient() {
     const shouldAutoStart = searchParams.get('autostart') === '1';
     const openMode = searchParams.get('openMode') === 'popup' ? 'popup' : 'replace';
     const redirectPath = normalizeRedirectPath(searchParams.get('redirectPath'));
+    const ssoErrorMessage = getSsoErrorMessage(searchParams.get('ssoError'));
 
     const loginRedirectPath = useMemo(() => {
         const params = new URLSearchParams();
@@ -85,12 +92,25 @@ export default function DetailImageAgentLaunchClient() {
         return `${DETAIL_IMAGE_AGENT_SITE_METADATA.entryPath}?${params.toString()}`;
     }, [openMode, redirectPath]);
 
+    useEffect(() => {
+        if (ssoErrorMessage) {
+            setLaunchError(ssoErrorMessage);
+        }
+    }, [ssoErrorMessage]);
+
     const handleOpenDetailImageAgent = useCallback(async (mode: 'popup' | 'replace' = 'replace') => {
         setLaunchError(null);
         setIsLaunching(true);
 
         try {
+            const token = readStoredToken();
+            if (!token) {
+                router.push(`/login?redirect=${encodeURIComponent(loginRedirectPath)}`);
+                return;
+            }
+
             const result = await startDetailImageAgentSso(
+                token,
                 redirectPath ? { redirectPath } : undefined,
             );
             const targetUrl = result.url || DETAIL_IMAGE_AGENT_SITE_METADATA.defaultAppUrl;
@@ -100,7 +120,7 @@ export default function DetailImageAgentLaunchClient() {
                 return;
             }
 
-            window.location.replace(targetUrl);
+            window.location.assign(targetUrl);
         } catch (error) {
             if (error instanceof DetailImageAgentLaunchError && error.status === 401) {
                 router.push(`/login?redirect=${encodeURIComponent(loginRedirectPath)}`);

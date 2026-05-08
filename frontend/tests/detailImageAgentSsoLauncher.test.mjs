@@ -133,6 +133,8 @@ test('detail image agent launcher delegates to its client component', async () =
   assert.match(page, /<DetailImageAgentLaunchClient \/>/)
   assert.match(client, /直达店铺图片工具/)
   assert.match(client, /打开店铺图片工具/)
+  assert.match(client, /ticket_exchange_failed/)
+  assert.match(client, /if \(!token\)/)
   assert.match(client, /\/api\/detail-image-agent-sso\/start/)
   assert.match(client, /DETAIL_IMAGE_AGENT_SITE_METADATA\.entryPath/)
 })
