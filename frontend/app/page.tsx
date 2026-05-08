@@ -101,6 +101,19 @@ const IMAGE_TOOL: BotInfo = {
   requiresAuth: false,
 };
 
+const DETAIL_IMAGE_AGENT_TOOL: BotInfo = {
+  id: 'detail-image-agent',
+  name: '店铺图片工具',
+  category: '绘图机器人',
+  description: '登录后直达店铺图片工具，支持按账号保存历史记录与复用生成结果。',
+  icon: <ImageIcon size={22} />,
+  iconColor: '#0891b2',
+  path: '/bot/detail-image-agent?autostart=1&openMode=replace',
+  pointsPerUse: 0,
+  isTrial: false,
+  requiresAuth: true,
+};
+
 const KB_CHAT_TOOL: BotInfo = {
   id: 'kb-chat',
   name: '起芽知识库机器人',
@@ -248,7 +261,13 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   requiresAuth: true,
 }));
 
-const ALL_HOMEPAGE_BOTS: BotInfo[] = [KB_CHAT_TOOL, ...HOMEPAGE_BOTS, IMAGE_TOOL, ...VIDEO_WORKBENCH_TOOLS];
+const ALL_HOMEPAGE_BOTS: BotInfo[] = [
+  KB_CHAT_TOOL,
+  ...HOMEPAGE_BOTS,
+  DETAIL_IMAGE_AGENT_TOOL,
+  IMAGE_TOOL,
+  ...VIDEO_WORKBENCH_TOOLS,
+];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
   '管理工具': <Compass size={18} />,
