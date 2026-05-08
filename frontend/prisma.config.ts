@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defineConfig } from 'prisma/config';
 
+const PLACEHOLDER_DATABASE_URL = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
+
 function parseEnvFile(filePath: string): Record<string, string> {
     if (!fs.existsSync(filePath)) {
         return {};
@@ -33,7 +35,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
 }
 
 function resolveDatabaseUrl(): string {
-    if (process.env.DATABASE_URL) {
+    if (process.env.DATABASE_URL?.trim()) {
         return process.env.DATABASE_URL;
     }
     const candidates = [
@@ -48,7 +50,8 @@ function resolveDatabaseUrl(): string {
             return databaseUrl;
         }
     }
-    throw new Error('DATABASE_URL is required. Checked process.env, frontend/.env, frontend/.env.local, and backend/.env.');
+    // prisma generate only needs a syntactically valid URL during build.
+    return PLACEHOLDER_DATABASE_URL;
 }
 
 export default defineConfig({
@@ -57,4 +60,3 @@ export default defineConfig({
         url: resolveDatabaseUrl(),
     },
 });
-
