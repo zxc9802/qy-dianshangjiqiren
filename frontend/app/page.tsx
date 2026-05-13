@@ -114,6 +114,19 @@ const DETAIL_IMAGE_AGENT_TOOL: BotInfo = {
   requiresAuth: true,
 };
 
+const BUYER_SHOW_TOOL: BotInfo = {
+  id: 'buyer-show',
+  name: '买家秀智能体',
+  category: '绘图机器人',
+  description: '登录后直达买家秀智能体，按主站账号保存生成历史与评论草稿。',
+  icon: <ImageIcon size={22} />,
+  iconColor: '#0f766e',
+  path: '/bot/buyer-show?autostart=1&openMode=replace',
+  pointsPerUse: 0,
+  isTrial: false,
+  requiresAuth: true,
+};
+
 const KB_CHAT_TOOL: BotInfo = {
   id: 'kb-chat',
   name: '起芽知识库机器人',
@@ -264,6 +277,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
 const ALL_HOMEPAGE_BOTS: BotInfo[] = [
   KB_CHAT_TOOL,
   ...HOMEPAGE_BOTS,
+  BUYER_SHOW_TOOL,
   DETAIL_IMAGE_AGENT_TOOL,
   IMAGE_TOOL,
   ...VIDEO_WORKBENCH_TOOLS,
