@@ -27,6 +27,7 @@ export const FIXED_MEMBER_NAMES = [
     '黎清海',
     '牟芯谊',
     '陈梦迪',
+    '冉江龙',
 ] as const;
 
 export const FIXED_GROUP_NAMES = [

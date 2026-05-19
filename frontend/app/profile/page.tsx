@@ -115,7 +115,7 @@ export default function ProfilePage() {
                                             setFeedback(null);
                                         }}
                                         placeholder="输入姓名关键词后选择"
-                                        helperText="姓名只能从固定 28 人名单中搜索选择。"
+                                        helperText="姓名只能从固定 29 人名单中搜索选择。"
                                         noResultsText="未搜索到名单内姓名，不能自定义输入。"
                                         disabled={isSaving}
                                     />

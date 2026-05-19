@@ -178,7 +178,7 @@ function LoginPageContent() {
                                     }}
                                     placeholder="输入姓名关键词后选择，例如：张"
                                     required
-                                    helperText="姓名固定为 28 人名单，只能搜索并选择。"
+                                    helperText="姓名固定为 29 人名单，只能搜索并选择。"
                                     noResultsText="未搜索到名单内姓名，不能自定义输入。"
                                 />
 
