@@ -140,6 +140,19 @@ const KB_CHAT_TOOL: BotInfo = {
   requiresAuth: true,
 };
 
+const COPYWRITING_AGENT_TOOL: BotInfo = {
+  id: 'copywriting-agent',
+  name: '老黄 AI 文案总控',
+  category: '电商工具',
+  description: '登录后直达文案总控智能体，按主站账号隔离案例库、素材库与内容表现数据。',
+  icon: <PenTool size={22} />,
+  iconColor: '#dc2626',
+  path: '/bot/copywriting-agent?autostart=1&openMode=replace',
+  pointsPerUse: 0,
+  isTrial: false,
+  requiresAuth: true,
+};
+
 const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'video-workbench',
@@ -276,6 +289,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
 
 const ALL_HOMEPAGE_BOTS: BotInfo[] = [
   KB_CHAT_TOOL,
+  COPYWRITING_AGENT_TOOL,
   ...HOMEPAGE_BOTS,
   BUYER_SHOW_TOOL,
   DETAIL_IMAGE_AGENT_TOOL,
