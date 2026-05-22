@@ -28,6 +28,7 @@ import { streamGeminiDeepThinkingChat } from '../../../../lib/gemini-deep-chat';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
 import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../../lib/server-chat-video';
+import { buildLongTermMemoryPrompt, rememberConversationTurn } from '../../../../lib/server-memory';
 import {
     streamYunwuOpenAIChat,
     type OpenAIChatMessage,
@@ -525,6 +526,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             }
         }
 
+        if (inputType !== 'image') {
+            const memoryPrompt = await buildLongTermMemoryPrompt({
+                userId,
+                botRouteId: bot.routeId,
+                query: currentPromptText,
+            });
+            if (memoryPrompt) {
+                systemPrompt = `${systemPrompt}\n\n${memoryPrompt}`.trim();
+            }
+        }
+
         const userMessage = await prisma.message.create({
             data: {
                 conversationId,
@@ -777,6 +789,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                 updatedAt: new Date(),
                             },
                         });
+                    });
+
+                    await rememberConversationTurn({
+                        userId,
+                        botRouteId: bot.routeId,
+                        conversationId,
+                        userMessage: currentPromptText,
+                        assistantMessage: cleanResponse,
                     });
 
                     if (suggestions.length) {
