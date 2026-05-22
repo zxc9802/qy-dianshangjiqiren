@@ -4,6 +4,7 @@ import { requestYunwuOpenAIChat } from './yunwu-openai-chat';
 import {
     buildMemoryContextBlock,
     parseExtractedMemories,
+    resolveMemoryBotRouteId,
     type ExtractedMemory,
 } from './server-memory-text';
 
@@ -106,15 +107,13 @@ async function searchUserMemories(params: {
     }
 
     return prisma.$queryRawUnsafe<MemorySearchResult[]>(
-        `SELECT id, content, memory_type, importance, embedding <=> $3::vector AS distance
+        `SELECT id, content, memory_type, importance, embedding <=> $2::vector AS distance
          FROM user_memories
          WHERE user_id = $1
            AND embedding IS NOT NULL
-           AND (bot_route_id = $2 OR bot_route_id IS NULL)
-         ORDER BY embedding <=> $3::vector
-         LIMIT $4`,
+         ORDER BY embedding <=> $2::vector
+         LIMIT $3`,
         params.userId,
-        params.botRouteId,
         toVectorLiteral(embedding),
         params.limit || readMemoryMaxResults(),
     );
@@ -135,7 +134,7 @@ async function saveExtractedMemory(params: {
         `INSERT INTO user_memories (user_id, bot_route_id, content, memory_type, importance, metadata, embedding)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::vector)`,
         params.userId,
-        params.botRouteId,
+        resolveMemoryBotRouteId(params.memory, params.botRouteId),
         params.memory.content,
         params.memory.memoryType,
         params.memory.importance,

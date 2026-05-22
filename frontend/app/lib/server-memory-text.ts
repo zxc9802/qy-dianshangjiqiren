@@ -4,6 +4,15 @@ export type ExtractedMemory = {
     importance: number;
 };
 
+export function resolveMemoryBotRouteId(
+    memory: Pick<ExtractedMemory, 'memoryType'>,
+    botRouteId: string,
+): string | null {
+    void memory;
+    void botRouteId;
+    return null;
+}
+
 const MAX_MEMORY_CONTENT_LENGTH = 500;
 const SENSITIVE_PATTERNS = [
     /\b1[3-9]\d{9}\b/,

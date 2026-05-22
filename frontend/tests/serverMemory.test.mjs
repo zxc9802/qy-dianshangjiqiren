@@ -79,3 +79,10 @@ test('memory context block is capped and clearly separated from the base prompt'
   assert.match(block, /- 用户常做电商短视频脚本。/)
   assert.doesNotMatch(block, /用户希望输出表格/)
 })
+
+test('new long-term memories are global by default', async () => {
+  const { resolveMemoryBotRouteId } = await loadMemoryTextModule()
+
+  assert.equal(resolveMemoryBotRouteId({ memoryType: 'profile' }, 'bot-a'), null)
+  assert.equal(resolveMemoryBotRouteId({ memoryType: 'business_context' }, 'bot-a'), null)
+})
