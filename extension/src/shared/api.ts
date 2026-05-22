@@ -19,6 +19,7 @@ interface StreamRequest {
   mode: 'summary' | 'chat';
   messages: ExtensionChatMessage[];
   pageContext?: PageContext;
+  webSearchMode?: 'auto' | 'on' | 'off';
 }
 
 interface AuthorizedFetchOptions {

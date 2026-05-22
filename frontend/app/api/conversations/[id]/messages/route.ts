@@ -19,7 +19,12 @@ import {
 } from '../../../../lib/conversation-message-codec';
 import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
 import { VIDEO_BREAKDOWN_BOT_ID } from '../../../../lib/builtin-bots';
-import { DEFAULT_RESPONSE_MODEL, RESPONSE_MODEL_VALUES } from '../../../../lib/chat-models';
+import {
+    DEFAULT_RESPONSE_MODEL,
+    DEFAULT_WEB_SEARCH_MODE,
+    RESPONSE_MODEL_VALUES,
+    WEB_SEARCH_MODE_VALUES,
+} from '../../../../lib/chat-models';
 import {
     extractSuggestions as extractSharedSuggestions,
     stripSuggestionBlock as stripSharedSuggestionBlock,
@@ -33,6 +38,7 @@ import {
     streamYunwuOpenAIChat,
     type OpenAIChatMessage,
 } from '../../../../lib/yunwu-openai-chat';
+import { streamYunwuClaudeChat } from '../../../../lib/yunwu-claude-chat';
 import {
     streamYunwuGeminiChat,
     type GeminiChatMessage,
@@ -85,6 +91,7 @@ const messageRequestSchema = z.object({
     inputType: z.enum(['text', 'voice', 'file', 'image', 'video']).default('text'),
     aspectRatio: z.string().min(3).max(10).optional(),
     responseModel: z.enum(RESPONSE_MODEL_VALUES).default(DEFAULT_RESPONSE_MODEL),
+    webSearchMode: z.enum(WEB_SEARCH_MODE_VALUES).default(DEFAULT_WEB_SEARCH_MODE),
     attachments: z.array(attachmentSchema).max(10).default([]),
 });
 
@@ -340,6 +347,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             inputType,
             aspectRatio,
             responseModel,
+            webSearchMode,
             attachments: incomingAttachments,
             inlineVideoUploads,
         } = await parseMessageRequest(req);
@@ -567,6 +575,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
         const shouldStreamOpenAI = inputType !== 'image' && responseModel === 'gpt-5.4';
+        const shouldStreamClaude = inputType !== 'image' && responseModel === 'claude-opus-4.6';
         const shouldStreamVideoBreakdownGpt = shouldStreamOpenAI
             && bot.kind === 'builtin'
             && bot.routeId === VIDEO_BREAKDOWN_BOT_ID
@@ -708,6 +717,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                 ...historyMessages,
                                 { role: 'user', content: currentPromptText },
                             ],
+                            temperature: 0.8,
+                            maxTokens: 8192,
+                            onText: (textChunk) => {
+                                if (!textChunk) {
+                                    return;
+                                }
+
+                                fullResponse += textChunk;
+                                flushVisibleText();
+                            },
+                        });
+                    } else if (shouldStreamClaude) {
+                        await streamYunwuClaudeChat({
+                            systemPrompt,
+                            messages: [
+                                ...historyMessages,
+                                { role: 'user', content: currentPromptText },
+                            ],
+                            webSearchMode,
                             temperature: 0.8,
                             maxTokens: 8192,
                             onText: (textChunk) => {

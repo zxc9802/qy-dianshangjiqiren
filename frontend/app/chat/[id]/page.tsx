@@ -18,11 +18,17 @@ import {
 } from '../../lib/chat-attachments';
 import {
     DEFAULT_RESPONSE_MODEL,
+    DEFAULT_WEB_SEARCH_MODE,
     getResponseModelLabel,
+    getWebSearchModeLabel,
     RESPONSE_MODEL_OPTIONS,
     RESPONSE_MODEL_STORAGE_PREFIX,
+    WEB_SEARCH_MODE_OPTIONS,
+    WEB_SEARCH_MODE_STORAGE_PREFIX,
     isResponseModel,
+    isWebSearchMode,
     type ResponseModel,
+    type WebSearchMode,
 } from '../../lib/chat-models';
 import {
     getLocalConversationVideo,
@@ -683,6 +689,10 @@ export default function ChatPage() {
     const requestedResponseModel = isResponseModel(rawRequestedResponseModel)
         ? rawRequestedResponseModel
         : null;
+    const rawRequestedWebSearchMode = searchParams.get('ws');
+    const requestedWebSearchMode = isWebSearchMode(rawRequestedWebSearchMode)
+        ? rawRequestedWebSearchMode
+        : null;
     const builtinBot = BUILTIN_BOT_MAP[botId];
     const fallbackBotName = BOT_NAMES[botId] || urlName || 'AI助手';
     const fallbackWelcome = builtinBot?.welcome
@@ -710,6 +720,7 @@ export default function ChatPage() {
     const [inputText, setInputText] = useState('');
     const [imageModeEnabled, setImageModeEnabled] = useState(false);
     const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
+    const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
     const [isStreaming, setIsStreaming] = useState(false);
     const [isHydratingLaunchDraft, setIsHydratingLaunchDraft] = useState(Boolean(launchDraftId));
     const [streamingText, setStreamingText] = useState('');
@@ -861,6 +872,25 @@ export default function ChatPage() {
         if (typeof window === 'undefined') return;
         window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`, responseModel);
     }, [botId, responseModel]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (requestedWebSearchMode) {
+            setWebSearchMode(requestedWebSearchMode);
+            return;
+        }
+        const saved = window.localStorage.getItem(`${WEB_SEARCH_MODE_STORAGE_PREFIX}${botId}`);
+        if (isWebSearchMode(saved)) {
+            setWebSearchMode(saved);
+            return;
+        }
+        setWebSearchMode(DEFAULT_WEB_SEARCH_MODE);
+    }, [botId, requestedWebSearchMode]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(`${WEB_SEARCH_MODE_STORAGE_PREFIX}${botId}`, webSearchMode);
+    }, [botId, webSearchMode]);
 
     useEffect(() => {
         if (!launchDraftId) {
@@ -1594,6 +1624,7 @@ export default function ChatPage() {
                 inputType: messageInputType,
                 aspectRatio: isImageRequest ? IMAGE_MODE_ASPECT_RATIO : undefined,
                 responseModel,
+                webSearchMode,
                 attachments: requestAttachments,
             };
             const requestBody = shouldSendGeminiVideoDirect
@@ -1798,6 +1829,7 @@ export default function ChatPage() {
         router,
         scheduleStreamingTextFlush,
         selectedConversationVideoIds,
+        webSearchMode,
         wfState,
         workflowFlag,
     ]);
@@ -1810,8 +1842,9 @@ export default function ChatPage() {
         if (conversationId || isLoadingConversation || isStreaming) return;
         if (isHydratingLaunchDraft) return;
         if (requestedResponseModel && responseModel !== requestedResponseModel) return;
+        if (requestedWebSearchMode && webSearchMode !== requestedWebSearchMode) return;
 
-        const draftKey = `${botId}:${responseModel}:${launchDraftId}:${launcherDraft}`;
+        const draftKey = `${botId}:${responseModel}:${webSearchMode}:${launchDraftId}:${launcherDraft}`;
         if (launcherDraftKeyRef.current === draftKey) return;
 
         launcherDraftKeyRef.current = draftKey;
@@ -1825,8 +1858,10 @@ export default function ChatPage() {
         isStreaming,
         launcherDraft,
         requestedResponseModel,
+        requestedWebSearchMode,
         responseModel,
         sendMessage,
+        webSearchMode,
     ]);
 
     const startNewConversation = () => {
@@ -2470,6 +2505,26 @@ export default function ChatPage() {
                             </select>
                             <ChevronDown size={16} className={styles.modelSelectChevron} />
                         </div>
+                        <div className={styles.modelSwitcher}>
+                            <select
+                                aria-label="联网搜索模式"
+                                className={styles.modelSelect}
+                                value={webSearchMode}
+                                onChange={(event) => {
+                                    if (isWebSearchMode(event.target.value)) {
+                                        setWebSearchMode(event.target.value);
+                                    }
+                                }}
+                                disabled={isStreaming || isUploading || isTranscribing}
+                            >
+                                {WEB_SEARCH_MODE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <ChevronDown size={16} className={styles.modelSelectChevron} />
+                        </div>
                         {showConversationVideoLibrary && (
                             <div ref={conversationVideoPickerRef} className={styles.conversationVideoPicker}>
                                 <button
@@ -2548,7 +2603,7 @@ export default function ChatPage() {
                             ? (imageStatusText || '正在生成图片，通常需要 10 到 40 秒。')
                             : imageModeEnabled
                             ? '当前输入会直接调用绘图能力，回答模型切换不会影响绘图结果。'
-                            : `当前回答模型：${getResponseModelLabel(responseModel)}，可实时切换。`}
+                            : `当前回答模型：${getResponseModelLabel(responseModel)}；${getWebSearchModeLabel(webSearchMode)}。`}
                     </span>
                 </div>
                 <div className={styles.inputWrapper}>
@@ -2626,6 +2681,4 @@ function formatMessage(text: string, enableTableCopyButton = false): string {
         tableCopyButtonLabel: TABLE_COPY_LABEL,
     } : undefined);
 }
-
-
 

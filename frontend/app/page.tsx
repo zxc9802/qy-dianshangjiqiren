@@ -13,10 +13,15 @@ import {
 } from './lib/builtin-bots';
 import {
   DEFAULT_RESPONSE_MODEL,
+  DEFAULT_WEB_SEARCH_MODE,
   RESPONSE_MODEL_OPTIONS,
   RESPONSE_MODEL_STORAGE_PREFIX,
+  WEB_SEARCH_MODE_OPTIONS,
+  WEB_SEARCH_MODE_STORAGE_PREFIX,
   isResponseModel,
+  isWebSearchMode,
   type ResponseModel,
+  type WebSearchMode,
 } from './lib/chat-models';
 import { putLaunchChatDraft } from './lib/launch-chat-drafts';
 import { VIDEO_SITE_METADATA, type VideoSiteKey } from './lib/video-sites';
@@ -320,6 +325,7 @@ export default function HomePage() {
   const [generalPrompt, setGeneralPrompt] = useState('');
   const [generalAttachedFiles, setGeneralAttachedFiles] = useState<File[]>([]);
   const [generalResponseModel, setGeneralResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
+  const [generalWebSearchMode, setGeneralWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
   const [isGeneralRecording, setIsGeneralRecording] = useState(false);
   const [isGeneralTranscribing, setIsGeneralTranscribing] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -350,6 +356,19 @@ export default function HomePage() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`, generalResponseModel);
   }, [generalResponseModel]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(`${WEB_SEARCH_MODE_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`);
+    if (isWebSearchMode(saved)) {
+      setGeneralWebSearchMode(saved);
+      return;
+    }
+    setGeneralWebSearchMode(DEFAULT_WEB_SEARCH_MODE);
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(`${WEB_SEARCH_MODE_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`, generalWebSearchMode);
+  }, [generalWebSearchMode]);
   useEffect(() => () => {
     const recorder = generalRecorderRef.current;
     generalRecorderRef.current = null;
@@ -374,6 +393,7 @@ export default function HomePage() {
   const buildGenericChatUrl = useCallback((draft?: string, launchDraftId?: string | null) => {
     const query = new URLSearchParams();
     query.set('rm', generalResponseModel);
+    query.set('ws', generalWebSearchMode);
     if (draft?.trim()) {
       query.set('draft', draft.trim());
     }
@@ -381,7 +401,7 @@ export default function HomePage() {
       query.set('ld', launchDraftId);
     }
     return `/chat/${GENERIC_CHAT_BOT_ID}?${query.toString()}`;
-  }, [generalResponseModel]);
+  }, [generalResponseModel, generalWebSearchMode]);
 
   const openGenericChat = useCallback(async (draft?: string) => {
     if (!ensureAuthenticated()) return;
@@ -790,6 +810,26 @@ export default function HomePage() {
                       disabled={isGeneralRecording || isGeneralTranscribing}
                     >
                       {RESPONSE_MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={16} className={styles.generalComposerModelChevron} />
+                  </div>
+                  <div className={styles.generalComposerModelSwitcher}>
+                    <select
+                      aria-label="联网搜索模式"
+                      className={styles.generalComposerModelSelect}
+                      value={generalWebSearchMode}
+                      onChange={(event) => {
+                        if (isWebSearchMode(event.target.value)) {
+                          setGeneralWebSearchMode(event.target.value);
+                        }
+                      }}
+                      disabled={isGeneralRecording || isGeneralTranscribing}
+                    >
+                      {WEB_SEARCH_MODE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>

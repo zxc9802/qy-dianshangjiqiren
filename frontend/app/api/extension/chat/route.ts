@@ -1,7 +1,12 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getUserId, errorResponse } from '../../../lib/auth';
-import { DEFAULT_RESPONSE_MODEL, RESPONSE_MODEL_VALUES } from '../../../lib/chat-models';
+import {
+    DEFAULT_RESPONSE_MODEL,
+    DEFAULT_WEB_SEARCH_MODE,
+    RESPONSE_MODEL_VALUES,
+    WEB_SEARCH_MODE_VALUES,
+} from '../../../lib/chat-models';
 import {
     buildExtensionContents,
     resolveExtensionBot,
@@ -33,12 +38,13 @@ const chatMessageSchema = z.object({
 export async function POST(req: NextRequest) {
     try {
         const userId = await getUserId(req);
-        const { botId, mode, messages, pageContext, responseModel } = z.object({
+        const { botId, mode, messages, pageContext, responseModel, webSearchMode } = z.object({
             botId: z.string().min(1),
             mode: z.enum(['summary', 'chat']).default('chat'),
             messages: z.array(chatMessageSchema).default([]),
             pageContext: pageContextSchema.optional(),
             responseModel: z.enum(RESPONSE_MODEL_VALUES).default(DEFAULT_RESPONSE_MODEL),
+            webSearchMode: z.enum(WEB_SEARCH_MODE_VALUES).default(DEFAULT_WEB_SEARCH_MODE),
         }).parse(await req.json());
 
         const { bot, systemPrompt } = await resolveExtensionBot(
@@ -54,7 +60,7 @@ export async function POST(req: NextRequest) {
                 try {
                     await streamExtensionCompletion(systemPrompt, contents, (text) => {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
-                    }, responseModel);
+                    }, responseModel, webSearchMode);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', bot })}\n\n`));
                 } catch (err) {
                     const message = err instanceof Error ? err.message : '未知错误';

@@ -1,4 +1,4 @@
-import type { ResponseModel } from './chat-models';
+import type { ResponseModel, WebSearchMode } from './chat-models';
 
 const API_BASE = '/api';
 export type VideoSiteKey = 'seedance' | 'tiktok';
@@ -212,6 +212,7 @@ export const api = {
         inputType?: 'text' | 'voice' | 'file' | 'image' | 'video';
         aspectRatio?: string;
         responseModel?: ResponseModel;
+        webSearchMode?: WebSearchMode;
         attachments?: ChatAttachmentPayload[];
     } | FormData) => {
         const token = getToken();

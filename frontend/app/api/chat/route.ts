@@ -2,11 +2,19 @@ import { NextRequest } from 'next/server';
 import { AppError } from '../../lib/auth';
 import { BUILTIN_BOT_MAP } from '../../lib/builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
-import { DEFAULT_RESPONSE_MODEL, isResponseModel, type ResponseModel } from '../../lib/chat-models';
+import {
+    DEFAULT_RESPONSE_MODEL,
+    DEFAULT_WEB_SEARCH_MODE,
+    isResponseModel,
+    isWebSearchMode,
+    type ResponseModel,
+    type WebSearchMode,
+} from '../../lib/chat-models';
 import { streamGeminiDeepThinkingChat } from '../../lib/gemini-deep-chat';
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
 import { readBackendUrl } from '../../lib/server-env';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
+import { streamYunwuClaudeChat } from '../../lib/yunwu-claude-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
 
 export const runtime = 'nodejs';
@@ -87,6 +95,7 @@ async function buildCustomBotPrompt(req: NextRequest, botId: string, fallbackPro
 
 async function streamByResponseModel(
     responseModel: ResponseModel,
+    webSearchMode: WebSearchMode,
     systemPrompt: string,
     messages: ChatRequestMessage[],
     onText: (text: string) => void,
@@ -100,6 +109,20 @@ async function streamByResponseModel(
         await streamYunwuOpenAIChat({
             systemPrompt,
             messages: openAIMessages,
+            temperature: 1,
+            onText,
+        });
+        return;
+    }
+
+    if (responseModel === 'claude-opus-4.6') {
+        await streamYunwuClaudeChat({
+            systemPrompt,
+            messages: messages.map((item) => ({
+                role: item.role === 'assistant' ? 'assistant' : 'user',
+                content: item.content,
+            })),
+            webSearchMode,
             temperature: 1,
             onText,
         });
@@ -142,10 +165,12 @@ export async function POST(req: NextRequest) {
             conversationHistory?: unknown;
             wfContext?: unknown;
             responseModel?: unknown;
+            webSearchMode?: unknown;
         };
 
         const botIdString = String(body.botId ?? '').trim();
         const responseModel = isResponseModel(body.responseModel) ? body.responseModel : DEFAULT_RESPONSE_MODEL;
+        const webSearchMode = isWebSearchMode(body.webSearchMode) ? body.webSearchMode : DEFAULT_WEB_SEARCH_MODE;
         const normalizedMessages = normalizeMessages(body.messages, body.conversationHistory, body.message);
         const builtinFallbackPrompt = BUILTIN_BOT_MAP[botIdString]?.systemPromptFallback;
         const fallbackPrompt = typeof body.systemPrompt === 'string' && body.systemPrompt.trim()
@@ -180,7 +205,7 @@ export async function POST(req: NextRequest) {
         const stream = new ReadableStream({
             async start(controller) {
                 try {
-                    await streamByResponseModel(responseModel, fullSystemPrompt, filteredMessages, (text) => {
+                    await streamByResponseModel(responseModel, webSearchMode, fullSystemPrompt, filteredMessages, (text) => {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
                     });
 

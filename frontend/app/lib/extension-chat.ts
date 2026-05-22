@@ -2,10 +2,11 @@ import { prisma } from './prisma';
 import { AppError } from './auth';
 import { BUILTIN_BOT_MAP } from './builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from './builtin-knowledge';
-import { DEFAULT_RESPONSE_MODEL, type ResponseModel } from './chat-models';
+import { DEFAULT_RESPONSE_MODEL, DEFAULT_WEB_SEARCH_MODE, type ResponseModel, type WebSearchMode } from './chat-models';
 import { streamGeminiDeepThinkingChat } from './gemini-deep-chat';
 import { getSystemPromptByBotId } from './server-bot-prompts';
 import { streamYunwuGeminiChat } from './yunwu-gemini-chat';
+import { streamYunwuClaudeChat } from './yunwu-claude-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from './yunwu-openai-chat';
 import type {
     ExtensionBot,
@@ -197,11 +198,23 @@ export async function streamExtensionCompletion(
     contents: OpenAIChatMessage[],
     onText: (text: string) => void,
     responseModel: ResponseModel = DEFAULT_RESPONSE_MODEL,
+    webSearchMode: WebSearchMode = DEFAULT_WEB_SEARCH_MODE,
 ): Promise<void> {
     if (responseModel === 'gpt-5.4') {
         await streamYunwuOpenAIChat({
             systemPrompt,
             messages: contents,
+            temperature: 0.8,
+            onText,
+        });
+        return;
+    }
+
+    if (responseModel === 'claude-opus-4.6') {
+        await streamYunwuClaudeChat({
+            systemPrompt,
+            messages: contents,
+            webSearchMode,
             temperature: 0.8,
             onText,
         });
