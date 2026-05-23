@@ -16,6 +16,7 @@ import { readBackendUrl } from '../../lib/server-env';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
 import { streamYunwuClaudeChat } from '../../lib/yunwu-claude-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+import { enrichSystemPromptWithWebSearch } from '../../lib/web-search';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -100,14 +101,20 @@ async function streamByResponseModel(
     messages: ChatRequestMessage[],
     onText: (text: string) => void,
 ): Promise<void> {
-    if (responseModel === 'gpt-5.4') {
-        const openAIMessages: OpenAIChatMessage[] = messages.map((item) => ({
-            role: item.role === 'assistant' ? 'assistant' : 'user',
-            content: item.content,
-        }));
+    const openAIMessages: OpenAIChatMessage[] = messages.map((item) => ({
+        role: item.role === 'assistant' ? 'assistant' : 'user',
+        content: item.content,
+    }));
+    const enriched = await enrichSystemPromptWithWebSearch({
+        systemPrompt,
+        messages: openAIMessages,
+        webSearchMode,
+    });
+    const systemPromptWithWebSearch = enriched.systemPrompt;
 
+    if (responseModel === 'gpt-5.4') {
         await streamYunwuOpenAIChat({
-            systemPrompt,
+            systemPrompt: systemPromptWithWebSearch,
             messages: openAIMessages,
             temperature: 1,
             onText,
@@ -117,12 +124,9 @@ async function streamByResponseModel(
 
     if (responseModel === 'claude-opus-4.6') {
         await streamYunwuClaudeChat({
-            systemPrompt,
-            messages: messages.map((item) => ({
-                role: item.role === 'assistant' ? 'assistant' : 'user',
-                content: item.content,
-            })),
-            webSearchMode,
+            systemPrompt: systemPromptWithWebSearch,
+            messages: openAIMessages,
+            webSearchMode: 'off',
             temperature: 1,
             onText,
         });
@@ -131,10 +135,10 @@ async function streamByResponseModel(
 
     if (responseModel === 'gemini-deep-thinking') {
         await streamGeminiDeepThinkingChat({
-            systemPrompt,
-            messages: messages.map((item) => ({
-                role: item.role === 'assistant' ? 'assistant' : 'user',
-                content: item.content,
+            systemPrompt: systemPromptWithWebSearch,
+            messages: openAIMessages.map((item) => ({
+                role: item.role,
+                content: typeof item.content === 'string' ? item.content : '',
             })),
             temperature: 1,
             topP: 1,
@@ -144,10 +148,10 @@ async function streamByResponseModel(
     }
 
     await streamYunwuGeminiChat({
-        systemPrompt,
-        messages: messages.map((item) => ({
-            role: item.role === 'assistant' ? 'assistant' : 'user',
-            content: item.content,
+        systemPrompt: systemPromptWithWebSearch,
+        messages: openAIMessages.map((item) => ({
+            role: item.role,
+            content: typeof item.content === 'string' ? item.content : '',
         })),
         temperature: 1,
         topP: 1,

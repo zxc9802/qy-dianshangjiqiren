@@ -136,6 +136,7 @@ function buildRequestBody(
     maxTokens: number,
     stream: boolean,
 ) {
+    void webSearchMode;
     return {
         model,
         stream,
@@ -143,7 +144,6 @@ function buildRequestBody(
         max_tokens: maxTokens,
         system: systemPrompt.trim(),
         messages: normalizeMessages(messages),
-        ...buildClaudeWebSearchRequestOptions(webSearchMode),
     };
 }
 
@@ -152,16 +152,8 @@ export function normalizeWebSearchMode(value: unknown): WebSearchMode {
 }
 
 export function buildClaudeWebSearchRequestOptions(mode: WebSearchMode): ClaudeWebSearchRequestOptions {
-    if (mode === 'off') {
-        return {};
-    }
-
-    return {
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        tool_choice: mode === 'on'
-            ? { type: 'tool', name: 'web_search' }
-            : { type: 'auto' },
-    };
+    void mode;
+    return {};
 }
 
 export function extractClaudeMessageTexts(payload: ClaudeMessagePayload): string[] {

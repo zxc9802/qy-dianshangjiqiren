@@ -104,18 +104,12 @@ test('Claude Messages response text is extracted from content parts', async () =
   assert.deepEqual(JSON.parse(JSON.stringify(texts)), ['Hello', ' world'])
 })
 
-test('Claude web search mode builds the expected tool payload', async () => {
+test('Claude web search mode does not send native Claude web search tools', async () => {
   const { buildClaudeWebSearchRequestOptions } = await loadTsModule(['lib', 'yunwu-claude-chat.ts'])
 
   assert.deepEqual(JSON.parse(JSON.stringify(buildClaudeWebSearchRequestOptions('off'))), {})
-  assert.deepEqual(JSON.parse(JSON.stringify(buildClaudeWebSearchRequestOptions('auto'))), {
-    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-    tool_choice: { type: 'auto' },
-  })
-  assert.deepEqual(JSON.parse(JSON.stringify(buildClaudeWebSearchRequestOptions('on'))), {
-    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-    tool_choice: { type: 'tool', name: 'web_search' },
-  })
+  assert.deepEqual(JSON.parse(JSON.stringify(buildClaudeWebSearchRequestOptions('auto'))), {})
+  assert.deepEqual(JSON.parse(JSON.stringify(buildClaudeWebSearchRequestOptions('on'))), {})
 })
 
 test('Claude event-stream text is extracted from non-streaming web-search responses', async () => {

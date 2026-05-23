@@ -8,6 +8,7 @@ import { getSystemPromptByBotId } from './server-bot-prompts';
 import { streamYunwuGeminiChat } from './yunwu-gemini-chat';
 import { streamYunwuClaudeChat } from './yunwu-claude-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from './yunwu-openai-chat';
+import { enrichSystemPromptWithWebSearch } from './web-search';
 import type {
     ExtensionBot,
     ExtensionChatMessage,
@@ -200,9 +201,16 @@ export async function streamExtensionCompletion(
     responseModel: ResponseModel = DEFAULT_RESPONSE_MODEL,
     webSearchMode: WebSearchMode = DEFAULT_WEB_SEARCH_MODE,
 ): Promise<void> {
+    const enriched = await enrichSystemPromptWithWebSearch({
+        systemPrompt,
+        messages: contents,
+        webSearchMode,
+    });
+    const systemPromptWithWebSearch = enriched.systemPrompt;
+
     if (responseModel === 'gpt-5.4') {
         await streamYunwuOpenAIChat({
-            systemPrompt,
+            systemPrompt: systemPromptWithWebSearch,
             messages: contents,
             temperature: 0.8,
             onText,
@@ -212,9 +220,9 @@ export async function streamExtensionCompletion(
 
     if (responseModel === 'claude-opus-4.6') {
         await streamYunwuClaudeChat({
-            systemPrompt,
+            systemPrompt: systemPromptWithWebSearch,
             messages: contents,
-            webSearchMode,
+            webSearchMode: 'off',
             temperature: 0.8,
             onText,
         });
@@ -223,7 +231,7 @@ export async function streamExtensionCompletion(
 
     if (responseModel === 'gemini-deep-thinking') {
         await streamGeminiDeepThinkingChat({
-            systemPrompt,
+            systemPrompt: systemPromptWithWebSearch,
             messages: contents.map((message) => ({
                 role: message.role,
                 content: typeof message.content === 'string' ? message.content : '',
@@ -236,7 +244,7 @@ export async function streamExtensionCompletion(
     }
 
     await streamYunwuGeminiChat({
-        systemPrompt,
+        systemPrompt: systemPromptWithWebSearch,
         messages: contents.map((message) => ({
             role: message.role,
             content: typeof message.content === 'string' ? message.content : '',

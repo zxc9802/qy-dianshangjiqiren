@@ -45,6 +45,7 @@ import {
     type GeminiChatPart,
 } from '../../../../lib/yunwu-gemini-chat';
 import { generateImageViaBackend } from '../../../image-generations/proxy';
+import { enrichSystemPromptWithWebSearch } from '../../../../lib/web-search';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -702,6 +703,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
                     };
 
+                    const textModelMessages: OpenAIChatMessage[] = [
+                        ...historyMessages,
+                        { role: 'user', content: currentPromptText },
+                    ];
+                    const enriched = await enrichSystemPromptWithWebSearch({
+                        systemPrompt,
+                        messages: textModelMessages,
+                        webSearchMode,
+                    });
+                    const systemPromptWithWebSearch = enriched.systemPrompt;
+
                     if (shouldStreamOpenAI) {
                         startHeartbeat();
                         if (shouldStreamVideoBreakdownGpt) {
@@ -712,11 +724,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         }
 
                         await streamYunwuOpenAIChat({
-                            systemPrompt,
-                            messages: [
-                                ...historyMessages,
-                                { role: 'user', content: currentPromptText },
-                            ],
+                            systemPrompt: systemPromptWithWebSearch,
+                            messages: textModelMessages,
                             temperature: 0.8,
                             maxTokens: 8192,
                             onText: (textChunk) => {
@@ -730,12 +739,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         });
                     } else if (shouldStreamClaude) {
                         await streamYunwuClaudeChat({
-                            systemPrompt,
-                            messages: [
-                                ...historyMessages,
-                                { role: 'user', content: currentPromptText },
-                            ],
-                            webSearchMode,
+                            systemPrompt: systemPromptWithWebSearch,
+                            messages: textModelMessages,
+                            webSearchMode: 'off',
                             temperature: 0.8,
                             maxTokens: 8192,
                             onText: (textChunk) => {
@@ -758,7 +764,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         });
 
                         await streamGeminiDeepThinkingChat({
-                            systemPrompt,
+                            systemPrompt: systemPromptWithWebSearch,
                             messages: deepThinkingMessages,
                             temperature: 0.8,
                             topP: 0.95,
@@ -780,7 +786,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         geminiMessages.push(await buildGeminiCurrentTurnMessage(content, attachments));
 
                         await streamYunwuGeminiChat({
-                            systemPrompt,
+                            systemPrompt: systemPromptWithWebSearch,
                             messages: geminiMessages,
                             temperature: 0.8,
                             topP: 0.95,
