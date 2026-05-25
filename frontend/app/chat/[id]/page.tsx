@@ -409,15 +409,6 @@ function inferRemoteVideoMimeType(remoteVideoUrl: string): string {
     return 'video/mp4';
 }
 
-function isDirectGeminiVideoBypassCandidate(file: File, model: ResponseModel): boolean {
-    if (model !== 'gemini') {
-        return false;
-    }
-
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    return file.type.startsWith('video/') || ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
-}
-
 function createAttachedFileFromLocalFile(file: File): AttachedFile {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
@@ -1313,21 +1304,6 @@ export default function ChatPage() {
     }, []);
 
     const parseAttachedFile = async (file: File, model: ResponseModel) => {
-        if (isDirectGeminiVideoBypassCandidate(file, model)) {
-            return {
-                kind: 'video' as ChatAttachmentKind,
-                fileName: file.name,
-                fileSize: file.size,
-                mimeType: file.type || undefined,
-                previewUrl: undefined,
-                extractedText: '',
-                durationMs: undefined,
-                transcript: '',
-                tempVideoToken: undefined,
-                frames: [] as ChatAttachmentFrame[],
-            } satisfies ChatAttachmentPayload;
-        }
-
         const formData = new FormData();
         formData.append('file', file);
         formData.append('responseModel', model);
@@ -1533,7 +1509,7 @@ export default function ChatPage() {
             frames: attachment.frames,
         }));
         const shouldSendGeminiVideoDirect = responseModel === 'gemini'
-            && requestAttachments.some((attachment) => attachment.kind === 'video');
+            && requestAttachments.some((attachment) => attachment.kind === 'video' && !attachment.tempVideoToken && !attachment.remoteVideoUrl);
         const optimisticAttachments: MessageAttachment[] = finalAttachments.map((attachment) => ({
             kind: attachment.kind,
             fileName: attachment.name,
@@ -1632,7 +1608,7 @@ export default function ChatPage() {
                     const formData = new FormData();
                     formData.append('payload', JSON.stringify(messagePayload));
                     finalAttachments
-                        .filter((attachment) => attachment.kind === 'video' && !attachment.remoteVideoUrl)
+                        .filter((attachment) => attachment.kind === 'video' && !attachment.remoteVideoUrl && !attachment.tempVideoToken)
                         .forEach((attachment) => {
                             formData.append('videoFiles', attachment.file, attachment.name);
                         });
@@ -2681,4 +2657,3 @@ function formatMessage(text: string, enableTableCopyButton = false): string {
         tableCopyButtonLabel: TABLE_COPY_LABEL,
     } : undefined);
 }
-

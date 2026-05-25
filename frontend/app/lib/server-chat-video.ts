@@ -20,6 +20,11 @@ const PERSISTED_FRAME_ROOT = path.join(process.cwd(), 'public', 'chat-video-fram
 const TEMP_VIDEO_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_KEYFRAMES = 3;
 const DEFAULT_MAX_REMOTE_VIDEO_SIZE = 20 * 1024 * 1024;
+const DEFAULT_VIDEO_COMPRESS_TARGET_SIZE = 18 * 1024 * 1024;
+const DEFAULT_VIDEO_COMPRESS_MAX_WIDTH = 720;
+const DEFAULT_VIDEO_COMPRESS_AUDIO_KBPS = 96;
+const DEFAULT_VIDEO_COMPRESS_MIN_VIDEO_KBPS = 1200;
+const DEFAULT_VIDEO_COMPRESS_FALLBACK_VIDEO_KBPS = 1200;
 const DEFAULT_TIKTOK_PLAYWRIGHT_TIMEOUT_MS = 20_000;
 const RUNTIME_BIN_ROOT = path.join(process.cwd(), 'bin');
 const FFMPEG_COMMAND = resolveMediaBinaryPath(
@@ -65,6 +70,7 @@ export interface DownloadRemoteVideoOptions extends ProcessUploadedVideoOptions 
 interface YtDlpInvocation { command: string; prefixArgs: string[] }
 interface RemoteVideoBinary { buffer: Buffer; fileName: string; mimeType: string; remotePlatform: RemoteVideoPlatform; downloadMethod: RemoteVideoDownloadMethod }
 interface RemoteVideoDownloadContext { maxSize: number; normalizedUrl: string; platform: RemoteVideoPlatform }
+export interface VideoCompressionSettings { maxWidth: number; videoBitrateKbps: number; audioBitrateKbps: number }
 type TikTokPlaywrightModule = typeof import('playwright');
 type TikTokBrowser = import('playwright').Browser;
 type TikTokPage = import('playwright').Page;
@@ -77,6 +83,43 @@ export async function storeUploadedVideo(params: { buffer: Buffer; fileName: str
     await cleanupStaleTempVideos();
     const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
     return { tempVideoToken: temp.token };
+}
+
+export async function storeUploadedVideoForModelUpload(params: { buffer: Buffer; fileName: string; mimeType: string }): Promise<{ tempVideoToken: string; fileSize: number; mimeType: string }> {
+    await cleanupStaleTempVideos();
+    const temp = await createTempVideo(params.buffer, params.fileName, params.mimeType);
+    let durationMs: number | undefined;
+    try {
+        durationMs = await probeVideoDurationMs(temp.absolutePath);
+    } catch (error) {
+        console.error('[VideoProcessing] Failed to probe duration before model upload staging', {
+            fileName: params.fileName,
+            error: getProcessingErrorMessage(error),
+        });
+    }
+
+    let stagedPath = temp.absolutePath;
+    let stagedMimeType = params.mimeType;
+    try {
+        const compressed = await compressTempVideoIfNeeded({
+            temp,
+            inputSizeBytes: params.buffer.length,
+            durationMs,
+            fileName: params.fileName,
+        });
+        if (compressed) {
+            stagedPath = compressed.absolutePath;
+            stagedMimeType = 'video/mp4';
+        }
+    } catch (error) {
+        console.error('[VideoProcessing] Failed to compress video for model upload; keeping original', {
+            fileName: params.fileName,
+            error: getProcessingErrorMessage(error),
+        });
+    }
+
+    const stat = await fs.stat(stagedPath);
+    return { tempVideoToken: temp.token, fileSize: stat.size, mimeType: stagedMimeType };
 }
 
 function getProcessingErrorMessage(error: unknown): string {
@@ -120,6 +163,39 @@ function resolveMediaBinaryPath(envKey: string, candidatePaths: Array<string | n
     }
 
     return fallbackCommand;
+}
+
+export function resolveVideoCompressionSettings(params: {
+    inputSizeBytes: number;
+    durationMs?: number;
+    targetSizeBytes?: number;
+    maxWidth?: number;
+    audioBitrateKbps?: number;
+    minVideoBitrateKbps?: number;
+}): VideoCompressionSettings | null {
+    const targetSizeBytes = params.targetSizeBytes || DEFAULT_VIDEO_COMPRESS_TARGET_SIZE;
+    if (params.inputSizeBytes <= targetSizeBytes) {
+        return null;
+    }
+
+    const maxWidth = params.maxWidth || DEFAULT_VIDEO_COMPRESS_MAX_WIDTH;
+    const audioBitrateKbps = params.audioBitrateKbps || DEFAULT_VIDEO_COMPRESS_AUDIO_KBPS;
+    const minVideoBitrateKbps = params.minVideoBitrateKbps || DEFAULT_VIDEO_COMPRESS_MIN_VIDEO_KBPS;
+    const durationSeconds = typeof params.durationMs === 'number' && params.durationMs > 0
+        ? params.durationMs / 1000
+        : 0;
+    if (durationSeconds <= 0) {
+        return {
+            maxWidth,
+            videoBitrateKbps: Math.max(DEFAULT_VIDEO_COMPRESS_FALLBACK_VIDEO_KBPS, minVideoBitrateKbps),
+            audioBitrateKbps,
+        };
+    }
+
+    const totalKbps = Math.floor((targetSizeBytes * 8) / durationSeconds / 1024);
+    const rawVideoKbps = Math.max(minVideoBitrateKbps, totalKbps - audioBitrateKbps);
+    const videoBitrateKbps = Math.max(minVideoBitrateKbps, Math.floor(rawVideoKbps / 16) * 16);
+    return { maxWidth, videoBitrateKbps, audioBitrateKbps };
 }
 
 function createProcessingStageError(fileName: string, stage: string, error: unknown): AppError {
@@ -227,6 +303,20 @@ export async function processUploadedVideo(params: { buffer: Buffer; fileName: s
                     throw buildProcessingStageError(params.fileName, '语音转写', error);
                 }
             }
+        }
+
+        try {
+            await compressTempVideoIfNeeded({
+                temp,
+                inputSizeBytes: params.buffer.length,
+                durationMs,
+                fileName: params.fileName,
+            });
+        } catch (error) {
+            console.error('[VideoProcessing] Failed to compress video; continuing with original', {
+                fileName: params.fileName,
+                error: getProcessingErrorMessage(error),
+            });
         }
 
         return {
@@ -350,6 +440,81 @@ async function createTempVideo(buffer: Buffer, fileName: string, mimeType: strin
     const meta: TempVideoMeta = { token, fileName, mimeType, createdAt: new Date().toISOString(), sourceFileName };
     await fs.writeFile(path.join(directory, 'meta.json'), JSON.stringify(meta), 'utf8');
     return { token, absolutePath };
+}
+
+async function compressTempVideoIfNeeded(params: {
+    temp: { token: string; absolutePath: string };
+    inputSizeBytes: number;
+    durationMs?: number;
+    fileName: string;
+}): Promise<{ absolutePath: string } | null> {
+    const targetSizeBytes = readIntServerEnv('VIDEO_COMPRESS_TARGET_SIZE', DEFAULT_VIDEO_COMPRESS_TARGET_SIZE);
+    const maxWidth = readIntServerEnv('VIDEO_COMPRESS_MAX_WIDTH', DEFAULT_VIDEO_COMPRESS_MAX_WIDTH);
+    const audioBitrateKbps = readIntServerEnv('VIDEO_COMPRESS_AUDIO_KBPS', DEFAULT_VIDEO_COMPRESS_AUDIO_KBPS);
+    const minVideoBitrateKbps = readIntServerEnv('VIDEO_COMPRESS_MIN_VIDEO_KBPS', DEFAULT_VIDEO_COMPRESS_MIN_VIDEO_KBPS);
+    const settings = resolveVideoCompressionSettings({
+        inputSizeBytes: params.inputSizeBytes,
+        durationMs: params.durationMs,
+        targetSizeBytes,
+        maxWidth,
+        audioBitrateKbps,
+        minVideoBitrateKbps,
+    });
+    if (!settings) {
+        return null;
+    }
+
+    const directory = path.dirname(params.temp.absolutePath);
+    const compressedFileName = 'compressed.mp4';
+    const compressedPath = path.join(directory, compressedFileName);
+    await execFileAsync(FFMPEG_COMMAND, [
+        '-y',
+        '-i',
+        params.temp.absolutePath,
+        '-vf',
+        `scale='min(${settings.maxWidth},iw)':-2`,
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-b:v',
+        `${settings.videoBitrateKbps}k`,
+        '-maxrate',
+        `${settings.videoBitrateKbps}k`,
+        '-bufsize',
+        `${settings.videoBitrateKbps * 2}k`,
+        '-c:a',
+        'aac',
+        '-b:a',
+        `${settings.audioBitrateKbps}k`,
+        '-movflags',
+        '+faststart',
+        compressedPath,
+    ]);
+
+    const compressedStat = await fs.stat(compressedPath);
+    if (compressedStat.size >= params.inputSizeBytes) {
+        await fs.rm(compressedPath, { force: true }).catch(() => undefined);
+        return null;
+    }
+
+    const metaPath = path.join(directory, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8')) as TempVideoMeta;
+    const updatedMeta: TempVideoMeta = {
+        ...meta,
+        mimeType: 'video/mp4',
+        sourceFileName: compressedFileName,
+    };
+    await fs.writeFile(metaPath, JSON.stringify(updatedMeta), 'utf8');
+    await fs.rm(params.temp.absolutePath, { force: true }).catch(() => undefined);
+    console.info('[VideoProcessing] compressed uploaded video', {
+        fileName: params.fileName,
+        originalBytes: params.inputSizeBytes,
+        compressedBytes: compressedStat.size,
+        targetBytes: targetSizeBytes,
+        videoBitrateKbps: settings.videoBitrateKbps,
+    });
+    return { absolutePath: compressedPath };
 }
 
 async function probeVideoDurationMs(absolutePath: string): Promise<number> {
