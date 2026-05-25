@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_RESPONSE_MODEL, isResponseModel } from '../../lib/chat-models';
-import { processUploadedVideo } from '../../lib/server-chat-video';
+import { processUploadedVideo, storeUploadedVideoForModelUpload } from '../../lib/server-chat-video';
 import { describeImageWithGemini } from '../../lib/server-gemini-media';
 import { readServerEnv } from '../../lib/server-env';
 
@@ -82,13 +82,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: '未选择文件' }, { status: 400 });
         }
 
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const mimeType = MIME_MAP[ext];
         const maxSize = Number.parseInt(readServerEnv('MAX_FILE_SIZE') || '', 10) || DEFAULT_MAX_FILE_SIZE;
-        if (file.size > maxSize) {
+        if (!VIDEO_EXTS.has(ext) && file.size > maxSize) {
             return NextResponse.json({ error: `文件大小不能超过 ${Math.round(maxSize / (1024 * 1024))}MB` }, { status: 400 });
         }
 
-        const ext = file.name.split('.').pop()?.toLowerCase() || '';
-        const mimeType = MIME_MAP[ext];
         if (!mimeType) {
             return NextResponse.json(
                 { error: '不支持的文件格式，请上传 PDF、Word、TXT、Markdown、CSV、图片或视频文件。' },
@@ -100,15 +100,22 @@ export async function POST(req: NextRequest) {
 
         if (VIDEO_EXTS.has(ext)) {
             if (responseModel === 'gemini') {
+                const staged = await storeUploadedVideoForModelUpload({
+                    buffer,
+                    fileName: file.name,
+                    mimeType,
+                });
+
                 return NextResponse.json({
                     kind: 'video',
                     fileName: file.name,
-                    fileSize: file.size,
-                    mimeType,
+                    fileSize: staged.fileSize,
+                    mimeType: staged.mimeType,
                     content: '',
                     durationMs: undefined,
                     transcript: '',
                     frames: [],
+                    tempVideoToken: staged.tempVideoToken,
                 });
             }
 

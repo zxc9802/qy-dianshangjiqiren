@@ -67,7 +67,7 @@ const VIDEO_BREAKDOWN_STREAM_STATUS = '正在分析视频内容，请稍候...';
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
     fileName: z.string().min(1).max(255),
-    fileSize: z.number().int().nonnegative().max(100 * 1024 * 1024),
+    fileSize: z.number().int().nonnegative(),
     mimeType: z.string().max(255).optional(),
     extractedText: z.string().default(''),
     previewUrl: z.string().max(2048).optional(),
