@@ -125,6 +125,7 @@ export async function consumeKbChatSsoTicket(ticketId: string) {
                 groupName: true,
                 role: true,
                 accessGrantedAt: true,
+                authTokenVersion: true,
             },
         });
 
@@ -160,6 +161,7 @@ export async function consumeKbChatSsoTicket(ticketId: string) {
                 nickname: user.nickname,
                 groupName: user.groupName,
                 role: user.role,
+                authTokenVersion: user.authTokenVersion,
             },
         };
     });

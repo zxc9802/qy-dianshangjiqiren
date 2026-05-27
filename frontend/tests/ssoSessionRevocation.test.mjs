@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..', 'app')
+const prismaSchemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma')
+const authLibPath = path.join(appRoot, 'lib', 'auth.ts')
+const authRoutePath = path.join(appRoot, 'api', 'auth', 'route.ts')
+const authStorePath = path.join(appRoot, 'stores', 'auth.ts')
 const ssoCorsPath = path.join(appRoot, 'lib', 'sso-client-cors.ts')
 const videoCorsPath = path.join(appRoot, 'lib', 'video-site-cors.ts')
 const ssoSessionRoutePath = path.join(appRoot, 'api', 'sso', 'session', 'route.ts')
@@ -57,4 +61,28 @@ test('browser-based SSO exchange routes return CORS headers', async () => {
     assert.match(source, /export function OPTIONS/, `${name} exchange should support preflight`)
     assert.match(source, /createSsoClientPreflightResponse/, `${name} exchange should use shared preflight`)
   }
+})
+
+test('auth tokens carry a server-side session version and stale tokens are rejected', async () => {
+  const schema = await readFile(prismaSchemaPath, 'utf8')
+  const authLib = await readFile(authLibPath, 'utf8')
+
+  assert.match(schema, /authTokenVersion\s+Int\s+@default\(0\)\s+@map\("auth_token_version"\)/)
+  assert.match(authLib, /tokenVersion:\s*authTokenVersion/)
+  assert.match(authLib, /authTokenVersion:\s*true/)
+  assert.match(authLib, /decoded\.tokenVersion !== user\.authTokenVersion/)
+  assert.match(authLib, /SESSION_REVOKED/)
+})
+
+test('main-site logout invalidates existing SSO child-site tokens on the server', async () => {
+  const authLib = await readFile(authLibPath, 'utf8')
+  const authRoute = await readFile(authRoutePath, 'utf8')
+  const authStore = await readFile(authStorePath, 'utf8')
+
+  assert.match(authLib, /export async function revokeAuthSession/)
+  assert.match(authLib, /increment:\s*1/)
+  assert.match(authRoute, /case 'logout':/)
+  assert.match(authRoute, /revokeAuthSession\(req\)/)
+  assert.match(authStore, /logout:\s*async/)
+  assert.match(authStore, /await api\.logout\(\)/)
 })

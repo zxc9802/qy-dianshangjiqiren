@@ -10,7 +10,7 @@ interface AuthState {
 
     login: (account: string, password: string) => Promise<void>;
     register: (account: string, password: string, inviteCode: string, nickname: string, groupName: string) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
     loadUser: () => Promise<void>;
 }
 
@@ -69,7 +69,14 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ user, token, isAuthenticated: true });
     },
 
-    logout: () => {
+    logout: async () => {
+        try {
+            if (readStoredToken()) {
+                await api.logout();
+            }
+        } catch (error) {
+            console.error('[Auth] Failed to revoke server session during logout', error);
+        }
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         set({ user: null, token: null, isAuthenticated: false });

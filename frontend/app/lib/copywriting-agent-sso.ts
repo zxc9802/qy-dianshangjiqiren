@@ -124,6 +124,7 @@ export async function consumeCopywritingAgentSsoTicket(ticketId: string) {
                 groupName: true,
                 role: true,
                 accessGrantedAt: true,
+                authTokenVersion: true,
             },
         });
 
@@ -159,6 +160,7 @@ export async function consumeCopywritingAgentSsoTicket(ticketId: string) {
                 nickname: user.nickname,
                 groupName: user.groupName,
                 role: user.role,
+                authTokenVersion: user.authTokenVersion,
             },
         };
     });

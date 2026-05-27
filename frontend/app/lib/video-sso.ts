@@ -204,6 +204,7 @@ export async function consumeVideoSsoTicket(ticketId: string) {
                 groupName: true,
                 role: true,
                 accessGrantedAt: true,
+                authTokenVersion: true,
             },
         });
 
@@ -239,6 +240,7 @@ export async function consumeVideoSsoTicket(ticketId: string) {
                 nickname: user.nickname,
                 groupName: user.groupName,
                 role: user.role,
+                authTokenVersion: user.authTokenVersion,
             },
         };
     });

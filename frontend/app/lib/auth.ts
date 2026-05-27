@@ -8,6 +8,7 @@ const JWT_EXPIRES_IN = readServerEnv('JWT_EXPIRES_IN') || '7d';
 const ACCESS_CONTROL_BOOTSTRAP_KEY = 'access_control_v1_bootstrapped';
 
 type AuthUser = Awaited<ReturnType<typeof loadUserById>>;
+type AuthTokenPayload = { userId: string; tokenVersion?: number };
 
 export interface AuthOptions {
     allowUnauthorizedMembers?: boolean;
@@ -21,9 +22,9 @@ function getJwtSecret(): string {
     return readRequiredServerEnv('JWT_SECRET');
 }
 
-export function signToken(userId: string): string {
+export function signToken(userId: string, authTokenVersion = 0): string {
     return jwt.sign(
-        { userId },
+        { userId, tokenVersion: authTokenVersion },
         getJwtSecret(),
         { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions,
     );
@@ -45,6 +46,8 @@ export async function ensureAccessControlBootstrap(): Promise<void> {
 }
 
 async function runAccessControlBootstrap(): Promise<void> {
+    await ensureAuthTokenVersionColumn();
+
     const adminAccount = readServerEnv('ADMIN_ACCOUNT')?.trim();
     const adminPassword = readServerEnv('ADMIN_PASSWORD');
     const adminNickname = readServerEnv('ADMIN_NICKNAME')?.trim();
@@ -79,6 +82,13 @@ async function runAccessControlBootstrap(): Promise<void> {
     });
 
     bootstrapComplete = true;
+}
+
+async function ensureAuthTokenVersionColumn(): Promise<void> {
+    await prisma.$executeRawUnsafe(`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS auth_token_version integer NOT NULL DEFAULT 0
+    `);
 }
 
 async function syncAdminAccount(
@@ -141,6 +151,7 @@ async function loadUserById(userId: string) {
             createdAt: true,
             role: true,
             accessGrantedAt: true,
+            authTokenVersion: true,
         },
     });
 }
@@ -149,10 +160,10 @@ export async function getAuthUser(req: NextRequest, options: AuthOptions = {}): 
     await ensureAccessControlBootstrap();
 
     const token = getBearerToken(req);
-    let decoded: { userId: string };
+    let decoded: AuthTokenPayload;
 
     try {
-        decoded = jwt.verify(token, getJwtSecret()) as { userId: string };
+        decoded = jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
     } catch {
         throw new AuthError('Login expired. Please sign in again.');
     }
@@ -160,6 +171,10 @@ export async function getAuthUser(req: NextRequest, options: AuthOptions = {}): 
     const user = await loadUserById(decoded.userId);
     if (!user) {
         throw new AuthError('Account not found.');
+    }
+
+    if (decoded.tokenVersion !== user.authTokenVersion && !(decoded.tokenVersion === undefined && user.authTokenVersion === 0)) {
+        throw new AuthError('Login expired. Please sign in again.', 401, 'SESSION_REVOKED');
     }
 
     if (options.requireAdmin && user.role !== 'admin') {
@@ -177,6 +192,27 @@ export async function getAuthUser(req: NextRequest, options: AuthOptions = {}): 
 export async function getUserId(req: NextRequest, options: AuthOptions = {}): Promise<string> {
     const user = await getAuthUser(req, options);
     return user.id;
+}
+
+export async function revokeAuthSession(req: NextRequest): Promise<void> {
+    await ensureAccessControlBootstrap();
+
+    const token = getBearerToken(req);
+    let decoded: AuthTokenPayload;
+
+    try {
+        decoded = jwt.verify(token, getJwtSecret()) as AuthTokenPayload;
+    } catch {
+        throw new AuthError('Login expired. Please sign in again.');
+    }
+
+    await prisma.user.update({
+        where: { id: decoded.userId },
+        data: {
+            authTokenVersion: { increment: 1 },
+        },
+        select: { id: true },
+    });
 }
 
 export class AuthError extends Error {
@@ -225,4 +261,3 @@ export function errorResponse(err: unknown) {
     console.error('[API Error]', message);
     return Response.json({ error: message }, { status: 500 });
 }
-

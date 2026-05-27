@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
             success: true,
             data: {
                 ...result,
-                token: signToken(result.user.id),
+                token: signToken(result.user.id, result.user.authTokenVersion),
             },
         }, undefined, origin);
     } catch (error) {

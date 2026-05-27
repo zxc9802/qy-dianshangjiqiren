@@ -9,6 +9,7 @@ import {
     AppError,
     errorResponse,
     ensureAccessControlBootstrap,
+    revokeAuthSession,
 } from '../../lib/auth';
 
 const accountSchema = z.string().trim().min(3, 'Account must be at least 3 characters.').max(64, 'Account is too long.');
@@ -60,6 +61,8 @@ export async function POST(req: NextRequest) {
                 return await handleLogin(body);
             case 'activate':
                 return await handleActivate(body);
+            case 'logout':
+                return await handleLogout(req);
             default:
                 throw new AppError('Invalid auth action.', 400);
         }
@@ -128,12 +131,13 @@ function issueAuthResponse(user: {
     groupName: string;
     avatar: string;
     role: string;
+    authTokenVersion: number;
     createdAt?: Date;
 }, status = 200) {
     return Response.json({
         success: true,
         data: {
-            token: signToken(user.id),
+            token: signToken(user.id, user.authTokenVersion),
             user: toUserPayload(user),
         },
     }, { status });
@@ -184,6 +188,7 @@ async function handleRegister(body: unknown) {
                 avatar: true,
                 role: true,
                 accessGrantedAt: true,
+                authTokenVersion: true,
                 createdAt: true,
             },
         });
@@ -212,6 +217,7 @@ async function handleRegister(body: unknown) {
                         groupName: true,
                         avatar: true,
                         role: true,
+                        authTokenVersion: true,
                         createdAt: true,
                     },
                 });
@@ -237,6 +243,7 @@ async function handleRegister(body: unknown) {
                 groupName: true,
                 avatar: true,
                 role: true,
+                authTokenVersion: true,
                 createdAt: true,
             },
         });
@@ -264,6 +271,7 @@ async function handleLogin(body: unknown) {
             avatar: true,
             role: true,
             accessGrantedAt: true,
+            authTokenVersion: true,
             createdAt: true,
         },
     });
@@ -301,6 +309,7 @@ async function handleActivate(body: unknown) {
                 avatar: true,
                 role: true,
                 accessGrantedAt: true,
+                authTokenVersion: true,
                 createdAt: true,
             },
         });
@@ -353,10 +362,16 @@ async function handleActivate(body: unknown) {
                 groupName: true,
                 avatar: true,
                 role: true,
+                authTokenVersion: true,
                 createdAt: true,
             },
         });
     }, AUTH_TRANSACTION_OPTIONS);
 
     return issueAuthResponse(user);
+}
+
+async function handleLogout(req: NextRequest) {
+    await revokeAuthSession(req);
+    return Response.json({ success: true });
 }

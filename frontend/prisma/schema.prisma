@@ -16,9 +16,10 @@ model User {
   nickname        String    @default("")
   groupName       String    @default("") @map("group_name")
   avatar          String    @default("")
-  pointsBalance   Int       @default(0) @map("points_balance")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  pointsBalance    Int      @default(0) @map("points_balance")
+  authTokenVersion Int      @default(0) @map("auth_token_version")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   conversations            Conversation[]
   pointsTransactions       PointsTransaction[]

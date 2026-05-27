@@ -119,6 +119,9 @@ export const api = {
     login: (body: { account: string; password: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=login', { method: 'POST', body: JSON.stringify(body) }),
 
+    logout: () =>
+        request<{ success: boolean }>('/auth?action=logout', { method: 'POST', body: JSON.stringify({}) }, { redirectOnUnauthorized: false }),
+
     getMe: () => request<{ success: boolean; data: UserInfo }>('/auth/me'),
 
     updateProfile: (body: { nickname: string }) =>
