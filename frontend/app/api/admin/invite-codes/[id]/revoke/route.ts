@@ -31,11 +31,21 @@ export async function POST(
             throw new AppError('This invite code is not in use.', 400);
         }
 
+        const targetUserId = inviteCode.usedByUserId;
+
         await prisma.$transaction(async (tx) => {
-            await tx.user.update({
-                where: { id: inviteCode.usedByUserId! },
-                data: { accessGrantedAt: null },
+            const targetUser = await tx.user.findUnique({
+                where: { id: targetUserId },
+                select: { role: true },
             });
+
+            if (!targetUser) {
+                throw new AppError('Invite code user not found.', 404);
+            }
+
+            if (targetUser.role === 'admin') {
+                throw new AppError('Admin accounts cannot be deleted by invite-code revocation.', 400);
+            }
 
             await tx.inviteCode.update({
                 where: { id: inviteCode.id },
@@ -43,6 +53,39 @@ export async function POST(
                     usedByUserId: null,
                     usedAt: null,
                 },
+            });
+
+            await tx.invitation.deleteMany({
+                where: {
+                    OR: [
+                        { inviterId: targetUserId },
+                        { inviteeId: targetUserId },
+                    ],
+                },
+            });
+
+            await tx.pointsTransaction.deleteMany({
+                where: { userId: targetUserId },
+            });
+
+            await tx.conversation.deleteMany({
+                where: { userId: targetUserId },
+            });
+
+            await tx.workflowExecution.deleteMany({
+                where: { userId: targetUserId },
+            });
+
+            await tx.workflow.deleteMany({
+                where: { userId: targetUserId },
+            });
+
+            await tx.videoUsageLog.deleteMany({
+                where: { userId: targetUserId },
+            });
+
+            await tx.user.delete({
+                where: { id: targetUserId },
             });
         }, REVOKE_TRANSACTION_OPTIONS);
 
