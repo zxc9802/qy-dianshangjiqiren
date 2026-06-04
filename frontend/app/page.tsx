@@ -322,7 +322,7 @@ export default function HomePage() {
   const [sidebarTab, setSidebarTab] = useState<'history' | 'favorites'>('history');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [generalPrompt, setGeneralPrompt] = useState('');
+  const [generalPromptHasText, setGeneralPromptHasText] = useState(false);
   const [generalAttachedFiles, setGeneralAttachedFiles] = useState<File[]>([]);
   const [generalResponseModel, setGeneralResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
   const [generalWebSearchMode, setGeneralWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
@@ -332,6 +332,7 @@ export default function HomePage() {
   const router = useRouter();
   const generalRecorderRef = useRef<Pcm16Recorder | null>(null);
   const generalFileInputRef = useRef<HTMLInputElement | null>(null);
+  const generalPromptRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -394,7 +395,7 @@ export default function HomePage() {
     const query = new URLSearchParams();
     query.set('rm', generalResponseModel);
     query.set('ws', generalWebSearchMode);
-    if (draft?.trim()) {
+    if (!launchDraftId && draft?.trim()) {
       query.set('draft', draft.trim());
     }
     if (launchDraftId) {
@@ -406,33 +407,37 @@ export default function HomePage() {
   const openGenericChat = useCallback(async (draft?: string) => {
     if (!ensureAuthenticated()) return;
     let launchDraftId: string | null = null;
+    const prompt = draft?.trim() || '';
 
-    if (generalAttachedFiles.length > 0) {
+    if (prompt || generalAttachedFiles.length > 0) {
       try {
         const draftRecord = await putLaunchChatDraft({
-          prompt: draft?.trim() || '',
+          prompt,
           files: generalAttachedFiles,
         });
         launchDraftId = draftRecord.id;
       } catch (error) {
-        alert(error instanceof Error ? error.message : '附件暂存失败，请重试');
+        alert(error instanceof Error ? error.message : '消息暂存失败，请重试');
         return;
       }
     }
 
-    setGeneralPrompt('');
+    if (generalPromptRef.current) {
+      generalPromptRef.current.value = '';
+    }
+    setGeneralPromptHasText(false);
     setGeneralAttachedFiles([]);
-    router.push(buildGenericChatUrl(draft, launchDraftId));
+    router.push(buildGenericChatUrl(prompt, launchDraftId));
   }, [buildGenericChatUrl, ensureAuthenticated, generalAttachedFiles, router]);
 
   const submitGenericChat = useCallback(async () => {
-    const text = generalPrompt.trim();
+    const text = generalPromptRef.current?.value.trim() || '';
     if (!ensureAuthenticated()) return;
     if (!text && generalAttachedFiles.length === 0) {
       return;
     }
     await openGenericChat(text);
-  }, [ensureAuthenticated, generalAttachedFiles.length, generalPrompt, openGenericChat]);
+  }, [ensureAuthenticated, generalAttachedFiles.length, openGenericChat]);
 
   const handleGeneralFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -598,7 +603,7 @@ export default function HomePage() {
     </div>
   );
 
-  const canSubmitGeneralChat = generalPrompt.trim().length > 0 || generalAttachedFiles.length > 0;
+  const canSubmitGeneralChat = generalPromptHasText || generalAttachedFiles.length > 0;
 
   if (isLoading) return <div className={styles.loading}><div className={styles.spinner} /></div>;
 
@@ -737,12 +742,16 @@ export default function HomePage() {
                 style={{ display: 'none' }}
               />
               <textarea
-                value={generalPrompt}
-                onChange={(event) => setGeneralPrompt(event.target.value)}
+                ref={generalPromptRef}
+                onChange={(event) => {
+                  const nextHasText = event.target.value.trim().length > 0;
+                  setGeneralPromptHasText((current) => current === nextHasText ? current : nextHasText);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
-                    if (canSubmitGeneralChat) {
+                    const hasCurrentText = generalPromptRef.current?.value.trim().length ? true : false;
+                    if (hasCurrentText || generalAttachedFiles.length > 0) {
                       void submitGenericChat();
                     }
                   }

@@ -718,6 +718,7 @@ export default function ChatPage() {
 
     const [messages, setMessages] = useState<MessageItem[]>([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
     const [inputText, setInputText] = useState('');
+    const [launchDraftPrompt, setLaunchDraftPrompt] = useState('');
     const [imageModeEnabled, setImageModeEnabled] = useState(false);
     const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
     const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
@@ -895,6 +896,7 @@ export default function ChatPage() {
     useEffect(() => {
         if (!launchDraftId) {
             hydratedLaunchDraftIdRef.current = null;
+            setLaunchDraftPrompt('');
             setIsHydratingLaunchDraft(false);
             return;
         }
@@ -908,20 +910,24 @@ export default function ChatPage() {
 
         void consumeLaunchChatDraft(launchDraftId)
             .then((draft) => {
-                if (cancelled || !draft?.files?.length) {
+                if (cancelled || !draft) {
                     return;
                 }
 
-                setAttachedFiles((current) => {
-                    const availableSlots = Math.max(0, MAX_ATTACHMENTS - current.length);
-                    const nextFiles = draft.files.slice(0, availableSlots).map(createAttachedFileFromLocalFile);
+                setLaunchDraftPrompt(draft.prompt.trim());
 
-                    if (draft.files.length > availableSlots && typeof window !== 'undefined') {
-                        window.alert(`一次最多上传 ${MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
-                    }
+                if (draft.files.length > 0) {
+                    setAttachedFiles((current) => {
+                        const availableSlots = Math.max(0, MAX_ATTACHMENTS - current.length);
+                        const nextFiles = draft.files.slice(0, availableSlots).map(createAttachedFileFromLocalFile);
 
-                    return [...current, ...nextFiles];
-                });
+                        if (draft.files.length > availableSlots && typeof window !== 'undefined') {
+                            window.alert(`一次最多上传 ${MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
+                        }
+
+                        return [...current, ...nextFiles];
+                    });
+                }
             })
             .catch((error) => {
                 console.error('[Chat] Failed to restore launch draft attachments', error);
@@ -1835,7 +1841,9 @@ export default function ChatPage() {
     ]);
 
     useEffect(() => {
-        if (!launcherDraft && !launchDraftId) {
+        const hydratedDraftPrompt = launchDraftPrompt || launcherDraft;
+
+        if (!hydratedDraftPrompt && !launchDraftId) {
             launcherDraftKeyRef.current = null;
             return;
         }
@@ -1844,13 +1852,14 @@ export default function ChatPage() {
         if (requestedResponseModel && responseModel !== requestedResponseModel) return;
         if (requestedWebSearchMode && webSearchMode !== requestedWebSearchMode) return;
 
-        const draftKey = `${botId}:${responseModel}:${webSearchMode}:${launchDraftId}:${launcherDraft}`;
+        const draftKey = `${botId}:${responseModel}:${webSearchMode}:${launchDraftId}:${hydratedDraftPrompt}`;
         if (launcherDraftKeyRef.current === draftKey) return;
 
         launcherDraftKeyRef.current = draftKey;
-        void sendMessage(launcherDraft);
+        void sendMessage(hydratedDraftPrompt);
     }, [
         launchDraftId,
+        launchDraftPrompt,
         botId,
         conversationId,
         isHydratingLaunchDraft,
@@ -1870,6 +1879,7 @@ export default function ChatPage() {
         clearAttachments();
         setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
         setInputText('');
+        setLaunchDraftPrompt('');
         setSuggestions([]);
         setConversationVideos([]);
         setSelectedConversationVideoIds([]);
