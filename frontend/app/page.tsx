@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
@@ -57,48 +57,48 @@ interface BotInfo {
 const WF_TEMPLATES = [
   {
     id: 'wf-1',
-    name: '鏂板搧涓婃灦鍏ㄦ祦绋?,
-    title: '鐖嗘鎵撻€犳祦姘寸嚎',
+    name: '新品上架全流程',
+    title: '爆款打造流水线',
     steps: [
-      { botId: '9', botName: '鍗栫偣鏁欑粌', instruction: '璇峰府鎴戞彁鐐艰繖涓骇鍝佺殑鏍稿績鍗栫偣' },
-      { botId: '10', botName: '澶╃尗涓诲浘绛栧垝鏁欑粌', instruction: '鍩轰簬鍗栫偣锛屽府鎴戠瓥鍒?寮犲ぉ鐚富鍥炬柟妗? },
-      { botId: '12', botName: '澶╃尗璇勪环鏁欑粌', instruction: '鍩轰簬浜у搧鍗栫偣鍜屼富鍥撅紝璁捐鐪熷疄鑷劧鐨勮瘎浠锋ā鏉? },
+      { botId: '9', botName: '卖点教练', instruction: '请帮我提炼这个产品的核心卖点' },
+      { botId: '10', botName: '天猫主图策划教练', instruction: '基于卖点，帮我策划5张天猫主图方案' },
+      { botId: '12', botName: '天猫评价教练', instruction: '基于产品卖点和主图，设计真实自然的评价模板' },
     ],
-    displaySteps: ['鍗栫偣', '涓诲浘', '璇勪环'],
+    displaySteps: ['卖点', '主图', '评价'],
     gradient: 'linear-gradient(135deg, #2563eb 0%, #60a5fa 100%)',
   },
   {
     id: 'wf-3',
-    name: '灏忕孩涔﹀唴瀹圭煩闃?,
-    title: '灏忕孩涔﹀唴瀹圭煩闃?,
+    name: '小红书内容矩阵',
+    title: '小红书内容矩阵',
     steps: [
-      { botId: '17', botName: '灏忕孩涔︾垎鏂囨媶瑙ｅ鍒?, instruction: '鎷嗚В杩欎釜鏂瑰悜鐨勭垎鏂囧叕寮忥紝鎻愮偧鍙鐢ㄥ厓绱? },
-      { botId: '18', botName: '灏忕孩涔︾垎娆炬爣棰?, instruction: '鍩轰簬鐖嗘枃鍒嗘瀽锛岀粰鍑?0涓珮鐐瑰嚮鐜囨爣棰? },
-      { botId: '21', botName: '灏忕孩涔︽鏂囨媶瑙OP', instruction: '鍩轰簬浠ヤ笂鏍囬锛屾寜鐖嗘枃鍏紡鍐欏畬鏁存鏂? },
-      { botId: '22', botName: '灏忕孩涔︾瑪璁拌瘎璁虹敓鎴?, instruction: '鍩轰簬鍐呭锛岀敓鎴?0鏉¤嚜鐒跺紩瀵间簰鍔ㄧ殑璇勮' },
+      { botId: '17', botName: '小红书爆文拆解复制', instruction: '拆解这个方向的爆文公式，提炼可复用元素' },
+      { botId: '18', botName: '小红书爆款标题', instruction: '基于爆文分析，给出10个高点击率标题' },
+      { botId: '21', botName: '小红书正文拆解SOP', instruction: '基于以上标题，按爆文公式写完整正文' },
+      { botId: '22', botName: '小红书笔记评论生成', instruction: '基于内容，生成10条自然引导互动的评论' },
     ],
-    displaySteps: ['鐖嗘枃', '鏍囬', '姝ｆ枃', '璇勮'],
+    displaySteps: ['爆文', '标题', '正文', '评论'],
     gradient: 'linear-gradient(135deg, #16a34a 0%, #4ade80 100%)',
   },
   {
     id: 'wf-2',
-    name: '绔炲搧鍏ㄩ潰鍒嗘瀽',
-    title: '绔炲搧鍏ㄩ潰鍒嗘瀽',
+    name: '竞品全面分析',
+    title: '竞品全面分析',
     steps: [
-      { botId: '13', botName: '澶╃尗绔炰簤绛栫暐鏁欑粌', instruction: '鍒嗘瀽浠ヤ笅浜у搧/绫荤洰鐨勭珵鍝佷紭鍔ｅ娍' },
-      { botId: '8', botName: '澶╃尗鐖嗘瓒嬪娍鎷嗚В', instruction: '鍩轰簬绔炲搧鍒嗘瀽锛屾繁鍏ュ垎鏋愯鍝佺被瓒嬪娍鍜屾満浼? },
-      { botId: '14', botName: '澶╃尗瀹㈠崟浠锋彁鍗囨暀缁?, instruction: '鍩轰簬绔炲搧鍜岃秼鍔垮垎鏋愶紝鍒跺畾瀹氫环鍜屽鍗曚环鎻愬崌绛栫暐' },
+      { botId: '13', botName: '天猫竞争策略教练', instruction: '分析以下产品/类目的竞品优劣势' },
+      { botId: '8', botName: '天猫爆款趋势拆解', instruction: '基于竞品分析，深入分析该品类趋势和机会' },
+      { botId: '14', botName: '天猫客单价提升教练', instruction: '基于竞品和趋势分析，制定定价和客单价提升策略' },
     ],
-    displaySteps: ['绔炲搧', '瓒嬪娍', '瀹氫环'],
+    displaySteps: ['竞品', '趋势', '定价'],
     gradient: 'linear-gradient(135deg, #ea580c 0%, #fb923c 100%)',
   },
 ];
 
 const IMAGE_TOOL: BotInfo = {
   id: 'image-generator',
-  name: '鐢靛晢鍥剧墖鐢熸垚鏈哄櫒浜?,
-  category: '缁樺浘鏈哄櫒浜?,
-  description: '涓婁紶鍙傝€冨浘锛屾寜鍙傛暟涓€閿敓鎴?2K 鐢靛晢鍥撅紝鏀寔鍘嗗彶澶嶇敤涓庝簩娆＄紪杈戙€?,
+  name: '电商图片生成机器人',
+  category: '绘图机器人',
+  description: '上传参考图，按参数一键生成 2K 电商图，支持历史复用与二次编辑。',
   icon: <ImageIcon size={22} />,
   iconColor: '#7c3aed',
   path: '/bot/image-generator',
@@ -109,9 +109,9 @@ const IMAGE_TOOL: BotInfo = {
 
 const DETAIL_IMAGE_AGENT_TOOL: BotInfo = {
   id: 'detail-image-agent',
-  name: '搴楅摵鍥剧墖宸ュ叿',
-  category: '缁樺浘鏈哄櫒浜?,
-  description: '鐧诲綍鍚庣洿杈惧簵閾哄浘鐗囧伐鍏凤紝鏀寔鎸夎处鍙蜂繚瀛樺巻鍙茶褰曚笌澶嶇敤鐢熸垚缁撴灉銆?,
+  name: '店铺图片工具',
+  category: '绘图机器人',
+  description: '登录后直达店铺图片工具，支持按账号保存历史记录与复用生成结果。',
   icon: <ImageIcon size={22} />,
   iconColor: '#0891b2',
   path: '/bot/detail-image-agent?autostart=1&openMode=replace',
@@ -122,9 +122,9 @@ const DETAIL_IMAGE_AGENT_TOOL: BotInfo = {
 
 const BUYER_SHOW_TOOL: BotInfo = {
   id: 'buyer-show',
-  name: '涔板绉€鏅鸿兘浣?,
-  category: '缁樺浘鏈哄櫒浜?,
-  description: '鐧诲綍鍚庣洿杈句拱瀹剁鏅鸿兘浣擄紝鎸変富绔欒处鍙蜂繚瀛樼敓鎴愬巻鍙蹭笌璇勮鑽夌銆?,
+  name: '买家秀智能体',
+  category: '绘图机器人',
+  description: '登录后直达买家秀智能体，按主站账号保存生成历史与评论草稿。',
   icon: <ImageIcon size={22} />,
   iconColor: '#0f766e',
   path: '/bot/buyer-show?autostart=1&openMode=replace',
@@ -135,9 +135,9 @@ const BUYER_SHOW_TOOL: BotInfo = {
 
 const KB_CHAT_TOOL: BotInfo = {
   id: 'kb-chat',
-  name: '璧疯娊鐭ヨ瘑搴撴満鍣ㄤ汉',
-  category: '绠＄悊宸ュ叿',
-  description: '鐧诲綍涓荤珯鍚庣洿杈句紒涓氱煡璇嗗簱闂瓟鏈哄櫒浜猴紝鏀寔鍐呴儴鐭ヨ瘑銆佷笂浼犺祫鏂欎笌鎶ュ憡鐢熸垚銆?,
+  name: '起芽知识库机器人',
+  category: '管理工具',
+  description: '登录主站后直达企业知识库问答机器人，支持内部知识、上传资料与报告生成。',
   icon: <BookOpen size={22} />,
   iconColor: '#0f766e',
   path: '/bot/kb-chat?autostart=1&openMode=replace',
@@ -148,9 +148,9 @@ const KB_CHAT_TOOL: BotInfo = {
 
 const COPYWRITING_AGENT_TOOL: BotInfo = {
   id: 'copywriting-agent',
-  name: '鑰侀粍 AI 鏂囨鎬绘帶',
-  category: '鐢靛晢宸ュ叿',
-  description: '鐧诲綍鍚庣洿杈炬枃妗堟€绘帶鏅鸿兘浣擄紝鎸変富绔欒处鍙烽殧绂绘渚嬪簱銆佺礌鏉愬簱涓庡唴瀹硅〃鐜版暟鎹€?,
+  name: '老黄 AI 文案总控',
+  category: '电商工具',
+  description: '登录后直达文案总控智能体，按主站账号隔离案例库、素材库与内容表现数据。',
   icon: <PenTool size={22} />,
   iconColor: '#dc2626',
   path: '/bot/copywriting-agent?autostart=1&openMode=replace',
@@ -162,7 +162,7 @@ const COPYWRITING_AGENT_TOOL: BotInfo = {
 const XHS_AUTO_PUBLISH_TOOL: BotInfo = {
   id: 'xhs-auto-publish',
   name: 'XHS auto publisher',
-  category: '绠＄悊宸ュ叿',
+  category: '管理工具',
   description: 'Open the XHS auto publishing console with your main-site account and synced permissions.',
   icon: <Smartphone size={22} />,
   iconColor: '#dc0033',
@@ -175,9 +175,9 @@ const XHS_AUTO_PUBLISH_TOOL: BotInfo = {
 const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'video-workbench',
-    name: '瑙嗛宸ヤ綔鍙?,
-    category: '瑙嗛宸ヤ綔鍙?,
-    description: '鐧诲綍鍚庤繘鍏ヨ棰戝伐浣滃彴锛屼綋楠岃棰戠敓鎴愬弬鏁伴潰鏉裤€侀瑙堝尯鍜屽伐浣滃彴寮忔搷浣滅晫闈€?,
+    name: '视频工作台',
+    category: '视频工作台',
+    description: '登录后进入视频工作台，体验视频生成参数面板、预览区和工作台式操作界面。',
     icon: <Video size={22} />,
     iconColor: '#c0841a',
     path: VIDEO_SITE_METADATA.seedance.entryPath,
@@ -189,8 +189,8 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
   {
     id: 'tiktok-studio',
     name: 'TikTok Studio',
-    category: '瑙嗛宸ヤ綔鍙?,
-    description: '鐧诲綍鍚庤繘鍏?TikTok Studio锛屼綋楠?TikTok 涓撶敤鐨勮棰戠敓鎴愪笌宸ヤ綔鍙板紡鎿嶄綔鍏ュ彛銆?,
+    category: '视频工作台',
+    description: '登录后进入 TikTok Studio，体验 TikTok 专用的视频生成与工作台式操作入口。',
     icon: <Video size={22} />,
     iconColor: '#0284c7',
     path: VIDEO_SITE_METADATA.tiktok.entryPath,
@@ -318,14 +318,14 @@ const ALL_HOMEPAGE_BOTS: BotInfo[] = [
 ];
 
 const CATEGORY_ICONS: Record<string, ReactNode> = {
-  '绠＄悊宸ュ叿': <Compass size={18} />,
-  '鐢靛晢宸ュ叿': <Package size={18} />,
-  '灏忕孩涔?: <BookOpen size={18} />,
-  '浼佷笟鏁欑粌': <Landmark size={18} />,
-  '璐㈢◣': <Briefcase size={18} />,
-  'AI闄窇鏁欑粌': <Bot size={18} />,
-  '缁樺浘鏈哄櫒浜?: <Puzzle size={18} />,
-  '瑙嗛宸ヤ綔鍙?: <Video size={18} />,
+  '管理工具': <Compass size={18} />,
+  '电商工具': <Package size={18} />,
+  '小红书': <BookOpen size={18} />,
+  '企业教练': <Landmark size={18} />,
+  '财税': <Briefcase size={18} />,
+  'AI陪跑教练': <Bot size={18} />,
+  '绘图机器人': <Puzzle size={18} />,
+  '视频工作台': <Video size={18} />,
 
 };
 
@@ -430,7 +430,7 @@ export default function HomePage() {
         });
         launchDraftId = draftRecord.id;
       } catch (error) {
-        alert(error instanceof Error ? error.message : '闄勪欢鏆傚瓨澶辫触锛岃閲嶈瘯');
+        alert(error instanceof Error ? error.message : '附件暂存失败，请重试');
         return;
       }
     }
@@ -456,7 +456,7 @@ export default function HomePage() {
 
     try {
       if (generalAttachedFiles.length >= HOMEPAGE_MAX_ATTACHMENTS) {
-        throw new Error(`涓€娆℃渶澶氫笂浼?${HOMEPAGE_MAX_ATTACHMENTS} 涓枃浠禶);
+        throw new Error(`一次最多上传 ${HOMEPAGE_MAX_ATTACHMENTS} 个文件`);
       }
 
       const availableSlots = HOMEPAGE_MAX_ATTACHMENTS - generalAttachedFiles.length;
@@ -464,10 +464,10 @@ export default function HomePage() {
       setGeneralAttachedFiles((current) => [...current, ...nextFiles]);
 
       if (files.length > availableSlots) {
-        alert(`涓€娆℃渶澶氫笂浼?${HOMEPAGE_MAX_ATTACHMENTS} 涓枃浠讹紝鍏朵綑鏂囦欢宸插拷鐣);
+        alert(`一次最多上传 ${HOMEPAGE_MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : '鏂囦欢涓婁紶澶辫触');
+      alert(error instanceof Error ? error.message : '文件上传失败');
     }
   }, [generalAttachedFiles.length]);
 
@@ -487,7 +487,7 @@ export default function HomePage() {
       try {
         const audioBlob = await recorder.stop();
         if (audioBlob.size < 1000) {
-          throw new Error('褰曢煶鏃堕棿澶煭锛岃閲嶈瘯');
+          throw new Error('录音时间太短，请重试');
         }
 
         setIsGeneralTranscribing(true);
@@ -499,12 +499,12 @@ export default function HomePage() {
         const transcript = typeof data.text === 'string' ? data.text.trim() : '';
 
         if (!transcript) {
-          throw new Error(data.error || '璇煶璇嗗埆澶辫触');
+          throw new Error(data.error || '语音识别失败');
         }
 
         await openGenericChat(transcript);
       } catch (error) {
-        alert(error instanceof Error ? error.message : '璇煶璇嗗埆澶辫触');
+        alert(error instanceof Error ? error.message : '语音识别失败');
       } finally {
         setIsGeneralTranscribing(false);
       }
@@ -515,7 +515,7 @@ export default function HomePage() {
       generalRecorderRef.current = await startPcm16kMonoRecorder();
       setIsGeneralRecording(true);
     } catch (error) {
-      alert(error instanceof Error ? error.message : '鏃犳硶璁块棶楹﹀厠椋?);
+      alert(error instanceof Error ? error.message : '无法访问麦克风');
     }
   }, [ensureAuthenticated, isGeneralRecording, openGenericChat]);
 
@@ -571,7 +571,7 @@ export default function HomePage() {
 
   const getLastMsg = (conv: typeof conversations[0]) => {
     const last = conv.messages[conv.messages.length - 1];
-    return last ? last.content.replace(/\[鏂囦欢:.*?\]/g, '[鏂囦欢]').slice(0, 40) : '';
+    return last ? last.content.replace(/\[文件:.*?\]/g, '[文件]').slice(0, 40) : '';
   };
 
   const openBot = async (bot: BotInfo) => {
@@ -606,7 +606,7 @@ export default function HomePage() {
       <div className={styles.botInfo}>
         <div className={styles.botHeading}>
           <h4 className={styles.botName}>{bot.name}</h4>
-          {badge ?? (bot.isTrial ? <span className={`${styles.botBadge} badge badge-orange`}>璇曠敤鐗?/span> : null)}
+          {badge ?? (bot.isTrial ? <span className={`${styles.botBadge} badge badge-orange`}>试用版</span> : null)}
         </div>
         <p className={styles.botDesc}>{bot.description}</p>
       </div>
@@ -623,43 +623,43 @@ export default function HomePage() {
         <div className={styles.headerLeft}>
           <button className={styles.sidebarToggle} onClick={() => setSidebarOpen(!sidebarOpen)}><Menu size={20} /></button>
           <span className={styles.logoIcon}><Bot size={22} /></span>
-          <h1 className={styles.logo}>鐢靛晢 AI 鏅鸿兘骞冲彴</h1>
+          <h1 className={styles.logo}>电商 AI 智能平台</h1>
         </div>
         <div className={styles.headerCenter}>
           <div className={styles.searchBox}>
             <span className={styles.searchIcon}><Search size={16} /></span>
             <input
               type="text"
-              placeholder="鎼滅储宸ュ叿鎴栨満鍣ㄤ汉..."
+              placeholder="搜索工具或机器人..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className={styles.searchInput}
             />
-            <span className={styles.searchHint}>鈱楰</span>
+            <span className={styles.searchHint}>⌘K</span>
           </div>
         </div>
         <div className={styles.headerRight}>
-          <button onClick={() => requireAuth('/my-bots')} className={styles.navBtn}>鎴戠殑鏅鸿兘浣?/button>
-          <button onClick={() => requireAuth('/my-workflows')} className={styles.navBtn}>鎴戠殑宸ヤ綔娴?/button>
+          <button onClick={() => requireAuth('/my-bots')} className={styles.navBtn}>我的智能体</button>
+          <button onClick={() => requireAuth('/my-workflows')} className={styles.navBtn}>我的工作流</button>
           {user?.role === 'admin' && (
-            <button onClick={() => requireAuth('/admin/invite-codes')} className={styles.navBtn}>閭€璇风爜绠＄悊</button>
+            <button onClick={() => requireAuth('/admin/invite-codes')} className={styles.navBtn}>邀请码管理</button>
           )}
-          <button onClick={() => requireAuth('/insights')} className={styles.navBtn}>缃戦〉娲炲療</button>
+          <button onClick={() => requireAuth('/insights')} className={styles.navBtn}>网页洞察</button>
           {mounted && (
             <button
               className={styles.themeToggle}
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              title={theme === 'dark' ? '鍒囨崲浜壊妯″紡' : '鍒囨崲鏆楄壊妯″紡'}
+              title={theme === 'dark' ? '切换亮色模式' : '切换暗色模式'}
             >
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           )}
           {isAuthenticated ? (
             <>
-              <button onClick={() => router.push('/profile')} className={styles.avatarBtn}>{user?.nickname?.slice(0, 1) || '鎴?}</button>
+              <button onClick={() => router.push('/profile')} className={styles.avatarBtn}>{user?.nickname?.slice(0, 1) || '我'}</button>
             </>
           ) : (
-            <button onClick={() => router.push('/login')} className={styles.navBtn}>鐧诲綍</button>
+            <button onClick={() => router.push('/login')} className={styles.navBtn}>登录</button>
           )}
         </div>
       </header>
@@ -672,23 +672,23 @@ export default function HomePage() {
               onClick={() => setSidebarTab('history')}
               style={{ borderBottomColor: sidebarTab === 'history' ? '#2563eb' : 'transparent', color: sidebarTab === 'history' ? 'var(--text-primary, #0f172a)' : undefined }}
             >
-              <MessageSquare size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 鑱婂ぉ璁板綍
+              <MessageSquare size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 聊天记录
             </button>
             <button
               className={`${styles.sidebarTabBtn} ${sidebarTab === 'favorites' ? styles.sidebarTabActive : ''}`}
               onClick={() => setSidebarTab('favorites')}
               style={{ borderBottomColor: sidebarTab === 'favorites' ? '#eab308' : 'transparent', color: sidebarTab === 'favorites' ? '#eab308' : undefined }}
             >
-              <Star size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 鏀惰棌
+              <Star size={14} style={{ verticalAlign: -2, marginRight: 4 }} /> 收藏
             </button>
           </div>
           <div className={styles.sidebarList}>
             {sidebarConvs.length === 0 ? (
-              <div className={styles.sidebarEmpty}>{sidebarTab === 'favorites' ? '鏆傛棤鏀惰棌' : '鏆傛棤瀵硅瘽璁板綍'}</div>
+              <div className={styles.sidebarEmpty}>{sidebarTab === 'favorites' ? '暂无收藏' : '暂无对话记录'}</div>
             ) : sidebarConvs.map((conv) => (
               <div key={conv.id} className={styles.sidebarItem} onClick={() => router.push(`/chat/${conv.botId}?cid=${conv.id}`)}>
                 <div className={styles.sidebarItemTop}>
-                  <span className={styles.sidebarBotName}>{conv.botName || '鏈哄櫒浜?}</span>
+                  <span className={styles.sidebarBotName}>{conv.botName || '机器人'}</span>
                   <span className={styles.sidebarTime}>{formatTime(conv.updatedAt)}</span>
                 </div>
                 <p className={styles.sidebarPreview}>{getLastMsg(conv)}</p>
@@ -715,9 +715,9 @@ export default function HomePage() {
               <div key={wf.id} className={styles.wfCard} style={{ background: wf.gradient }} onClick={() => launchWorkflow(wf)}>
                 <h3 className={styles.wfCardTitle}><Zap size={16} /> {wf.title}</h3>
                 <div className={styles.wfSteps}>
-                  {wf.displaySteps.map((s, i) => <span key={i}>{s}{i < wf.displaySteps.length - 1 && <span className={styles.wfArrow}> 鈫?</span>}</span>)}
+                  {wf.displaySteps.map((s, i) => <span key={i}>{s}{i < wf.displaySteps.length - 1 && <span className={styles.wfArrow}> → </span>}</span>)}
                 </div>
-                <button className={styles.wfLaunchBtn}>绔嬪嵆鍚姩</button>
+                <button className={styles.wfLaunchBtn}>立即启动</button>
               </div>
             ))}
             <div
@@ -725,11 +725,11 @@ export default function HomePage() {
               style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)' }}
               onClick={() => requireAuth('/my-workflows')}
             >
-              <h3 className={styles.wfCardTitle}><Plus size={16} /> 鑷畾涔夊伐浣滄祦</h3>
+              <h3 className={styles.wfCardTitle}><Plus size={16} /> 自定义工作流</h3>
               <div className={styles.wfSteps}>
-                <span>浠庣┖鐧界敾甯冨垱寤轰笓灞炲伐浣滄祦</span>
+                <span>从空白画布创建专属工作流</span>
               </div>
-              <button className={styles.wfLaunchBtn}>寮€濮嬪垱寤?/button>
+              <button className={styles.wfLaunchBtn}>开始创建</button>
             </div>
           </div>
 
@@ -737,8 +737,8 @@ export default function HomePage() {
             <div className={styles.heroGreeting}>
               <h2 className={styles.heroGreetingTitle}>
                 {isAuthenticated && user?.nickname
-                  ? <><span className={styles.heroGreetingHighlight}>{user.nickname}锛屼綘濂?/span><br />闇€瑕佹垜涓轰綘鍋氫簺浠€涔堬紵</>
-                  : <><span className={styles.heroGreetingHighlight}>浣犲ソ</span><br />闇€瑕佹垜涓轰綘鍋氫簺浠€涔堬紵</>}
+                  ? <><span className={styles.heroGreetingHighlight}>{user.nickname}，你好</span><br />需要我为你做些什么？</>
+                  : <><span className={styles.heroGreetingHighlight}>你好</span><br />需要我为你做些什么？</>}
               </h2>
             </div>
 
@@ -764,8 +764,8 @@ export default function HomePage() {
                 }}
                 className={styles.generalComposerInput}
                 placeholder={isGeneralTranscribing
-                  ? '璇煶杞綍涓紝璇风◢鍊?..'
-                  : '鍦ㄨ繖閲岃緭鍏ヤ换浣曢棶棰?..'}
+                  ? '语音转录中，请稍候...'
+                  : '在这里输入任何问题...'}
                 rows={2}
               />
 
@@ -787,7 +787,7 @@ export default function HomePage() {
                           type="button"
                           className={styles.generalComposerAttachmentRemove}
                           onClick={() => removeGeneralAttachment(index)}
-                          aria-label={`绉婚櫎 ${file.name}`}
+                          aria-label={`移除 ${file.name}`}
                         >
                           <X size={12} />
                         </button>
@@ -807,14 +807,14 @@ export default function HomePage() {
                   >
                     <Paperclip size={16} />
                     {generalAttachedFiles.length > 0
-                      ? `宸查€?${generalAttachedFiles.length} 涓檮浠禶
-                      : '涓婁紶闄勪欢'}
+                      ? `已选 ${generalAttachedFiles.length} 个附件`
+                      : '上传附件'}
                   </button>
                 </div>
                 <div className={styles.generalComposerControls}>
                   <div className={styles.generalComposerModelSwitcher}>
                     <select
-                      aria-label="閫氱敤鑱婂ぉ鍥炵瓟妯″瀷"
+                      aria-label="通用聊天回答模型"
                       className={styles.generalComposerModelSelect}
                       value={generalResponseModel}
                       onChange={(event) => {
@@ -834,7 +834,7 @@ export default function HomePage() {
                   </div>
                   <div className={styles.generalComposerModelSwitcher}>
                     <select
-                      aria-label="鑱旂綉鎼滅储妯″紡"
+                      aria-label="联网搜索模式"
                       className={styles.generalComposerModelSelect}
                       value={generalWebSearchMode}
                       onChange={(event) => {
@@ -858,7 +858,7 @@ export default function HomePage() {
                     className={`${styles.generalComposerVoiceBtn} ${isGeneralRecording ? styles.generalComposerVoiceBtnActive : ''}`}
                     onClick={() => void toggleGeneralVoice()}
                     disabled={isGeneralTranscribing}
-                    title={isGeneralTranscribing ? '璇煶杞綍涓?..' : isGeneralRecording ? '鍋滄褰曢煶' : '璇煶杈撳叆'}
+                    title={isGeneralTranscribing ? '语音转录中...' : isGeneralRecording ? '停止录音' : '语音输入'}
                   >
                     {isGeneralTranscribing ? <Loader2 size={18} className="animate-spin" /> : <Mic size={18} />}
                   </button>
@@ -888,7 +888,7 @@ export default function HomePage() {
               <div className={styles.botGrid}>
                 {group.bots.map((bot) => renderBotCard(
                   bot,
-                  <span className={`${styles.botBadge} badge badge-green`}>姝ｅ紡鐗?/span>,
+                  <span className={`${styles.botBadge} badge badge-green`}>正式版</span>,
                   bot.id === QIYA_ENTERPRISE_MANAGEMENT_BOT_ID ? styles.enterpriseBotCard : undefined,
                 ))}
               </div>
@@ -906,14 +906,14 @@ export default function HomePage() {
                 <span className={styles.trialToggleText}>
                   <span className={styles.trialToggleLabel}>
                     {trialBotsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    璇曠敤鐗堟満鍣ㄤ汉
+                    试用版机器人
                   </span>
                   <span className={styles.trialToggleHint}>
-                    灞曞紑鍚庢寜绫诲瀷鏌ョ湅鍏ㄩ儴璇曠敤鐗堟満鍣ㄤ汉
+                    展开后按类型查看全部试用版机器人
                   </span>
                 </span>
                 <span className={styles.trialToggleMeta}>
-                  {trialBotsOpen ? '鏀惰捣鍒嗙被' : `${trialBotCount} 涓満鍣ㄤ汉`}
+                  {trialBotsOpen ? '收起分类' : `${trialBotCount} 个机器人`}
                 </span>
               </button>
 
@@ -933,16 +933,16 @@ export default function HomePage() {
           )}
 
           {filteredBots.length === 0 && (
-            <div className={styles.empty}><p>娌℃湁鎵惧埌鍖归厤鐨勬満鍣ㄤ汉</p></div>
+            <div className={styles.empty}><p>没有找到匹配的机器人</p></div>
           )}
         </main>
       </div>
 
       <div className={styles.mobileNav}>
-        <button className={styles.mobileNavBtn} onClick={() => router.push('/')}><span><Home size={20} /></span>棣栭〉</button>
-        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/my-workflows')}><span><Zap size={20} /></span>宸ヤ綔娴?/button>
-        <button className={styles.mobileNavBtn} onClick={() => router.push('/bot/image-generator')}><span><ImageIcon size={20} /></span>缁樺浘</button>
-        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/profile')}><span><User size={20} /></span>鎴戠殑</button>
+        <button className={styles.mobileNavBtn} onClick={() => router.push('/')}><span><Home size={20} /></span>首页</button>
+        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/my-workflows')}><span><Zap size={20} /></span>工作流</button>
+        <button className={styles.mobileNavBtn} onClick={() => router.push('/bot/image-generator')}><span><ImageIcon size={20} /></span>绘图</button>
+        <button className={styles.mobileNavBtn} onClick={() => requireAuth('/profile')}><span><User size={20} /></span>我的</button>
       </div>
     </div>
   );
