@@ -112,6 +112,33 @@ const IMAGE_MODE_ASPECT_RATIO = '1:1';
 const TABLE_COPY_LABEL = '复制表格';
 const TABLE_COPIED_LABEL = '已复制表格';
 const STREAMING_RENDER_INTERVAL_MS = 140;
+const ACCEPTED_ATTACHMENT_EXTENSIONS = new Set([
+    'pdf',
+    'docx',
+    'txt',
+    'md',
+    'csv',
+    'pptx',
+    'jpg',
+    'jpeg',
+    'png',
+    'gif',
+    'webp',
+    'mp4',
+    'mov',
+    'webm',
+    'm4v',
+]);
+const CLIPBOARD_MIME_EXTENSION_MAP: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'video/x-m4v': 'm4v',
+};
 
 interface ConversationVideoCatalogItem {
     clientVideoId: string;
@@ -409,8 +436,35 @@ function inferRemoteVideoMimeType(remoteVideoUrl: string): string {
     return 'video/mp4';
 }
 
-function createAttachedFileFromLocalFile(file: File): AttachedFile {
+function getAttachmentExtension(file: File): string {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (ext && ext !== file.name.toLowerCase()) {
+        return ext;
+    }
+
+    return CLIPBOARD_MIME_EXTENSION_MAP[file.type] || '';
+}
+
+function isAcceptedAttachmentFile(file: File): boolean {
+    const ext = getAttachmentExtension(file);
+    return ACCEPTED_ATTACHMENT_EXTENSIONS.has(ext);
+}
+
+function normalizeDroppedOrPastedFile(file: File, index: number): File {
+    if (file.name.trim()) {
+        return file;
+    }
+
+    const ext = getAttachmentExtension(file) || 'bin';
+    const prefix = file.type.startsWith('video/') ? 'pasted-video' : file.type.startsWith('image/') ? 'pasted-image' : 'pasted-file';
+    return new File([file], `${prefix}-${Date.now()}-${index + 1}.${ext}`, {
+        type: file.type,
+        lastModified: file.lastModified,
+    });
+}
+
+function createAttachedFileFromLocalFile(file: File): AttachedFile {
+    const ext = getAttachmentExtension(file);
     const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
     const isVideo = ['mp4', 'mov', 'webm', 'm4v'].includes(ext);
 
@@ -744,6 +798,7 @@ export default function ChatPage() {
     const [selectedConversationVideoIds, setSelectedConversationVideoIds] = useState<string[]>([]);
     const [conversationVideoPickerOpen, setConversationVideoPickerOpen] = useState(false);
     const [videoResolutionNotice, setVideoResolutionNotice] = useState<VideoResolutionNotice | null>(null);
+    const [isAttachmentDragActive, setIsAttachmentDragActive] = useState(false);
 
     const [isRecording, setIsRecording] = useState(false);
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -1864,10 +1919,14 @@ export default function ChatPage() {
         return `${date.getMonth() + 1}/${date.getDate()} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
     };
 
-    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(event.target.files || []);
-        if (!files.length) return;
-        event.target.value = '';
+    const addLocalFiles = useCallback((incomingFiles: File[], sourceLabel: string) => {
+        if (!incomingFiles.length) return;
+
+        if (imageModeEnabled) {
+            alert('绘图模式下暂不支持上传文件，请先关闭绘图模式。');
+            return;
+        }
+
         setVideoResolutionNotice(null);
 
         try {
@@ -1875,19 +1934,69 @@ export default function ChatPage() {
                 throw new Error(`一次最多上传 ${MAX_ATTACHMENTS} 个文件`);
             }
 
+            const normalizedFiles = incomingFiles
+                .map(normalizeDroppedOrPastedFile)
+                .filter(isAcceptedAttachmentFile);
+
+            if (normalizedFiles.length === 0) {
+                throw new Error('不支持的文件格式，请上传 PDF、Word、TXT、Markdown、CSV、图片或视频文件。');
+            }
+
             const availableSlots = MAX_ATTACHMENTS - attachedFiles.length;
-            const nextFiles: AttachedFile[] = files
+            const nextFiles: AttachedFile[] = normalizedFiles
                 .slice(0, availableSlots)
                 .map(createAttachedFileFromLocalFile);
 
             setAttachedFiles((current) => [...current, ...nextFiles]);
 
-            if (files.length > availableSlots) {
+            if (normalizedFiles.length > availableSlots) {
                 alert(`一次最多上传 ${MAX_ATTACHMENTS} 个文件，其余文件已忽略`);
+            } else if (normalizedFiles.length < incomingFiles.length) {
+                alert(`${sourceLabel}中有不支持的文件格式，已自动忽略。`);
             }
         } catch (error) {
             alert(error instanceof Error ? error.message : '文件上传失败');
         }
+    }, [attachedFiles.length, imageModeEnabled]);
+
+    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []);
+        if (!files.length) return;
+        event.target.value = '';
+        addLocalFiles(files, '选择的文件');
+    };
+
+    const handleAttachmentPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const files = Array.from(event.clipboardData.files || []);
+        if (!files.length) return;
+
+        event.preventDefault();
+        addLocalFiles(files, '剪贴板');
+    };
+
+    const handleAttachmentDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
+
+        event.preventDefault();
+        event.dataTransfer.dropEffect = imageModeEnabled ? 'none' : 'copy';
+        setIsAttachmentDragActive(!imageModeEnabled);
+    };
+
+    const handleAttachmentDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+        const nextTarget = event.relatedTarget as Node | null;
+        if (nextTarget && event.currentTarget.contains(nextTarget)) {
+            return;
+        }
+
+        setIsAttachmentDragActive(false);
+    };
+
+    const handleAttachmentDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
+
+        event.preventDefault();
+        setIsAttachmentDragActive(false);
+        addLocalFiles(Array.from(event.dataTransfer.files || []), '拖拽的文件');
     };
 
     const toggleVoice = async () => {
@@ -2413,7 +2522,18 @@ export default function ChatPage() {
                 </div>
             )}
 
-            <div className={styles.inputBar}>
+            <div
+                className={`${styles.inputBar} ${isAttachmentDragActive ? styles.inputBarDragActive : ''}`}
+                onDragOver={handleAttachmentDragOver}
+                onDragLeave={handleAttachmentDragLeave}
+                onDrop={handleAttachmentDrop}
+            >
+                {isAttachmentDragActive && (
+                    <div className={styles.dropOverlay}>
+                        <Paperclip size={22} />
+                        <span>松开即可添加图片、视频或文件</span>
+                    </div>
+                )}
                 {attachedFiles.length > 0 && (
                     <div className={styles.attachmentList}>
                         {attachedFiles.map((file, index) => (
@@ -2609,6 +2729,7 @@ export default function ChatPage() {
                     </button>
                     <textarea
                         value={inputText}
+                        onPaste={handleAttachmentPaste}
                         onChange={(event) => {
                             setInputText(event.target.value);
                             setVideoResolutionNotice(null);

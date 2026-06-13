@@ -852,6 +852,29 @@
 .inputBar {
     padding: var(--space-md) var(--space-lg) var(--space-lg);
     flex-shrink: 0;
+    position: relative;
+}
+
+.inputBarDragActive {
+    background: color-mix(in srgb, var(--color-card) 88%, var(--color-primary) 12%);
+}
+
+.dropOverlay {
+    position: absolute;
+    inset: 10px var(--space-lg);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 1px dashed var(--color-primary);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--color-card) 82%, var(--color-primary) 18%);
+    color: var(--color-primary);
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
 
 .inputMeta {
