@@ -161,9 +161,9 @@ const COPYWRITING_AGENT_TOOL: BotInfo = {
 
 const XHS_AUTO_PUBLISH_TOOL: BotInfo = {
   id: 'xhs-auto-publish',
-  name: 'XHS auto publisher',
+  name: '小红书自动发布',
   category: '管理工具',
-  description: 'Open the XHS auto publishing console with your main-site account and synced permissions.',
+  description: '登录后直达小红书自动发布控制台，使用主站账号同步权限并完成发布操作。',
   icon: <Smartphone size={22} />,
   iconColor: '#dc0033',
   path: `${XHS_SITE_METADATA.entryPath}?autostart=1&openMode=replace`,

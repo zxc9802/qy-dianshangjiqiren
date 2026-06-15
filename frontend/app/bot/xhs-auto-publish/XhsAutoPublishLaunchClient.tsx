@@ -50,7 +50,7 @@ async function startXhsSso(body?: { redirectPath?: string }) {
     if (!response.ok) {
         const message = typeof payload === 'string'
             ? payload
-            : payload?.error || payload?.message || 'Failed to open XHS auto publisher.';
+            : payload?.error || payload?.message || '小红书自动发布打开失败。';
         throw new XhsLaunchError(message, response.status);
     }
 
@@ -98,7 +98,7 @@ export default function XhsAutoPublishLaunchClient() {
                 return;
             }
 
-            const message = error instanceof Error ? error.message : 'Failed to open XHS auto publisher.';
+            const message = error instanceof Error ? error.message : '小红书自动发布打开失败。';
             setLaunchError(message);
         } finally {
             setIsLaunching(false);
@@ -119,17 +119,17 @@ export default function XhsAutoPublishLaunchClient() {
             <main className={styles.hero}>
                 <Link className={styles.backLink} href="/">
                     <House size={16} />
-                    <span>Back home</span>
+                    <span>返回首页</span>
                 </Link>
 
                 <div className={styles.badge}>
                     <Smartphone size={18} />
-                    <span>XHS auto publisher</span>
+                    <span>小红书自动发布</span>
                 </div>
 
-                <h1 className={styles.title}>Open XHS auto publisher</h1>
+                <h1 className={styles.title}>打开小红书自动发布</h1>
                 <p className={styles.description}>
-                    The main site verifies your account and grants a one-time SSO ticket for the XHS publishing console.
+                    主站将验证你的账号，并发放一次性 SSO 票据，用于进入小红书发布控制台。
                 </p>
 
                 <div className={styles.actions}>
@@ -140,7 +140,7 @@ export default function XhsAutoPublishLaunchClient() {
                         disabled={isLaunching}
                     >
                         {isLaunching ? <Loader2 size={16} className={styles.spinner} /> : <ExternalLink size={16} />}
-                        <span>{isLaunching ? 'Opening...' : 'Open XHS publisher'}</span>
+                        <span>{isLaunching ? '正在打开...' : '打开小红书发布器'}</span>
                     </button>
                 </div>
 
