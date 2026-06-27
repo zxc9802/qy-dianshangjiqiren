@@ -8,6 +8,12 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/error';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import {
+    buildImageProviderConfig,
+    buildImageProviderRequest,
+    extractGeneratedImageResult,
+    type ImageProviderConfig,
+} from '../services/image-generation-provider';
 
 const router = Router();
 router.use(authMiddleware);
@@ -18,7 +24,6 @@ const STORAGE_ROOT = path.join(process.cwd(), 'storage');
 const GENERATED_DIR = path.join(STORAGE_ROOT, 'generated');
 const IMAGE_API_PREFIX = '/api/image-assets/';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const DEFAULT_MODEL_URL = 'https://yunwu.ai/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -62,19 +67,6 @@ function normalizeNumber(value: unknown, fallback: number, min: number, max: num
     return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-function buildImageApiUrl(): string {
-    const apiKey = process.env.YUNWU_IMAGE_API_KEY || process.env.AI_API_KEY;
-    if (!apiKey) {
-        throw new AppError('YUNWU_IMAGE_API_KEY or AI_API_KEY is not configured', 500);
-    }
-    const baseUrl = process.env.YUNWU_IMAGE_API_URL || DEFAULT_MODEL_URL;
-    const url = new URL(baseUrl);
-    if (!url.searchParams.has('key')) {
-        url.searchParams.set('key', apiKey);
-    }
-    return url.toString();
-}
-
 async function ensureStorageDirs() {
     await fs.mkdir(GENERATED_DIR, { recursive: true });
 }
@@ -110,27 +102,6 @@ function normalizeResultPaths(req: AuthRequest, resultImagePaths: unknown): stri
         .filter((item): item is string => typeof item === 'string')
         .map((item) => toPublicAssetUrl(req, item))
         .filter((item): item is string => Boolean(item));
-}
-
-function extractImagePart(responseData: unknown): { mimeType: string; data: string } | null {
-    if (!responseData || typeof responseData !== 'object') return null;
-    const record = responseData as Record<string, unknown>;
-    const candidates = record.candidates as Array<Record<string, unknown>> | undefined;
-    const first = candidates?.[0];
-    const content = first?.content as Record<string, unknown> | undefined;
-    const parts = content?.parts as Array<Record<string, unknown>> | undefined;
-    if (!parts) return null;
-
-    for (const part of parts) {
-        const inlineData = part.inlineData as Record<string, unknown> | undefined;
-        const mimeType = inlineData?.mimeType;
-        const data = inlineData?.data;
-        if (typeof mimeType === 'string' && typeof data === 'string' && data.length > 0) {
-            return { mimeType, data };
-        }
-    }
-
-    return null;
 }
 
 function buildPrompt(input: {
@@ -205,7 +176,7 @@ function buildGenerationInput({
 }
 
 async function generateOneImage(args: {
-    apiUrl: string;
+    providerConfig: ImageProviderConfig;
     aspectRatio: string;
     prompt: string;
     negativePrompt?: string;
@@ -217,43 +188,28 @@ async function generateOneImage(args: {
     imageIndex: number;
 }): Promise<{ imagePath?: string; error?: string }> {
     for (let attempt = 0; attempt < 3; attempt++) {
-        const parts: Array<Record<string, unknown>> = [];
-        if (args.referenceImage) {
-            parts.push({
-                inlineData: {
-                    mimeType: args.referenceImage.mimeType,
-                    data: args.referenceImage.base64,
-                },
-            });
-        }
-        parts.push({
-            text: buildGenerationInput({
-                prompt: args.prompt,
-                negativePrompt: args.negativePrompt,
-                stylePreset: args.stylePreset,
-                background: args.background,
-                lighting: args.lighting,
-                referenceStrength: args.referenceStrength,
-                hasReferenceImage: Boolean(args.referenceImage),
-                imageIndex: args.imageIndex,
-                attempt,
-            }),
+        const prompt = buildGenerationInput({
+            prompt: args.prompt,
+            negativePrompt: args.negativePrompt,
+            stylePreset: args.stylePreset,
+            background: args.background,
+            lighting: args.lighting,
+            referenceStrength: args.referenceStrength,
+            hasReferenceImage: Boolean(args.referenceImage),
+            imageIndex: args.imageIndex,
+            attempt,
+        });
+        const request = buildImageProviderRequest(args.providerConfig, {
+            prompt,
+            aspectRatio: args.aspectRatio,
+            referenceImage: args.referenceImage,
         });
 
         try {
-            const response = await fetch(args.apiUrl, {
+            const response = await fetch(request.url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts }],
-                    generationConfig: {
-                        responseModalities: ['TEXT', 'IMAGE'],
-                        imageConfig: {
-                            imageSize: '2K',
-                            aspectRatio: args.aspectRatio,
-                        },
-                    },
-                }),
+                headers: request.headers,
+                body: request.body,
             });
 
             if (!response.ok) {
@@ -263,13 +219,15 @@ async function generateOneImage(args: {
             }
 
             const data = await response.json();
-            const imagePart = extractImagePart(data);
-            if (!imagePart) {
-                if (attempt === 2) return { error: 'Image API returned no inline image data' };
+            const generatedImage = extractGeneratedImageResult(data);
+            if (!generatedImage) {
+                if (attempt === 2) return { error: 'Image API returned no image data' };
                 continue;
             }
 
-            const imagePath = await saveGeneratedImage(imagePart);
+            const imagePath = generatedImage.kind === 'url'
+                ? generatedImage.url
+                : await saveGeneratedImage(generatedImage);
             return { imagePath };
         } catch (error) {
             if (attempt === 2) {
@@ -321,7 +279,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
     });
 
     await ensureStorageDirs();
-    const apiUrl = buildImageApiUrl();
+    const providerConfig = buildImageProviderConfig();
 
     let referenceImageInput: { mimeType: string; base64: string } | undefined;
 
@@ -338,7 +296,7 @@ router.post('/generate', async (req: AuthRequest, res: Response) => {
     for (let i = 0; i < imageIndexes.length; i += 2) {
         const chunk = imageIndexes.slice(i, i + 2);
         const chunkResults = await Promise.all(chunk.map((imageIndex) => generateOneImage({
-            apiUrl,
+            providerConfig,
             aspectRatio: parsed.aspectRatio,
             prompt: parsed.prompt,
             negativePrompt: parsed.negativePrompt,
