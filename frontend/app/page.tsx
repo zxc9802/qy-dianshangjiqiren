@@ -18,7 +18,7 @@ import {
   RESPONSE_MODEL_STORAGE_PREFIX,
   WEB_SEARCH_MODE_OPTIONS,
   WEB_SEARCH_MODE_STORAGE_PREFIX,
-  isResponseModel,
+  isSelectableResponseModel,
   isWebSearchMode,
   type ResponseModel,
   type WebSearchMode,
@@ -361,7 +361,7 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`);
-    if (isResponseModel(saved)) {
+    if (isSelectableResponseModel(saved)) {
       setGeneralResponseModel(saved);
       return;
     }
@@ -818,7 +818,7 @@ export default function HomePage() {
                       className={styles.generalComposerModelSelect}
                       value={generalResponseModel}
                       onChange={(event) => {
-                        if (isResponseModel(event.target.value)) {
+                        if (isSelectableResponseModel(event.target.value)) {
                           setGeneralResponseModel(event.target.value);
                         }
                       }}

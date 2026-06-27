@@ -25,7 +25,7 @@ import {
     RESPONSE_MODEL_STORAGE_PREFIX,
     WEB_SEARCH_MODE_OPTIONS,
     WEB_SEARCH_MODE_STORAGE_PREFIX,
-    isResponseModel,
+    isSelectableResponseModel,
     isWebSearchMode,
     type ResponseModel,
     type WebSearchMode,
@@ -731,7 +731,7 @@ export default function ChatPage() {
     const launcherDraft = searchParams.get('draft')?.trim() || '';
     const launchDraftId = searchParams.get('ld')?.trim() || '';
     const rawRequestedResponseModel = searchParams.get('rm');
-    const requestedResponseModel = isResponseModel(rawRequestedResponseModel)
+    const requestedResponseModel = isSelectableResponseModel(rawRequestedResponseModel)
         ? rawRequestedResponseModel
         : null;
     const rawRequestedWebSearchMode = searchParams.get('ws');
@@ -907,7 +907,7 @@ export default function ChatPage() {
             return;
         }
         const saved = window.localStorage.getItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`);
-        if (isResponseModel(saved)) {
+        if (isSelectableResponseModel(saved)) {
             setResponseModel(saved);
             return;
         }
@@ -2587,7 +2587,7 @@ export default function ChatPage() {
                                 className={styles.modelSelect}
                                 value={responseModel}
                                 onChange={(event) => {
-                                    if (isResponseModel(event.target.value)) {
+                                    if (isSelectableResponseModel(event.target.value)) {
                                         setResponseModel(event.target.value);
                                     }
                                 }}

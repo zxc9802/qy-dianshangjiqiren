@@ -4,7 +4,6 @@ export type ResponseModel = typeof RESPONSE_MODEL_VALUES[number];
 
 export const RESPONSE_MODEL_OPTIONS = [
     { value: 'gemini', label: 'Gemini' },
-    { value: 'gemini-deep-thinking', label: 'gemini深度思考' },
     { value: 'gpt-5.4', label: 'GPT-5.4' },
     { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
 ] as const satisfies ReadonlyArray<{ value: ResponseModel; label: string }>;
@@ -29,6 +28,10 @@ export const WEB_SEARCH_MODE_STORAGE_PREFIX = 'chat-web-search-mode:';
 
 export function isResponseModel(value: unknown): value is ResponseModel {
     return typeof value === 'string' && RESPONSE_MODEL_VALUES.includes(value as ResponseModel);
+}
+
+export function isSelectableResponseModel(value: unknown): value is ResponseModel {
+    return typeof value === 'string' && RESPONSE_MODEL_OPTIONS.some((option) => option.value === value);
 }
 
 export function isWebSearchMode(value: unknown): value is WebSearchMode {

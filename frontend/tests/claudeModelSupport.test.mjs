@@ -72,17 +72,25 @@ async function loadTsModule(relativePath) {
 
 test('chat model options include Claude Opus 4.6', async () => {
   const {
+    RESPONSE_MODEL_OPTIONS,
     RESPONSE_MODEL_VALUES,
     WEB_SEARCH_MODE_VALUES,
     DEFAULT_WEB_SEARCH_MODE,
     getResponseModelLabel,
     getWebSearchModeLabel,
+    isSelectableResponseModel,
     isResponseModel,
     isWebSearchMode,
   } = await loadTsModule(['lib', 'chat-models.ts'])
 
   assert.ok(RESPONSE_MODEL_VALUES.includes('claude-opus-4.6'))
   assert.equal(isResponseModel('claude-opus-4.6'), true)
+  assert.equal(isResponseModel('gemini-deep-thinking'), true)
+  assert.equal(isSelectableResponseModel('gemini-deep-thinking'), false)
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(RESPONSE_MODEL_OPTIONS.map((option) => option.value))),
+    ['gemini', 'gpt-5.4', 'claude-opus-4.6'],
+  )
   assert.equal(getResponseModelLabel('claude-opus-4.6'), 'Claude Opus 4.6')
   assert.deepEqual(JSON.parse(JSON.stringify(WEB_SEARCH_MODE_VALUES)), ['auto', 'on', 'off'])
   assert.equal(DEFAULT_WEB_SEARCH_MODE, 'auto')
