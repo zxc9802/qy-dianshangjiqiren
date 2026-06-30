@@ -712,27 +712,6 @@
     color: var(--color-muted-foreground);
 }
 
-.imagePrompt {
-    border-radius: 14px;
-    padding: 12px 14px;
-    background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
-    border: 1px solid #bfdbfe;
-}
-
-.imagePrompt span {
-    display: inline-flex;
-    margin-bottom: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #2563eb;
-}
-
-.imagePrompt p {
-    margin: 0;
-    color: var(--color-muted-foreground);
-    line-height: 1.7;
-}
-
 .imageGrid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

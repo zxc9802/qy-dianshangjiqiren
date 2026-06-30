@@ -2318,12 +2318,6 @@ export default function ChatPage() {
                                         {message.content ? (
                                             <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
                                         ) : null}
-                                        {message.imagePrompt ? (
-                                            <div className={styles.imagePrompt}>
-                                                <span>绘图提示词</span>
-                                                <p>{message.imagePrompt}</p>
-                                            </div>
-                                        ) : null}
                                         <div className={styles.imageGrid}>
                                             {message.imageUrls.map((imageUrl, imageIndex) => (
                                                 <a

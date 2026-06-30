@@ -54,6 +54,31 @@ test('image generation prompt includes current request and the latest five user 
   assert.match(prompt, /把上面的内容综合成一张宣传图/)
 })
 
+test('conversation image response still sends the internal prompt to the image backend without exposing it', async () => {
+  const routePath = path.join(__dirname, '..', 'app', 'api', 'conversations', '[id]', 'messages', 'route.ts')
+  const source = await readFile(routePath, 'utf8')
+  const requestStart = source.indexOf('const imageResponse = await generateImageViaBackend')
+  const requestEnd = source.indexOf('const imagePayload = imageResponse.payload', requestStart)
+  const requestSection = source.slice(requestStart, requestEnd)
+  const responseStart = source.indexOf('const assistantText = buildConversationImageSummary')
+  const responseEnd = source.indexOf('const flushVisibleText', responseStart)
+  const responseSection = source.slice(responseStart, responseEnd)
+
+  assert.ok(requestStart > -1)
+  assert.ok(requestEnd > requestStart)
+  assert.match(requestSection, /prompt:\s*imagePrompt/)
+  assert.ok(responseStart > -1)
+  assert.ok(responseEnd > responseStart)
+  assert.doesNotMatch(responseSection, /imagePrompt:/)
+})
+
+test('chat image renderer does not show the image prompt panel', async () => {
+  const pagePath = path.join(__dirname, '..', 'app', 'chat', '[id]', 'page.tsx')
+  const source = await readFile(pagePath, 'utf8')
+
+  assert.doesNotMatch(source, /绘图提示词/)
+})
+
 test('selects the latest generated image for modification requests', async () => {
   const { selectImageReferenceForPrompt } = await loadImageGenerationContextModule()
 

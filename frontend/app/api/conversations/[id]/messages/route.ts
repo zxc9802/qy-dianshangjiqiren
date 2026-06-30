@@ -715,7 +715,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         const encodedAssistantMessage = encodeConversationImageMessage({
                             content: assistantText,
                             imageUrls: generated.resultImagePaths,
-                            imagePrompt: generated.prompt,
                             aspectRatio: generated.aspectRatio,
                         });
 
@@ -746,7 +745,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                 content: assistantText,
                                 kind: 'image',
                                 imageUrls: generated.resultImagePaths,
-                                imagePrompt: generated.prompt,
                                 aspectRatio: generated.aspectRatio,
                             },
                         })}\n\n`));
