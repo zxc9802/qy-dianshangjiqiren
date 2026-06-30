@@ -16,6 +16,7 @@ import {
     buildConversationImageSummary,
     encodeConversationImageMessage,
     isConversationImageTurn,
+    parseConversationImageMessage,
 } from '../../../../lib/conversation-message-codec';
 import { buildPromptWithBuiltinKnowledge } from '../../../../lib/builtin-knowledge';
 import { VIDEO_BREAKDOWN_BOT_ID } from '../../../../lib/builtin-bots';
@@ -45,6 +46,10 @@ import {
     type GeminiChatPart,
 } from '../../../../lib/yunwu-gemini-chat';
 import { generateImageViaBackend } from '../../../image-generations/proxy';
+import {
+    buildImageGenerationPrompt,
+    selectImageReferenceForPrompt,
+} from '../../../../lib/image-generation-context';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -335,6 +340,40 @@ function takeRecentUserTurns<T extends { role: string }>(
     return messages.slice(startIndex);
 }
 
+function resolveRequestUrl(req: NextRequest, value: string): string {
+    if (/^https?:\/\//i.test(value)) return value;
+    return new URL(value, req.nextUrl.origin).toString();
+}
+
+function mimeTypeFromImageUrl(value: string): string {
+    const pathname = (() => {
+        try {
+            return new URL(value, 'https://local.invalid').pathname.toLowerCase();
+        } catch {
+            return value.toLowerCase();
+        }
+    })();
+
+    if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+    if (pathname.endsWith('.webp')) return 'image/webp';
+    return 'image/png';
+}
+
+async function loadImageReference(req: NextRequest, imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+    const resolvedUrl = resolveRequestUrl(req, imageUrl);
+    const response = await fetch(resolvedUrl, { cache: 'no-store' });
+    if (!response.ok) {
+        throw new AppError('无法读取历史参考图，请重新生成或明确指定另一张图片。', 502);
+    }
+
+    const contentType = response.headers.get('content-type')?.split(';')[0]?.trim();
+    const mimeType = contentType?.startsWith('image/')
+        ? contentType
+        : mimeTypeFromImageUrl(resolvedUrl);
+    const base64 = Buffer.from(await response.arrayBuffer()).toString('base64');
+    return { mimeType, base64 };
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     let tempVideoTokensToCleanup: string[] = [];
 
@@ -617,10 +656,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             content: '正在生成图片，通常需要 10 到 40 秒。',
                         })}\n\n`));
 
+                        const imagePrompt = buildImageGenerationPrompt({
+                            currentPrompt: content,
+                            historyMessages: historyMessages.map((message) => ({
+                                role: message.role,
+                                content: typeof message.content === 'string' ? message.content : '',
+                            })),
+                        });
+                        const imageReference = selectImageReferenceForPrompt({
+                            currentPrompt: content,
+                            historyMessages: conversation.messages.map((message) => {
+                                const imagePayload = parseConversationImageMessage(message.content);
+                                return {
+                                    role: message.role,
+                                    content: imagePayload?.content || buildHistoryPromptText(message),
+                                    imageUrls: imagePayload?.imageUrls,
+                                };
+                            }),
+                        });
+                        const referenceImage = imageReference
+                            ? await loadImageReference(req, imageReference.url)
+                            : null;
                         const imageResponse = await generateImageViaBackend(req.headers, {
-                            prompt: content,
+                            prompt: imagePrompt,
                             aspectRatio: aspectRatio || '1:1',
                             count: 1,
+                            referenceImage: referenceImage?.base64,
+                            referenceImageMime: referenceImage?.mimeType,
                         });
 
                         const imagePayload = imageResponse.payload as Record<string, unknown>;

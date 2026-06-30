@@ -1,7 +1,8 @@
 const DEFAULT_GEMINI_IMAGE_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3.1-flash-image-preview:generateContent';
 const DEFAULT_OPENAI_IMAGE_BASE_URL = 'https://yunwu.ai/v1';
 const DEFAULT_OPENAI_IMAGE_ENDPOINT_PATH = '/images/generations';
-const DEFAULT_OPENAI_IMAGE_SIZE = '2048x2048';
+const DEFAULT_OPENAI_IMAGE_SIZE = '1024x1024';
+const OPENAI_IMAGE_BASE_SIZE = 1024;
 
 type EnvSource = Record<string, string | undefined>;
 
@@ -53,6 +54,40 @@ function addGeminiApiKey(apiUrl: string, apiKey: string): string {
     return url.toString();
 }
 
+function parseAspectRatio(value: string): { width: number; height: number; label: string } | null {
+    const match = value.match(/(?:比例|画幅|尺寸|ratio|aspect)?\s*(\d{1,2})\s*(?::|：|比|\/)\s*(\d{1,2})/i);
+    if (!match) return null;
+
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return null;
+    }
+
+    return { width, height, label: `${width}:${height}` };
+}
+
+function roundToImageStep(value: number): number {
+    return Math.max(64, Math.round(value / 8) * 8);
+}
+
+function sizeFromAspectRatio(ratio: { width: number; height: number }): string {
+    if (ratio.width >= ratio.height) {
+        return `${OPENAI_IMAGE_BASE_SIZE}x${roundToImageStep((OPENAI_IMAGE_BASE_SIZE * ratio.height) / ratio.width)}`;
+    }
+
+    return `${roundToImageStep((OPENAI_IMAGE_BASE_SIZE * ratio.width) / ratio.height)}x${OPENAI_IMAGE_BASE_SIZE}`;
+}
+
+function resolveAspectRatio(prompt: string, aspectRatio: string): { width: number; height: number; label: string } | null {
+    return parseAspectRatio(prompt) || parseAspectRatio(aspectRatio);
+}
+
+function resolveOpenAIImageSize(prompt: string, aspectRatio: string, fallbackSize: string): string {
+    const ratio = resolveAspectRatio(prompt, aspectRatio);
+    return ratio ? sizeFromAspectRatio(ratio) : fallbackSize;
+}
+
 export function buildImageProviderConfig(env: EnvSource = process.env): ImageProviderConfig {
     const apiKey = readEnv(env, 'YUNWU_IMAGE_API_KEY') || readEnv(env, 'AI_API_KEY');
     if (!apiKey) {
@@ -94,10 +129,11 @@ export function buildImageProviderRequest(
     },
 ): ImageProviderRequest {
     if (config.kind === 'openai') {
+        const size = resolveOpenAIImageSize(input.prompt, input.aspectRatio, config.size);
         const body: Record<string, unknown> = {
             model: config.model,
             prompt: input.prompt,
-            size: config.size,
+            size,
             n: 1,
         };
         if (config.responseFormat) {
@@ -135,7 +171,7 @@ export function buildImageProviderRequest(
                 responseModalities: ['TEXT', 'IMAGE'],
                 imageConfig: {
                     imageSize: '2K',
-                    aspectRatio: input.aspectRatio,
+                    aspectRatio: resolveAspectRatio(input.prompt, input.aspectRatio)?.label || input.aspectRatio,
                 },
             },
         }),
