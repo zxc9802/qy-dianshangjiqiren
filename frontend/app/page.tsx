@@ -10,6 +10,7 @@ import {
   BUILTIN_CATEGORY_ORDER,
   GENERIC_CHAT_BOT_ID,
   QIYA_ENTERPRISE_MANAGEMENT_BOT_ID,
+  VIDEO_BREAKDOWN_BOT_ID,
 } from './lib/builtin-bots';
 import {
   DEFAULT_RESPONSE_MODEL,
@@ -182,7 +183,7 @@ const VIDEO_WORKBENCH_TOOLS: BotInfo[] = [
     iconColor: '#c0841a',
     path: VIDEO_SITE_METADATA.seedance.entryPath,
     pointsPerUse: 0,
-    isTrial: true,
+    isTrial: false,
     requiresAuth: true,
     videoSite: 'seedance',
   },
@@ -301,7 +302,7 @@ const HOMEPAGE_BOTS: BotInfo[] = BUILTIN_BOTS
   iconColor: BOT_ICON_COLOR_MAP[bot.icon] || '#2563eb',
   description: bot.description,
   pointsPerUse: bot.pointsPerUse,
-  isTrial: bot.homepageTrial ?? true,
+  isTrial: bot.routeId === VIDEO_BREAKDOWN_BOT_ID ? false : bot.homepageTrial ?? true,
   path: `/chat/${bot.routeId}`,
   requiresAuth: true,
 }));
@@ -541,7 +542,8 @@ export default function HomePage() {
     ])),
     [],
   );
-  const filteredBots = ALL_HOMEPAGE_BOTS.filter((bot) => {
+  const visibleHomepageBots = ALL_HOMEPAGE_BOTS.filter((bot) => !bot.isTrial);
+  const filteredBots = visibleHomepageBots.filter((bot) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return bot.name.toLowerCase().includes(q) || bot.description.toLowerCase().includes(q);
