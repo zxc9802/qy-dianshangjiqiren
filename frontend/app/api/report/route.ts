@@ -1,19 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readServerEnv } from '../../lib/server-env';
-
-const API_KEY = readServerEnv('YUNWU_CHAT_API_KEY') || readServerEnv('AI_API_KEY') || '';
-
-function getNonStreamUrl(): string {
-    const raw = readServerEnv('YUNWU_CHAT_API_URL') || readServerEnv('AI_API_URL') || '';
-    let url = raw.trim();
-    // Use non-streaming endpoint
-    url = url.replace(':streamGenerateContent', ':generateContent');
-    url = url.replace(/[?&]alt=sse/g, '');
-    if (!url) {
-        url = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:generateContent';
-    }
-    return url;
-}
+import { GPT_5_4_MODEL, requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
 
 const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基于以下对话记录，生成一份结构化的分析报告。
 
@@ -41,10 +27,6 @@ const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基
 
 export async function POST(req: NextRequest) {
     try {
-        if (!API_KEY) {
-            return NextResponse.json({ error: '未配置 API Key' }, { status: 500 });
-        }
-
         const { botId, botName, messages } = await req.json();
 
         if (!Array.isArray(messages) || messages.length < 2) {
@@ -57,40 +39,17 @@ export async function POST(req: NextRequest) {
             .map((m: { role: string; content: string }) => `${m.role === 'user' ? '用户' : 'AI'}：${m.content}`)
             .join('\n\n');
 
-        const apiUrl = getNonStreamUrl();
-        const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                systemInstruction: {
-                    parts: [{ text: REPORT_PROMPT }],
-                },
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [{ text: `智能体名称：${botName || 'AI助手'}（编号：${botId}）\n\n以下是对话记录：\n\n${conversationText}` }],
-                    },
-                ],
-                generationConfig: {
-                    temperature: 0.7,
-                    topP: 0.95,
-                    responseMimeType: 'application/json',
-                },
-            }),
+        const reportMessages: OpenAIChatMessage[] = [{
+            role: 'user',
+            content: `智能体名称：${botName || 'AI助手'}（编号：${botId}）\n\n以下是对话记录：\n\n${conversationText}`,
+        }];
+
+        const text = await requestYunwuOpenAIChat({
+            systemPrompt: REPORT_PROMPT,
+            messages: reportMessages,
+            temperature: 0.7,
+            model: GPT_5_4_MODEL,
         });
-
-        if (!res.ok) {
-            const errText = await res.text();
-            console.error('[Report] API error:', errText);
-            return NextResponse.json({ error: `AI 分析失败: ${res.status}` }, { status: 500 });
-        }
-
-        const data = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
         if (!text) {
             return NextResponse.json({ error: 'AI 返回为空' }, { status: 500 });
         }

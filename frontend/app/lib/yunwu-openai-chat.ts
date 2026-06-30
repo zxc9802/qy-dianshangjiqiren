@@ -8,7 +8,8 @@ import {
 } from './upstream-error';
 
 const DEFAULT_OPENAI_CHAT_URL = 'https://yunwu.ai/v1/chat/completions';
-const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-5.4';
+export const GPT_5_4_MODEL = 'gpt-5.4';
+const DEFAULT_OPENAI_CHAT_MODEL = GPT_5_4_MODEL;
 
 export type OpenAIContentPart =
     | { type: 'text'; text: string }
@@ -29,6 +30,7 @@ type OpenAIChatOptions = {
     messages: OpenAIChatMessage[];
     temperature?: number;
     maxTokens?: number;
+    model?: string;
 };
 
 type StreamOptions = OpenAIChatOptions & {
@@ -208,8 +210,10 @@ export async function requestYunwuOpenAIChat({
     messages,
     temperature = 0.8,
     maxTokens = 8192,
+    model: modelOverride,
 }: OpenAIChatOptions): Promise<string> {
     const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
+    const requestModel = modelOverride?.trim() || model;
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
@@ -218,7 +222,7 @@ export async function requestYunwuOpenAIChat({
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(
-            buildRequestBody(model, systemPrompt, messages, temperature, maxTokens, false),
+            buildRequestBody(requestModel, systemPrompt, messages, temperature, maxTokens, false),
         ),
     });
 
@@ -273,8 +277,10 @@ export async function streamYunwuOpenAIChat({
     onText,
     temperature = 0.8,
     maxTokens = 8192,
+    model: modelOverride,
 }: StreamOptions): Promise<void> {
     const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
+    const requestModel = modelOverride?.trim() || model;
 
     const upstream = await fetch(apiUrl, {
         method: 'POST',
@@ -283,7 +289,7 @@ export async function streamYunwuOpenAIChat({
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(
-            buildRequestBody(model, systemPrompt, messages, temperature, maxTokens, true),
+            buildRequestBody(requestModel, systemPrompt, messages, temperature, maxTokens, true),
         ),
     });
 
