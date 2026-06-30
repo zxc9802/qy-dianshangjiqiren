@@ -17,7 +17,7 @@ test('uses OpenAI-compatible image env when image model is configured', () => {
     if (config.kind !== 'openai') throw new Error('expected openai image provider');
     assert.equal(config.endpointUrl, 'https://yunwu.ai/v1/images/generations');
     assert.equal(config.model, 'gpt-image-2');
-    assert.equal(config.size, '2048x2048');
+    assert.equal(config.size, '1024x1024');
 
     const request = buildImageProviderRequest(config, {
         prompt: 'Draw a clean product image.',
@@ -30,9 +30,31 @@ test('uses OpenAI-compatible image env when image model is configured', () => {
     assert.deepEqual(body, {
         model: 'gpt-image-2',
         prompt: 'Draw a clean product image.',
-        size: '2048x2048',
+        size: '1024x1024',
         n: 1,
     });
+});
+
+test('uses 1K OpenAI-compatible image size from requested aspect ratio', () => {
+    const config = buildImageProviderConfig({
+        YUNWU_IMAGE_API_KEY: 'test-key',
+        YUNWU_IMAGE_BASE_URL: 'https://yunwu.ai/v1',
+        YUNWU_IMAGE_MODEL: 'gpt-image-2',
+    });
+
+    if (config.kind !== 'openai') throw new Error('expected openai image provider');
+
+    const defaultRequest = buildImageProviderRequest(config, {
+        prompt: '生成一张电商宣传图。',
+        aspectRatio: '1:1',
+    });
+    assert.equal(JSON.parse(defaultRequest.body).size, '1024x1024');
+
+    const widescreenRequest = buildImageProviderRequest(config, {
+        prompt: '生成一张 16:9 横版电商宣传图。',
+        aspectRatio: '1:1',
+    });
+    assert.equal(JSON.parse(widescreenRequest.body).size, '1024x576');
 });
 
 test('keeps legacy Gemini image URL env working', () => {
