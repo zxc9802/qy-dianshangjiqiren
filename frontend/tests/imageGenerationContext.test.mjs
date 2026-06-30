@@ -153,6 +153,28 @@ test('conversation image route compiles image prompts with GPT-5.4 before backen
   )
 })
 
+test('conversation image route logs each image generation boundary', async () => {
+  const routePath = path.join(__dirname, '..', 'app', 'api', 'conversations', '[id]', 'messages', 'route.ts')
+  const source = await readFile(routePath, 'utf8')
+  const markers = [
+    '[Conversations] image request started',
+    '[Conversations] image prompt compiled',
+    '[Conversations] calling backend image generation',
+    '[Conversations] backend image generation returned',
+    '[Conversations] image request failed',
+  ]
+
+  for (const marker of markers) {
+    assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+
+  assert.ok(
+    markers
+      .slice(0, -1)
+      .every((marker, index) => source.indexOf(marker) < source.indexOf(markers[index + 1])),
+  )
+})
+
 test('chat image renderer does not show the image prompt panel', async () => {
   const pagePath = path.join(__dirname, '..', 'app', 'chat', '[id]', 'page.tsx')
   const source = await readFile(pagePath, 'utf8')

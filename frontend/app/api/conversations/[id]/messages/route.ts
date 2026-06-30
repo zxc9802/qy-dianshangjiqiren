@@ -694,6 +694,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             type: 'status',
                             content: '正在生成图片，通常需要 10 到 40 秒。',
                         })}\n\n`));
+                        console.info('[Conversations] image request started', {
+                            conversationId,
+                            contentLength: content.length,
+                            aspectRatio: aspectRatio || '1:1',
+                            storedMessageCount: conversation.messages.length,
+                            attachmentCount: attachments.length,
+                        });
 
                         const imageContextMessages: ImageGenerationContextMessage[] = conversation.messages.map((message) => {
                             const imagePayload = parseConversationImageMessage(message.content);
@@ -722,15 +729,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             historyMessages: imageContextMessages,
                             compiledBrief,
                         });
+                        console.info('[Conversations] image prompt compiled', {
+                            conversationId,
+                            promptLength: imagePrompt.length,
+                            compilerUsed: Boolean(compiledBrief),
+                            referenceImageNeeded: compiledBrief?.referenceImageNeeded === true,
+                            selectedReferenceImage: Boolean(imageReference),
+                        });
                         const referenceImage = imageReference
                             ? await loadImageReference(req, imageReference.url)
                             : null;
+                        console.info('[Conversations] calling backend image generation', {
+                            conversationId,
+                            promptLength: imagePrompt.length,
+                            aspectRatio: aspectRatio || '1:1',
+                            hasReferenceImage: Boolean(referenceImage),
+                        });
                         const imageResponse = await generateImageViaBackend(req.headers, {
                             prompt: imagePrompt,
                             aspectRatio: aspectRatio || '1:1',
                             count: 1,
                             referenceImage: referenceImage?.base64,
                             referenceImageMime: referenceImage?.mimeType,
+                        });
+                        console.info('[Conversations] backend image generation returned', {
+                            conversationId,
+                            ok: imageResponse.ok,
+                            status: imageResponse.status,
+                            statusText: imageResponse.statusText,
                         });
 
                         const imagePayload = imageResponse.payload as Record<string, unknown>;
@@ -945,6 +971,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     }
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {
+                    if (inputType === 'image') {
+                        console.error('[Conversations] image request failed', {
+                            conversationId,
+                            contentLength: content.length,
+                            errorName: error instanceof Error ? error.name : undefined,
+                            errorMessage: error instanceof Error ? error.message : String(error),
+                            errorStack: error instanceof Error ? error.stack : undefined,
+                        });
+                    }
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                         type: 'error',
                         content: error instanceof Error ? error.message : 'Request failed',
