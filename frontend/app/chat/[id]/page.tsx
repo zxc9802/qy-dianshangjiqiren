@@ -112,6 +112,8 @@ const IMAGE_MODE_ASPECT_RATIO = '1:1';
 const TABLE_COPY_LABEL = '复制表格';
 const TABLE_COPIED_LABEL = '已复制表格';
 const STREAMING_RENDER_INTERVAL_MS = 140;
+const IMAGE_JOB_POLL_INTERVAL_MS = 2000;
+const IMAGE_JOB_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const ACCEPTED_ATTACHMENT_EXTENSIONS = new Set([
     'pdf',
     'docx',
@@ -1031,6 +1033,52 @@ export default function ChatPage() {
         return conversation;
     }, [fallbackWelcome, fetchConversation]);
 
+    const pollConversationImageJob = useCallback(async (activeConversationId: string, jobId: string) => {
+        const startedAt = Date.now();
+
+        while (true) {
+            const response = await api.getConversationImageJob(activeConversationId, jobId);
+            const job = response.data;
+            if (job.message) {
+                setImageStatusText(job.message);
+            }
+
+            if (job.status === 'succeeded') {
+                const result = job.result;
+                if (!result?.imageUrls?.length) {
+                    throw new Error('图片生成结果为空');
+                }
+
+                const assistantImageTimestamp = Date.now();
+                setMessages((current) => [
+                    ...current,
+                    {
+                        id: `assistant-image-${assistantImageTimestamp}`,
+                        role: 'assistant',
+                        timestamp: assistantImageTimestamp,
+                        content: result.content || '已生成图片。',
+                        kind: 'image',
+                        imageUrls: result.imageUrls,
+                        imagePrompt: result.imagePrompt,
+                        aspectRatio: result.aspectRatio,
+                    },
+                ]);
+                setImageStatusText('');
+                return;
+            }
+
+            if (job.status === 'failed') {
+                throw new Error(job.error || job.message || '图片生成失败');
+            }
+
+            if (Date.now() - startedAt > IMAGE_JOB_POLL_TIMEOUT_MS) {
+                throw new Error('图片生成等待超时，请稍后查看历史记录或重试。');
+            }
+
+            await new Promise((resolve) => window.setTimeout(resolve, IMAGE_JOB_POLL_INTERVAL_MS));
+        }
+    }, []);
+
     const ensureConversationScope = useCallback(() => {
         if (conversationId) {
             draftConversationScopeRef.current = conversationId;
@@ -1717,6 +1765,7 @@ export default function ChatPage() {
 
             const decoder = new TextDecoder();
             let fullText = '';
+            let imageJobId: string | null = null;
             pendingStreamingTextRef.current = '';
             let pending = '';
 
@@ -1744,6 +1793,11 @@ export default function ChatPage() {
                             setSuggestions(event.content);
                         } else if (event.type === 'status' && typeof event.content === 'string') {
                             setImageStatusText(event.content);
+                        } else if (event.type === 'image_job' && event.content?.jobId) {
+                            imageJobId = String(event.content.jobId);
+                            if (typeof event.content.message === 'string') {
+                                setImageStatusText(event.content.message);
+                            }
                         } else if (event.type === 'image' && event.content) {
                             const assistantImageTimestamp = Date.now();
                             setMessages((current) => [
@@ -1777,6 +1831,11 @@ export default function ChatPage() {
                     const event = JSON.parse(pending.trim().slice(6));
                     if (event.type === 'status' && typeof event.content === 'string') {
                         setImageStatusText(event.content);
+                    } else if (event.type === 'image_job' && event.content?.jobId) {
+                        imageJobId = String(event.content.jobId);
+                        if (typeof event.content.message === 'string') {
+                            setImageStatusText(event.content.message);
+                        }
                     } else if (event.type === 'image' && event.content) {
                         const assistantImageTimestamp = Date.now();
                         setMessages((current) => [
@@ -1812,6 +1871,10 @@ export default function ChatPage() {
                     ...current,
                     { id: `assistant-${assistantTimestamp}`, role: 'assistant', content: finalText, timestamp: assistantTimestamp },
                 ]);
+            }
+
+            if (imageJobId) {
+                await pollConversationImageJob(activeConversationId, imageJobId);
             }
 
             shouldRefreshConversation = true;
@@ -1854,6 +1917,7 @@ export default function ChatPage() {
         isStreaming,
         isUploading,
         isVideoBreakdownBot,
+        pollConversationImageJob,
         refreshConversation,
         refreshConversationVideos,
         responseModel,

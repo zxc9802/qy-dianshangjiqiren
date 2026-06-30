@@ -58,6 +58,10 @@ import {
     type ImageGenerationContextMessage,
     type ImagePromptCompilerBrief,
 } from '../../../../lib/image-generation-context';
+import {
+    startConversationImageJob,
+    type ConversationImageJobResult,
+} from '../../../../lib/server-conversation-image-jobs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -348,9 +352,9 @@ function takeRecentUserTurns<T extends { role: string }>(
     return messages.slice(startIndex);
 }
 
-function resolveRequestUrl(req: NextRequest, value: string): string {
+function resolveRequestUrl(requestOrigin: string, value: string): string {
     if (/^https?:\/\//i.test(value)) return value;
-    return new URL(value, req.nextUrl.origin).toString();
+    return new URL(value, requestOrigin).toString();
 }
 
 function mimeTypeFromImageUrl(value: string): string {
@@ -367,8 +371,8 @@ function mimeTypeFromImageUrl(value: string): string {
     return 'image/png';
 }
 
-async function loadImageReference(req: NextRequest, imageUrl: string): Promise<{ mimeType: string; base64: string }> {
-    const resolvedUrl = resolveRequestUrl(req, imageUrl);
+async function loadImageReference(requestOrigin: string, imageUrl: string): Promise<{ mimeType: string; base64: string }> {
+    const resolvedUrl = resolveRequestUrl(requestOrigin, imageUrl);
     const response = await fetch(resolvedUrl, { cache: 'no-store' });
     if (!response.ok) {
         throw new AppError('无法读取历史参考图，请重新生成或明确指定另一张图片。', 502);
@@ -690,135 +694,166 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                 try {
                     if (inputType === 'image') {
+                        const requestHeaders = new Headers(req.headers);
+                        const requestOrigin = req.nextUrl.origin;
+                        const imageJob = startConversationImageJob({
+                            conversationId,
+                            userId,
+                            initialMessage: '正在生成图片，通常需要 10 到 40 秒。',
+                            run: async ({ jobId, updateStatus }): Promise<ConversationImageJobResult> => {
+                                try {
+                                    updateStatus('正在整理图片上下文。');
+                                    console.info('[Conversations] image request started', {
+                                        conversationId,
+                                        jobId,
+                                        contentLength: content.length,
+                                        aspectRatio: aspectRatio || '1:1',
+                                        storedMessageCount: conversation.messages.length,
+                                        attachmentCount: attachments.length,
+                                    });
+
+                                    const imageContextMessages: ImageGenerationContextMessage[] = conversation.messages.map((message) => {
+                                        const imagePayload = parseConversationImageMessage(message.content);
+                                        return {
+                                            role: message.role,
+                                            content: imagePayload
+                                                ? [
+                                                    imagePayload.content,
+                                                    imagePayload.imagePrompt ? `Previous image prompt: ${imagePayload.imagePrompt}` : '',
+                                                ].filter(Boolean).join('\n')
+                                                : buildHistoryPromptText(message),
+                                            imageUrls: imagePayload?.imageUrls,
+                                        };
+                                    });
+                                    const compiledBrief = await compileImagePromptBrief({
+                                        currentPrompt: content,
+                                        historyMessages: imageContextMessages,
+                                    });
+                                    const imagePrompt = buildImageGenerationPrompt({
+                                        currentPrompt: content,
+                                        historyMessages: imageContextMessages,
+                                        compiledBrief,
+                                    });
+                                    const imageReference = selectImageReferenceForPrompt({
+                                        currentPrompt: content,
+                                        historyMessages: imageContextMessages,
+                                        compiledBrief,
+                                    });
+                                    console.info('[Conversations] image prompt compiled', {
+                                        conversationId,
+                                        jobId,
+                                        promptLength: imagePrompt.length,
+                                        compilerUsed: Boolean(compiledBrief),
+                                        referenceImageNeeded: compiledBrief?.referenceImageNeeded === true,
+                                        selectedReferenceImage: Boolean(imageReference),
+                                    });
+                                    updateStatus(imageReference ? '正在读取参考图。' : '正在调用生图服务。');
+
+                                    const referenceImage = imageReference
+                                        ? await loadImageReference(requestOrigin, imageReference.url)
+                                        : null;
+                                    updateStatus('正在调用生图服务。');
+                                    console.info('[Conversations] calling backend image generation', {
+                                        conversationId,
+                                        jobId,
+                                        promptLength: imagePrompt.length,
+                                        aspectRatio: aspectRatio || '1:1',
+                                        hasReferenceImage: Boolean(referenceImage),
+                                    });
+                                    const imageResponse = await generateImageViaBackend(requestHeaders, {
+                                        prompt: imagePrompt,
+                                        aspectRatio: aspectRatio || '1:1',
+                                        count: 1,
+                                        referenceImage: referenceImage?.base64,
+                                        referenceImageMime: referenceImage?.mimeType,
+                                    });
+                                    console.info('[Conversations] backend image generation returned', {
+                                        conversationId,
+                                        jobId,
+                                        ok: imageResponse.ok,
+                                        status: imageResponse.status,
+                                        statusText: imageResponse.statusText,
+                                    });
+
+                                    const imagePayload = imageResponse.payload as Record<string, unknown>;
+                                    if (!imageResponse.ok) {
+                                        throw new Error(
+                                            (typeof imagePayload.error === 'string' ? imagePayload.error : '')
+                                            || (typeof imagePayload.message === 'string' ? imagePayload.message : '')
+                                            || 'Image generation failed',
+                                        );
+                                    }
+
+                                    const generated = imagePayload.data as {
+                                        prompt: string;
+                                        aspectRatio: string;
+                                        errorMessage: string | null;
+                                        resultImagePaths: string[];
+                                    } | undefined;
+
+                                    if (!generated?.resultImagePaths?.length) {
+                                        throw new Error(generated?.errorMessage || 'Image generation failed');
+                                    }
+
+                                    updateStatus('图片已生成，正在整理结果。');
+                                    const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);
+                                    const encodedAssistantMessage = encodeConversationImageMessage({
+                                        content: assistantText,
+                                        imageUrls: generated.resultImagePaths,
+                                        aspectRatio: generated.aspectRatio,
+                                    });
+
+                                    await prisma.$transaction(async (tx) => {
+                                        await tx.message.create({
+                                            data: {
+                                                conversationId,
+                                                role: 'assistant',
+                                                content: encodedAssistantMessage,
+                                                inputType: 'image',
+                                            },
+                                        });
+
+                                        await tx.conversation.update({
+                                            where: { id: conversationId },
+                                            data: {
+                                                title: shouldSetInitialTitle
+                                                    ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
+                                                    : conversation.title,
+                                                updatedAt: new Date(),
+                                            },
+                                        });
+                                    });
+
+                                    return {
+                                        content: assistantText,
+                                        kind: 'image',
+                                        imageUrls: generated.resultImagePaths,
+                                        aspectRatio: generated.aspectRatio,
+                                    };
+                                } catch (error) {
+                                    console.error('[Conversations] image request failed', {
+                                        conversationId,
+                                        jobId,
+                                        contentLength: content.length,
+                                        errorName: error instanceof Error ? error.name : undefined,
+                                        errorMessage: error instanceof Error ? error.message : String(error),
+                                        errorStack: error instanceof Error ? error.stack : undefined,
+                                    });
+                                    throw error;
+                                }
+                            },
+                        });
+
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                             type: 'status',
-                            content: '正在生成图片，通常需要 10 到 40 秒。',
+                            content: imageJob.message,
                         })}\n\n`));
-                        console.info('[Conversations] image request started', {
-                            conversationId,
-                            contentLength: content.length,
-                            aspectRatio: aspectRatio || '1:1',
-                            storedMessageCount: conversation.messages.length,
-                            attachmentCount: attachments.length,
-                        });
-
-                        const imageContextMessages: ImageGenerationContextMessage[] = conversation.messages.map((message) => {
-                            const imagePayload = parseConversationImageMessage(message.content);
-                            return {
-                                role: message.role,
-                                content: imagePayload
-                                    ? [
-                                        imagePayload.content,
-                                        imagePayload.imagePrompt ? `Previous image prompt: ${imagePayload.imagePrompt}` : '',
-                                    ].filter(Boolean).join('\n')
-                                    : buildHistoryPromptText(message),
-                                imageUrls: imagePayload?.imageUrls,
-                            };
-                        });
-                        const compiledBrief = await compileImagePromptBrief({
-                            currentPrompt: content,
-                            historyMessages: imageContextMessages,
-                        });
-                        const imagePrompt = buildImageGenerationPrompt({
-                            currentPrompt: content,
-                            historyMessages: imageContextMessages,
-                            compiledBrief,
-                        });
-                        const imageReference = selectImageReferenceForPrompt({
-                            currentPrompt: content,
-                            historyMessages: imageContextMessages,
-                            compiledBrief,
-                        });
-                        console.info('[Conversations] image prompt compiled', {
-                            conversationId,
-                            promptLength: imagePrompt.length,
-                            compilerUsed: Boolean(compiledBrief),
-                            referenceImageNeeded: compiledBrief?.referenceImageNeeded === true,
-                            selectedReferenceImage: Boolean(imageReference),
-                        });
-                        const referenceImage = imageReference
-                            ? await loadImageReference(req, imageReference.url)
-                            : null;
-                        console.info('[Conversations] calling backend image generation', {
-                            conversationId,
-                            promptLength: imagePrompt.length,
-                            aspectRatio: aspectRatio || '1:1',
-                            hasReferenceImage: Boolean(referenceImage),
-                        });
-                        const imageResponse = await generateImageViaBackend(req.headers, {
-                            prompt: imagePrompt,
-                            aspectRatio: aspectRatio || '1:1',
-                            count: 1,
-                            referenceImage: referenceImage?.base64,
-                            referenceImageMime: referenceImage?.mimeType,
-                        });
-                        console.info('[Conversations] backend image generation returned', {
-                            conversationId,
-                            ok: imageResponse.ok,
-                            status: imageResponse.status,
-                            statusText: imageResponse.statusText,
-                        });
-
-                        const imagePayload = imageResponse.payload as Record<string, unknown>;
-                        if (!imageResponse.ok) {
-                            throw new Error(
-                                (typeof imagePayload.error === 'string' ? imagePayload.error : '')
-                                || (typeof imagePayload.message === 'string' ? imagePayload.message : '')
-                                || 'Image generation failed',
-                            );
-                        }
-
-                        const generated = imagePayload.data as {
-                            prompt: string;
-                            aspectRatio: string;
-                            errorMessage: string | null;
-                            resultImagePaths: string[];
-                        } | undefined;
-
-                        if (!generated?.resultImagePaths?.length) {
-                            throw new Error(generated?.errorMessage || 'Image generation failed');
-                        }
-
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: 'status',
-                            content: '图片已生成，正在整理结果。',
-                        })}\n\n`));
-
-                        const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);
-                        const encodedAssistantMessage = encodeConversationImageMessage({
-                            content: assistantText,
-                            imageUrls: generated.resultImagePaths,
-                            aspectRatio: generated.aspectRatio,
-                        });
-
-                        await prisma.$transaction(async (tx) => {
-                            await tx.message.create({
-                                data: {
-                                    conversationId,
-                                    role: 'assistant',
-                                    content: encodedAssistantMessage,
-                                    inputType: 'image',
-                                },
-                            });
-
-                            await tx.conversation.update({
-                                where: { id: conversationId },
-                                data: {
-                                    title: shouldSetInitialTitle
-                                        ? buildConversationTitle(bot.name, [{ role: 'user', content: userDisplayContent }])
-                                        : conversation.title,
-                                    updatedAt: new Date(),
-                                },
-                            });
-                        });
-
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: 'image',
+                            type: 'image_job',
                             content: {
-                                content: assistantText,
-                                kind: 'image',
-                                imageUrls: generated.resultImagePaths,
-                                aspectRatio: generated.aspectRatio,
+                                jobId: imageJob.id,
+                                status: imageJob.status,
+                                message: imageJob.message,
                             },
                         })}\n\n`));
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));

@@ -232,6 +232,13 @@ export const api = {
         });
     },
 
+    getConversationImageJob: (conversationId: string, jobId: string) =>
+        request<{ success: boolean; data: ConversationImageJobInfo }>(
+            `/conversations/${conversationId}/image-jobs/${jobId}`,
+            {},
+            { redirectOnUnauthorized: false },
+        ),
+
     migrateLocalData: (body: {
         conversations: LocalConversationItem[];
         favorites: LocalConversationItem[];
@@ -402,6 +409,29 @@ export interface ConversationInfo {
 
 export interface ConversationDetail extends ConversationInfo {
     messages: MessageInfo[];
+}
+
+export type ConversationImageJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface ConversationImageJobResult {
+    content: string;
+    kind: 'image';
+    imageUrls: string[];
+    imagePrompt?: string;
+    aspectRatio?: string;
+}
+
+export interface ConversationImageJobInfo {
+    id: string;
+    conversationId: string;
+    userId: string;
+    status: ConversationImageJobStatus;
+    message: string;
+    result?: ConversationImageJobResult;
+    error?: string;
+    createdAt: string;
+    updatedAt: string;
+    completedAt?: string;
 }
 
 export interface MessageInfo {
