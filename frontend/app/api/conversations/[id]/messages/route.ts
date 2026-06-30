@@ -36,6 +36,8 @@ import { buildConversationTitle, getConversationBotPayload } from '../../../../l
 import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../../lib/server-chat-video';
 import { buildLongTermMemoryPrompt, rememberConversationTurn } from '../../../../lib/server-memory';
 import {
+    GPT_5_4_MODEL,
+    requestYunwuOpenAIChat,
     streamYunwuOpenAIChat,
     type OpenAIChatMessage,
 } from '../../../../lib/yunwu-openai-chat';
@@ -48,8 +50,13 @@ import {
 import { generateImageViaBackend } from '../../../image-generations/proxy';
 import { enrichSystemPromptWithWebSearch } from '../../../../lib/web-search';
 import {
+    IMAGE_PROMPT_COMPILER_SYSTEM_PROMPT,
+    buildImagePromptCompilerUserMessage,
     buildImageGenerationPrompt,
+    parseImagePromptCompilerOutput,
     selectImageReferenceForPrompt,
+    type ImageGenerationContextMessage,
+    type ImagePromptCompilerBrief,
 } from '../../../../lib/image-generation-context';
 
 export const runtime = 'nodejs';
@@ -375,6 +382,37 @@ async function loadImageReference(req: NextRequest, imageUrl: string): Promise<{
     return { mimeType, base64 };
 }
 
+async function compileImagePromptBrief({
+    currentPrompt,
+    historyMessages,
+}: {
+    currentPrompt: string;
+    historyMessages: ImageGenerationContextMessage[];
+}): Promise<ImagePromptCompilerBrief | null> {
+    const compilerInput = buildImagePromptCompilerUserMessage({
+        currentPrompt,
+        historyMessages,
+    });
+    if (!compilerInput.trim()) return null;
+
+    try {
+        const output = await requestYunwuOpenAIChat({
+            systemPrompt: IMAGE_PROMPT_COMPILER_SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: compilerInput }],
+            temperature: 0.2,
+            maxTokens: 1200,
+            model: GPT_5_4_MODEL,
+        });
+        return parseImagePromptCompilerOutput(output);
+    } catch (error) {
+        console.warn(
+            '[Conversations] image prompt compiler failed, using fallback prompt.',
+            error instanceof Error ? error.message : error,
+        );
+        return null;
+    }
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     let tempVideoTokensToCleanup: string[] = [];
 
@@ -657,23 +695,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             content: '正在生成图片，通常需要 10 到 40 秒。',
                         })}\n\n`));
 
+                        const imageContextMessages: ImageGenerationContextMessage[] = conversation.messages.map((message) => {
+                            const imagePayload = parseConversationImageMessage(message.content);
+                            return {
+                                role: message.role,
+                                content: imagePayload
+                                    ? [
+                                        imagePayload.content,
+                                        imagePayload.imagePrompt ? `Previous image prompt: ${imagePayload.imagePrompt}` : '',
+                                    ].filter(Boolean).join('\n')
+                                    : buildHistoryPromptText(message),
+                                imageUrls: imagePayload?.imageUrls,
+                            };
+                        });
+                        const compiledBrief = await compileImagePromptBrief({
+                            currentPrompt: content,
+                            historyMessages: imageContextMessages,
+                        });
                         const imagePrompt = buildImageGenerationPrompt({
                             currentPrompt: content,
-                            historyMessages: historyMessages.map((message) => ({
-                                role: message.role,
-                                content: typeof message.content === 'string' ? message.content : '',
-                            })),
+                            historyMessages: imageContextMessages,
+                            compiledBrief,
                         });
                         const imageReference = selectImageReferenceForPrompt({
                             currentPrompt: content,
-                            historyMessages: conversation.messages.map((message) => {
-                                const imagePayload = parseConversationImageMessage(message.content);
-                                return {
-                                    role: message.role,
-                                    content: imagePayload?.content || buildHistoryPromptText(message),
-                                    imageUrls: imagePayload?.imageUrls,
-                                };
-                            }),
+                            historyMessages: imageContextMessages,
+                            compiledBrief,
                         });
                         const referenceImage = imageReference
                             ? await loadImageReference(req, imageReference.url)
