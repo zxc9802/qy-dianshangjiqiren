@@ -42,3 +42,15 @@ test('stripSuggestionBlock hides a streaming suggestion block before the array a
 
   assert.equal(visible, '这是正常回答。')
 })
+
+test('stripSuggestionBlock hides an unterminated streaming suggestions key', async () => {
+  const { stripSuggestionBlock } = await loadFormatMessageModule()
+
+  const visible = stripSuggestionBlock([
+    '这是正常回答。',
+    '',
+    '{"suggestions',
+  ].join('\n'))
+
+  assert.equal(visible, '这是正常回答。')
+})

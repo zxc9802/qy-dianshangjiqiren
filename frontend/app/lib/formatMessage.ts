@@ -151,8 +151,8 @@ const COMPLETE_SUGGESTION_BLOCK_PATTERNS = [
 ];
 
 const PARTIAL_SUGGESTION_BLOCK_PATTERNS = [
-    /(?:\n|^)\s*```json\s*\{\s*"suggestions"(?:\s*:)?[\s\S]*$/i,
-    /(?:\n|^)\s*\{\s*"suggestions"(?:\s*:)?[\s\S]*$/i,
+    /(?:\n|^)\s*```json\s*\{\s*"suggestions"?(?:\s*:)?[\s\S]*$/i,
+    /(?:\n|^)\s*\{\s*"suggestions"?(?:\s*:)?[\s\S]*$/i,
 ];
 
 function findSuggestionBlock(text: string): RegExpMatchArray | null {
