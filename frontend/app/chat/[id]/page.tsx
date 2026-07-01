@@ -222,7 +222,14 @@ interface StreamingMarkdownBlockProps {
     onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }
 
+interface RenderedStreamingMarkdownBlock {
+    key: string;
+    html: string;
+}
+
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
+const STREAMING_MARKDOWN_BLOCK_CACHE_LIMIT = 400;
+const streamingMarkdownBlockHtmlCache = new Map<string, string>();
 
 type ConversationMessageResponsePayload = {
     data?: {
@@ -301,6 +308,23 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
 
 function stripSuggestionBlock(text: string): string {
     return stripRichSuggestionBlock(text);
+}
+
+function getCachedStreamingMarkdownHtml(block: string): string {
+    const cached = streamingMarkdownBlockHtmlCache.get(block);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const html = formatMessage(block, false);
+    streamingMarkdownBlockHtmlCache.set(block, html);
+    if (streamingMarkdownBlockHtmlCache.size > STREAMING_MARKDOWN_BLOCK_CACHE_LIMIT) {
+        const firstKey = streamingMarkdownBlockHtmlCache.keys().next().value;
+        if (firstKey !== undefined) {
+            streamingMarkdownBlockHtmlCache.delete(firstKey);
+        }
+    }
+    return html;
 }
 
 const MemoizedMessageList = memo(function MessageList({
@@ -468,22 +492,19 @@ const StreamingMarkdownMessage = memo(function StreamingMarkdownMessage({
     text,
     onMessageContentClick,
 }: StreamingMarkdownMessageProps) {
-    const cleanText = stripSuggestionBlock(text);
+    const cleanText = text;
     const { stableBlocks, activeBlock } = useMemo(
         () => splitStreamingMarkdownBlocks(cleanText),
         [cleanText],
     );
-    const stableBlocksKey = useMemo(() => JSON.stringify(stableBlocks), [stableBlocks]);
     const renderedStableBlocks = useMemo(() => {
-        const blocks = JSON.parse(stableBlocksKey) as string[];
-        return blocks.map((block, index) => {
-            const key = `${index}:${block}`;
-            return {
-                key,
-                html: formatMessage(block, false),
-            };
-        });
-    }, [stableBlocksKey]);
+        return stableBlocks.map((block, index): RenderedStreamingMarkdownBlock => (
+            {
+                key: `${index}:${block}`,
+                html: getCachedStreamingMarkdownHtml(block),
+            }
+        ));
+    }, [stableBlocks]);
     const activeHtml = useMemo(
         () => (activeBlock ? formatMessage(activeBlock, false) : ''),
         [activeBlock],

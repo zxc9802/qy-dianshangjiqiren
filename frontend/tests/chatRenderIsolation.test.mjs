@@ -73,12 +73,26 @@ test('streaming markdown renderer caches stable blocks and only formats the acti
 
   const rendererBlock = source.slice(rendererStart, streamingMessageStart)
   assert.match(rendererBlock, /splitStreamingMarkdownBlocks\(cleanText\)/)
-  assert.match(rendererBlock, /const stableBlocksKey = useMemo/)
-  assert.match(rendererBlock, /JSON\.stringify\(stableBlocks\)/)
-  assert.match(rendererBlock, /JSON\.parse\(stableBlocksKey\) as string\[\]/)
-  assert.match(rendererBlock, /formatMessage\(block, false\)/)
+  assert.match(source, /const streamingMarkdownBlockHtmlCache = new Map<string, string>\(\)/)
+  assert.match(source, /function getCachedStreamingMarkdownHtml\(block: string\): string/)
+  assert.match(rendererBlock, /getCachedStreamingMarkdownHtml\(block\)/)
+  assert.doesNotMatch(rendererBlock, /JSON\.stringify\(stableBlocks\)/)
+  assert.doesNotMatch(rendererBlock, /JSON\.parse\(stableBlocksKey\)/)
   assert.match(rendererBlock, /const activeHtml = useMemo/)
   assert.match(rendererBlock, /formatMessage\(activeBlock, false\)/)
+})
+
+test('streaming markdown does not rescan the full text to strip suggestions on every flush', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const rendererStart = source.indexOf('const StreamingMarkdownMessage = memo(function StreamingMarkdownMessage')
+  const streamingMessageStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage', rendererStart)
+
+  assert.notEqual(rendererStart, -1)
+  assert.notEqual(streamingMessageStart, -1)
+
+  const rendererBlock = source.slice(rendererStart, streamingMessageStart)
+  assert.match(rendererBlock, /const cleanText = text/)
+  assert.doesNotMatch(rendererBlock, /stripSuggestionBlock\(text\)/)
 })
 
 test('streaming completion does not force a duplicate final flush before appending the message', async () => {
