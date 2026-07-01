@@ -42,6 +42,11 @@ import {
     stripSuggestionBlock as stripRichSuggestionBlock,
 } from '../../lib/formatMessage';
 import { splitStreamingMarkdownBlocks } from '../../lib/streaming-markdown';
+import {
+    normalizeChatStreamEvent,
+    parseChatStreamSseLine,
+    type ChatStreamProjection,
+} from '../../lib/chat-stream-events';
 import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
@@ -1580,7 +1585,7 @@ export default function ChatPage() {
         }
 
         streamingFlushTimerRef.current = null;
-        const nextStreamingText = stripSuggestionBlock(pendingStreamingTextRef.current);
+        const nextStreamingText = pendingStreamingTextRef.current;
         startTransition(() => {
             setStreamingText(nextStreamingText);
         });
@@ -2086,6 +2091,82 @@ export default function ChatPage() {
             pendingStreamingTextRef.current = '';
             let pending = '';
 
+            const appendAssistantImageMessage = (image: unknown) => {
+                if (typeof image !== 'object' || image === null) {
+                    return;
+                }
+
+                const imagePayload = image as {
+                    content?: unknown;
+                    imageUrls?: unknown;
+                    imagePrompt?: unknown;
+                    aspectRatio?: unknown;
+                };
+                const assistantImageTimestamp = Date.now();
+                setMessages((current) => [
+                    ...current,
+                    {
+                        id: `assistant-image-${assistantImageTimestamp}`,
+                        role: 'assistant',
+                        timestamp: assistantImageTimestamp,
+                        content: typeof imagePayload.content === 'string' ? imagePayload.content : '已生成图片。',
+                        kind: 'image',
+                        imageUrls: Array.isArray(imagePayload.imageUrls) ? imagePayload.imageUrls.filter((item): item is string => typeof item === 'string') : [],
+                        imagePrompt: typeof imagePayload.imagePrompt === 'string' ? imagePayload.imagePrompt : undefined,
+                        aspectRatio: typeof imagePayload.aspectRatio === 'string' ? imagePayload.aspectRatio : undefined,
+                    },
+                ]);
+                setImageStatusText('');
+            };
+
+            const applyChatStreamProjection = (projection: ChatStreamProjection | null) => {
+                if (!projection) {
+                    return;
+                }
+
+                if (projection.channel === 'messages') {
+                    if (projection.kind !== 'delta' || !projection.content) {
+                        return;
+                    }
+
+                    fullText += projection.content;
+                    pendingStreamingTextRef.current += projection.content;
+                    if (typeof window === 'undefined') {
+                        flushStreamingText();
+                    } else {
+                        scheduleStreamingTextFlush();
+                    }
+                    return;
+                }
+
+                if (projection.channel === 'suggestions') {
+                    setSuggestions(projection.suggestions);
+                    return;
+                }
+
+                if (projection.channel === 'status') {
+                    setImageStatusText(projection.status);
+                    return;
+                }
+
+                if (projection.channel === 'image_job') {
+                    imageJobId = projection.jobId;
+                    if (projection.message) {
+                        setImageStatusText(projection.message);
+                    }
+                    return;
+                }
+
+                if (projection.channel === 'image') {
+                    appendAssistantImageMessage(projection.image);
+                    return;
+                }
+
+                if (projection.channel === 'error') {
+                    throw new Error(projection.error);
+                }
+            };
+
             while (true) {
                 const { done, value } = await reader.read();
                 pending += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -2094,46 +2175,9 @@ export default function ChatPage() {
                 pending = lines.pop() || '';
 
                 for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-
                     try {
-                        const event = JSON.parse(line.slice(6));
-                        if (event.type === 'text' && event.content) {
-                            fullText += event.content;
-                            pendingStreamingTextRef.current = fullText;
-                            if (typeof window === 'undefined') {
-                                flushStreamingText();
-                            } else {
-                                scheduleStreamingTextFlush();
-                            }
-                        } else if (event.type === 'suggestions' && Array.isArray(event.content)) {
-                            setSuggestions(event.content);
-                        } else if (event.type === 'status' && typeof event.content === 'string') {
-                            setImageStatusText(event.content);
-                        } else if (event.type === 'image_job' && event.content?.jobId) {
-                            imageJobId = String(event.content.jobId);
-                            if (typeof event.content.message === 'string') {
-                                setImageStatusText(event.content.message);
-                            }
-                        } else if (event.type === 'image' && event.content) {
-                            const assistantImageTimestamp = Date.now();
-                            setMessages((current) => [
-                                ...current,
-                                {
-                                    id: `assistant-image-${assistantImageTimestamp}`,
-                                    role: 'assistant',
-                                    timestamp: assistantImageTimestamp,
-                                    content: event.content.content || '已生成图片。',
-                                    kind: 'image',
-                                    imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
-                                    imagePrompt: event.content.imagePrompt,
-                                    aspectRatio: event.content.aspectRatio,
-                                },
-                            ]);
-                            setImageStatusText('');
-                        } else if (event.type === 'error') {
-                            throw new Error(event.content || 'AI 回复失败');
-                        }
+                        const parsedEvent = parseChatStreamSseLine(line);
+                        applyChatStreamProjection(normalizeChatStreamEvent(parsedEvent));
                     } catch (error) {
                         if (error instanceof SyntaxError) continue;
                         throw error;
@@ -2143,39 +2187,12 @@ export default function ChatPage() {
                 if (done) break;
             }
 
-            if (pending.trim().startsWith('data: ')) {
-                try {
-                    const event = JSON.parse(pending.trim().slice(6));
-                    if (event.type === 'status' && typeof event.content === 'string') {
-                        setImageStatusText(event.content);
-                    } else if (event.type === 'image_job' && event.content?.jobId) {
-                        imageJobId = String(event.content.jobId);
-                        if (typeof event.content.message === 'string') {
-                            setImageStatusText(event.content.message);
-                        }
-                    } else if (event.type === 'image' && event.content) {
-                        const assistantImageTimestamp = Date.now();
-                        setMessages((current) => [
-                            ...current,
-                            {
-                                id: `assistant-image-${assistantImageTimestamp}`,
-                                role: 'assistant',
-                                timestamp: assistantImageTimestamp,
-                                content: event.content.content || '已生成图片。',
-                                kind: 'image',
-                                imageUrls: Array.isArray(event.content.imageUrls) ? event.content.imageUrls : [],
-                                imagePrompt: event.content.imagePrompt,
-                                aspectRatio: event.content.aspectRatio,
-                            },
-                        ]);
-                        setImageStatusText('');
-                    } else if (event.type === 'error') {
-                        throw new Error(event.content || 'AI 回复失败');
-                    }
-                } catch (error) {
-                    if (!(error instanceof SyntaxError)) {
-                        throw error;
-                    }
+            try {
+                const parsedEvent = parseChatStreamSseLine(pending);
+                applyChatStreamProjection(normalizeChatStreamEvent(parsedEvent));
+            } catch (error) {
+                if (!(error instanceof SyntaxError)) {
+                    throw error;
                 }
             }
 

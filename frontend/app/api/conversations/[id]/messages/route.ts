@@ -140,6 +140,46 @@ interface StoredPromptMessage {
     attachments: StoredPromptAttachment[];
 }
 
+type ChatStreamEventPayload = {
+    type: string;
+    content?: unknown;
+    channel?: string;
+    messageId?: string;
+};
+
+function inferChatStreamChannel(type: string): string {
+    if (type === 'text' || type === 'message_delta' || type === 'message_done') return 'messages';
+    if (type === 'sources') return 'sources';
+    if (type === 'suggestions') return 'suggestions';
+    if (type === 'status') return 'status';
+    if (type === 'image_job') return 'image_job';
+    if (type === 'image') return 'image';
+    if (type === 'error') return 'error';
+    return 'lifecycle';
+}
+
+function createChatStreamRunId(): string {
+    return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createChatStreamEmitter(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    encoder: TextEncoder,
+) {
+    const runId = createChatStreamRunId();
+    let seq = 0;
+
+    return (event: ChatStreamEventPayload) => {
+        seq += 1;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            ...event,
+            channel: event.channel || inferChatStreamChannel(event.type),
+            runId,
+            seq,
+        })}\n\n`));
+    };
+}
+
 function isMissingPresetBotDocumentTable(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error || '');
     return /preset_bot_documents/i.test(message)
@@ -759,6 +799,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 let fullResponse = '';
                 let streamedVisibleLength = 0;
                 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+                const emitStreamEvent = createChatStreamEmitter(controller, encoder);
 
                 const startHeartbeat = () => {
                     if (!shouldStreamVideoBreakdownGpt || heartbeatTimer) {
@@ -933,19 +974,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             },
                         });
 
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        emitStreamEvent({
                             type: 'status',
                             content: imageJob.message,
-                        })}\n\n`));
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        });
+                        emitStreamEvent({
                             type: 'image_job',
                             content: {
                                 jobId: imageJob.id,
                                 status: imageJob.status,
                                 message: imageJob.message,
                             },
-                        })}\n\n`));
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                        });
+                        emitStreamEvent({ type: 'done' });
                         return;
                     }
 
@@ -957,7 +998,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                         const visibleDelta = visibleResponse.slice(streamedVisibleLength);
                         streamedVisibleLength = visibleResponse.length;
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: visibleDelta })}\n\n`));
+                        emitStreamEvent({ type: 'text', content: visibleDelta });
                     };
 
                     const textModelMessages: OpenAIChatMessage[] = [
@@ -974,10 +1015,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     if (shouldStreamOpenAI) {
                         startHeartbeat();
                         if (shouldStreamVideoBreakdownGpt) {
-                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            emitStreamEvent({
                                 type: 'status',
                                 content: VIDEO_BREAKDOWN_STREAM_STATUS,
-                            })}\n\n`));
+                            });
                         }
 
                         await streamYunwuOpenAIChat({
@@ -1091,9 +1132,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     });
 
                     if (suggestions.length) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'suggestions', content: suggestions })}\n\n`));
+                        emitStreamEvent({ type: 'suggestions', content: suggestions });
                     }
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                    emitStreamEvent({ type: 'done' });
                 } catch (error) {
                     if (inputType === 'image') {
                         console.error('[Conversations] image request failed', {
@@ -1104,10 +1145,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             errorStack: error instanceof Error ? error.stack : undefined,
                         });
                     }
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    emitStreamEvent({
                         type: 'error',
                         content: error instanceof Error ? error.message : 'Request failed',
-                    })}\n\n`));
+                    });
                 } finally {
                     stopHeartbeat();
                     await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));

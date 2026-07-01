@@ -118,3 +118,19 @@ test('sidebar report markers are derived outside the conversation row render', a
   assert.doesNotMatch(source, /\{sidebarTab === 'history' && typeof window !== 'undefined' && localStorage\.getItem\(`report-\$\{conversation\.id\}`\) && \(/)
   assert.match(source, /\{sidebarTab === 'history' && reportConversationIds\.has\(conversation\.id\) && \(/)
 })
+
+test('chat stream reader dispatches typed projections instead of branching on raw events', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const readerStart = source.indexOf('const reader = response.body?.getReader()')
+  const finalTextStart = source.indexOf('const finalText = stripSuggestionBlock(fullText).trim()', readerStart)
+
+  assert.notEqual(readerStart, -1)
+  assert.notEqual(finalTextStart, -1)
+  assert.match(source, /normalizeChatStreamEvent/)
+  assert.match(source, /parseChatStreamSseLine/)
+  assert.match(source, /const applyChatStreamProjection = \(projection: ChatStreamProjection \| null\) =>/)
+
+  const streamReaderBlock = source.slice(readerStart, finalTextStart)
+  assert.match(streamReaderBlock, /applyChatStreamProjection\(normalizeChatStreamEvent\(parsedEvent\)\)/)
+  assert.doesNotMatch(streamReaderBlock, /event\.type ===/)
+})
