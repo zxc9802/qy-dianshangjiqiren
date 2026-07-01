@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
@@ -87,6 +87,11 @@ interface MessageItem {
 interface RenderedMessageItem extends MessageItem {
     textContent: string;
     html: string;
+}
+
+interface RenderedMessageCacheEntry {
+    message: MessageItem;
+    rendered: RenderedMessageItem;
 }
 
 interface AttachedFile {
@@ -181,20 +186,23 @@ interface WfState {
     selectedMessages: Record<number, string[]>;
 }
 
-interface ChatMessagesProps {
-    messagesContainerRef: RefObject<HTMLDivElement | null>;
-    messagesEndRef: RefObject<HTMLDivElement | null>;
+interface MessageListProps {
     renderedMessages: RenderedMessageItem[];
     wfState: WfState | null;
     selectedMsgIds: Set<string>;
-    showLoadingBubble: boolean;
-    showStreamingBubble: boolean;
-    streamingText: string;
-    renderedStreamingText: string;
-    imageModeEnabled: boolean;
-    imageStatusText: string;
     onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
     onTogglePinMessage: (id: string) => void;
+}
+
+interface LoadingMessageProps {
+    show: boolean;
+}
+
+interface StreamingMessageProps {
+    show: boolean;
+    streamingText: string;
+    imageModeEnabled: boolean;
+    imageStatusText: string;
 }
 
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
@@ -278,24 +286,15 @@ function stripSuggestionBlock(text: string): string {
     return stripRichSuggestionBlock(text);
 }
 
-const MemoizedChatMessages = memo(function ChatMessages({
-    messagesContainerRef,
-    messagesEndRef,
+const MemoizedMessageList = memo(function MessageList({
     renderedMessages,
     wfState,
     selectedMsgIds,
-    showLoadingBubble,
-    showStreamingBubble,
-    streamingText,
-    renderedStreamingText,
-    imageModeEnabled,
-    imageStatusText,
     onMessageContentClick,
     onTogglePinMessage,
-}: ChatMessagesProps) {
+}: MessageListProps) {
     return (
-        <div ref={messagesContainerRef} className={styles.messagesContainer}>
-            <div className={styles.messages}>
+        <>
                 {wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1] && (
                     <div className={styles.wfContextCard}>
                         <div className={styles.wfContextLabel}>
@@ -409,50 +408,63 @@ const MemoizedChatMessages = memo(function ChatMessages({
                         </div>
                     </div>
                 ))}
-                {showLoadingBubble && (
-                    <div className={`${styles.message} ${styles.assistantMsg}`}>
-                        <div className={styles.msgBubble}>
-                            <div className={styles.thinking}>
-                                <span />
-                                <span />
-                                <span />
-                            </div>
+        </>
+    );
+});
+
+const LoadingMessage = memo(function LoadingMessage({ show }: LoadingMessageProps) {
+    if (!show) {
+        return null;
+    }
+
+    return (
+        <div className={`${styles.message} ${styles.assistantMsg}`}>
+            <div className={styles.msgBubble}>
+                <div className={styles.thinking}>
+                    <span />
+                    <span />
+                    <span />
+                </div>
+            </div>
+        </div>
+    );
+});
+
+const StreamingMessage = memo(function StreamingMessage({
+    show,
+    streamingText,
+    imageModeEnabled,
+    imageStatusText,
+}: StreamingMessageProps) {
+    if (!show) {
+        return null;
+    }
+
+    return (
+        <div className={`${styles.message} ${styles.assistantMsg} ${styles.streamingMessage}`}>
+            <div className={styles.msgBubble}>
+                {streamingText ? (
+                    <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
+                        {streamingText}
+                    </div>
+                ) : imageModeEnabled ? (
+                    <div className={styles.imagePending}>
+                        <div className={styles.thinking}>
+                            <span />
+                            <span />
+                            <span />
+                        </div>
+                        <div className={styles.imagePendingText}>
+                            {imageStatusText || '正在生成图片，通常需要 10 到 40 秒。'}
                         </div>
                     </div>
-                )}
-                {showStreamingBubble && (
-                    <div className={`${styles.message} ${styles.assistantMsg}`}>
-                        <div className={styles.msgBubble}>
-                            {streamingText ? (
-                                renderedStreamingText ? (
-                                    <div className={styles.msgContent} onClick={onMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
-                                ) : (
-                                    <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
-                                        {streamingText}
-                                    </div>
-                                )
-                            ) : imageModeEnabled ? (
-                                <div className={styles.imagePending}>
-                                    <div className={styles.thinking}>
-                                        <span />
-                                        <span />
-                                        <span />
-                                    </div>
-                                    <div className={styles.imagePendingText}>
-                                        {imageStatusText || '正在生成图片，通常需要 10 到 40 秒。'}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className={styles.thinking}>
-                                    <span />
-                                    <span />
-                                    <span />
-                                </div>
-                            )}
-                        </div>
+                ) : (
+                    <div className={styles.thinking}>
+                        <span />
+                        <span />
+                        <span />
                     </div>
                 )}
-                <div ref={messagesEndRef} className={styles.scrollAnchor} />
             </div>
         </div>
     );
@@ -985,6 +997,7 @@ export default function ChatPage() {
     const streamingFlushTimerRef = useRef<number | null>(null);
     const streamingScrollFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
+    const renderedMessageCacheRef = useRef<Map<string, RenderedMessageCacheEntry>>(new Map());
     const tableCopyResetTimerRef = useRef<number | null>(null);
     const copiedTableButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -1425,6 +1438,19 @@ export default function ChatPage() {
         () => conversations.filter((conversation) => conversation.botId === botId).sort((a, b) => b.updatedAt - a.updatedAt),
         [botId, conversations],
     );
+    const reportConversationIds = useMemo(() => {
+        if (typeof window === 'undefined') {
+            return new Set<string>();
+        }
+
+        const nextIds = new Set<string>();
+        for (const conversation of botConversations) {
+            if (window.localStorage.getItem(`report-${conversation.id}`)) {
+                nextIds.add(conversation.id);
+            }
+        }
+        return nextIds;
+    }, [botConversations]);
     const botFavorites = useMemo(
         () => favorites.filter((conversation) => conversation.botId === botId).sort((a, b) => b.updatedAt - a.updatedAt),
         [botId, favorites],
@@ -1437,26 +1463,36 @@ export default function ChatPage() {
         return base;
     }, [botId, botName]);
     const renderedMessages = useMemo<RenderedMessageItem[]>(
-        () => messages.map((message) => {
-            const rawTextContent = message.attachments?.length
-                ? stripAttachmentDisplayLabels(message.content, message.attachments)
-                : message.content;
-            const textContent = message.role === 'assistant'
-                ? sanitizeAssistantMessageContent(rawTextContent)
-                : rawTextContent;
+        () => {
+            const previousCache = renderedMessageCacheRef.current;
+            const nextCache = new Map<string, RenderedMessageCacheEntry>();
+            const nextMessages = messages.map((message) => {
+                const cached = previousCache.get(message.id);
+                if (cached?.message === message) {
+                    nextCache.set(message.id, cached);
+                    return cached.rendered;
+                }
 
-            return {
-                ...message,
-                textContent,
-                html: formatMessage(stripSuggestionBlock(textContent), message.role === 'assistant'),
-            };
-        }),
+                const rawTextContent = message.attachments?.length
+                    ? stripAttachmentDisplayLabels(message.content, message.attachments)
+                    : message.content;
+                const textContent = message.role === 'assistant'
+                    ? sanitizeAssistantMessageContent(rawTextContent)
+                    : rawTextContent;
+                const rendered = {
+                    ...message,
+                    textContent,
+                    html: formatMessage(stripSuggestionBlock(textContent), message.role === 'assistant'),
+                };
+
+                nextCache.set(message.id, { message, rendered });
+                return rendered;
+            });
+
+            renderedMessageCacheRef.current = nextCache;
+            return nextMessages;
+        },
         [messages],
-    );
-    const deferredStreamingText = useDeferredValue(streamingText);
-    const renderedStreamingText = useMemo(
-        () => (deferredStreamingText ? formatMessage(deferredStreamingText, true) : ''),
-        [deferredStreamingText],
     );
     const flushStreamingText = useCallback(() => {
         if (typeof window !== 'undefined' && streamingFlushTimerRef.current !== null) {
@@ -2066,7 +2102,6 @@ export default function ChatPage() {
             const finalText = stripSuggestionBlock(fullText).trim();
             if (finalText) {
                 pendingStreamingTextRef.current = finalText;
-                flushStreamingText();
                 const assistantTimestamp = Date.now();
                 setMessages((current) => [
                     ...current,
@@ -2442,7 +2477,7 @@ export default function ChatPage() {
                                                 <Star size={14} fill={conversation.isFavorite ? '#eab308' : 'none'} />
                                             </button>
                                         )}
-                                        {sidebarTab === 'history' && typeof window !== 'undefined' && localStorage.getItem(`report-${conversation.id}`) && (
+                                        {sidebarTab === 'history' && reportConversationIds.has(conversation.id) && (
                                             <button
                                                 className={styles.chatSidebarAction}
                                                 style={{ color: '#3b82f6' }}
@@ -2562,21 +2597,25 @@ export default function ChatPage() {
                 </div>
             )}
 
-            <MemoizedChatMessages
-                messagesContainerRef={messagesContainerRef}
-                messagesEndRef={messagesEndRef}
-                renderedMessages={renderedMessages}
-                wfState={wfState}
-                selectedMsgIds={selectedMsgIds}
-                showLoadingBubble={showLoadingBubble}
-                showStreamingBubble={showStreamingBubble}
-                streamingText={streamingText}
-                renderedStreamingText={renderedStreamingText}
-                imageModeEnabled={imageModeEnabled}
-                imageStatusText={imageStatusText}
-                onMessageContentClick={handleMessageContentClick}
-                onTogglePinMessage={togglePinMsg}
-            />
+            <div ref={messagesContainerRef} className={styles.messagesContainer}>
+                <div className={styles.messages}>
+                    <MemoizedMessageList
+                        renderedMessages={renderedMessages}
+                        wfState={wfState}
+                        selectedMsgIds={selectedMsgIds}
+                        onMessageContentClick={handleMessageContentClick}
+                        onTogglePinMessage={togglePinMsg}
+                    />
+                    <LoadingMessage show={showLoadingBubble} />
+                    <StreamingMessage
+                        show={showStreamingBubble}
+                        streamingText={streamingText}
+                        imageModeEnabled={imageModeEnabled}
+                        imageStatusText={imageStatusText}
+                    />
+                    <div ref={messagesEndRef} className={styles.scrollAnchor} />
+                </div>
+            </div>
 
             {suggestions.length > 0 && !isStreaming && !imageModeEnabled && (
                 <div className={styles.suggestions}>

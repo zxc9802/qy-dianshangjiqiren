@@ -544,6 +544,10 @@
     animation: fadeIn var(--duration-fast) var(--ease-smooth);
 }
 
+.streamingMessage {
+    animation: none;
+}
+
 .userMsg {
     justify-content: flex-end;
 }

@@ -15,9 +15,85 @@ test('chat message rendering is memoized away from input text updates', async ()
   assert.notEqual(chatPageStart, -1)
   assert.notEqual(formatMessageStart, -1)
   assert.match(source, /import \{[^}]*\bmemo\b[^}]*\} from 'react'/)
-  assert.match(source, /const MemoizedChatMessages = memo\(function ChatMessages/)
-  assert.match(source, /<MemoizedChatMessages[\s\S]*renderedMessages=\{renderedMessages\}/)
+  assert.match(source, /const MemoizedMessageList = memo\(function MessageList/)
+  assert.match(source, /<MemoizedMessageList[\s\S]*renderedMessages=\{renderedMessages\}/)
 
   const chatPageBody = source.slice(chatPageStart, formatMessageStart)
   assert.doesNotMatch(chatPageBody, /renderedMessages\.map\(\(message\) =>/)
+})
+
+test('streaming message rendering is isolated from historical message rendering', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const messageListStart = source.indexOf('const MemoizedMessageList = memo(function MessageList')
+  const streamingStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage')
+  const chatPageStart = source.indexOf('export default function ChatPage()')
+
+  assert.notEqual(messageListStart, -1)
+  assert.notEqual(streamingStart, -1)
+  assert.notEqual(chatPageStart, -1)
+  assert.ok(messageListStart < streamingStart)
+
+  const messageListBlock = source.slice(messageListStart, streamingStart)
+  assert.match(messageListBlock, /renderedMessages\.map\(\(message\) =>/)
+  assert.doesNotMatch(messageListBlock, /\bstreamingText\b/)
+  assert.doesNotMatch(messageListBlock, /\brenderedStreamingText\b/)
+  assert.doesNotMatch(messageListBlock, /\bshowStreamingBubble\b/)
+  assert.doesNotMatch(messageListBlock, /\bimageStatusText\b/)
+
+  const chatPageBody = source.slice(chatPageStart)
+  assert.match(chatPageBody, /<MemoizedMessageList[\s\S]*renderedMessages=\{renderedMessages\}/)
+  assert.match(chatPageBody, /<StreamingMessage[\s\S]*streamingText=\{streamingText\}/)
+})
+
+test('streaming text avoids full markdown html replacement until completion', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const streamingStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage')
+  const chatPageStart = source.indexOf('export default function ChatPage()')
+
+  assert.notEqual(streamingStart, -1)
+  assert.notEqual(chatPageStart, -1)
+
+  const streamingBlock = source.slice(streamingStart, chatPageStart)
+  assert.doesNotMatch(streamingBlock, /dangerouslySetInnerHTML/)
+  assert.doesNotMatch(source, /\brenderedStreamingText\b/)
+  assert.doesNotMatch(source, /formatMessage\(deferredStreamingText/)
+  assert.doesNotMatch(source, /\buseDeferredValue\(streamingText\)/)
+})
+
+test('streaming completion does not force a duplicate final flush before appending the message', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const finalTextStart = source.indexOf('const finalText = stripSuggestionBlock(fullText).trim()')
+  const completionStart = source.indexOf('if (imageJobId)', finalTextStart)
+
+  assert.notEqual(finalTextStart, -1)
+  assert.notEqual(completionStart, -1)
+
+  const finalizationBlock = source.slice(finalTextStart, completionStart)
+  assert.doesNotMatch(finalizationBlock, /flushStreamingText\(\)/)
+})
+
+test('historical formatted message html is cached by message identity', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const renderedStart = source.indexOf('const renderedMessages = useMemo<RenderedMessageItem[]>(')
+  const flushStart = source.indexOf('const flushStreamingText = useCallback', renderedStart)
+
+  assert.notEqual(renderedStart, -1)
+  assert.notEqual(flushStart, -1)
+  assert.match(source, /interface RenderedMessageCacheEntry/)
+  assert.match(source, /const renderedMessageCacheRef = useRef<Map<string, RenderedMessageCacheEntry>>\(new Map\(\)\)/)
+
+  const renderedBlock = source.slice(renderedStart, flushStart)
+  assert.match(renderedBlock, /const previousCache = renderedMessageCacheRef\.current/)
+  assert.match(renderedBlock, /const cached = previousCache\.get\(message\.id\)/)
+  assert.match(renderedBlock, /cached\?\.message === message/)
+  assert.match(renderedBlock, /nextCache\.set\(message\.id, \{ message, rendered \}\)/)
+  assert.match(renderedBlock, /renderedMessageCacheRef\.current = nextCache/)
+})
+
+test('sidebar report markers are derived outside the conversation row render', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+
+  assert.match(source, /const reportConversationIds = useMemo\(/)
+  assert.doesNotMatch(source, /\{sidebarTab === 'history' && typeof window !== 'undefined' && localStorage\.getItem\(`report-\$\{conversation\.id\}`\) && \(/)
+  assert.match(source, /\{sidebarTab === 'history' && reportConversationIds\.has\(conversation\.id\) && \(/)
 })
