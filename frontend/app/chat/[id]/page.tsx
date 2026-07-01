@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useConversationsStore, type Conversation } from '../../stores/conversations';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../../lib/pcmRecorder';
@@ -82,6 +82,11 @@ interface MessageItem {
     imagePrompt?: string;
     aspectRatio?: string;
     attachments?: MessageAttachment[];
+}
+
+interface RenderedMessageItem extends MessageItem {
+    textContent: string;
+    html: string;
 }
 
 interface AttachedFile {
@@ -176,6 +181,22 @@ interface WfState {
     selectedMessages: Record<number, string[]>;
 }
 
+interface ChatMessagesProps {
+    messagesContainerRef: RefObject<HTMLDivElement | null>;
+    messagesEndRef: RefObject<HTMLDivElement | null>;
+    renderedMessages: RenderedMessageItem[];
+    wfState: WfState | null;
+    selectedMsgIds: Set<string>;
+    showLoadingBubble: boolean;
+    showStreamingBubble: boolean;
+    streamingText: string;
+    renderedStreamingText: string;
+    imageModeEnabled: boolean;
+    imageStatusText: string;
+    onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+    onTogglePinMessage: (id: string) => void;
+}
+
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
 
 type ConversationMessageResponsePayload = {
@@ -256,6 +277,186 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
 function stripSuggestionBlock(text: string): string {
     return stripRichSuggestionBlock(text);
 }
+
+const MemoizedChatMessages = memo(function ChatMessages({
+    messagesContainerRef,
+    messagesEndRef,
+    renderedMessages,
+    wfState,
+    selectedMsgIds,
+    showLoadingBubble,
+    showStreamingBubble,
+    streamingText,
+    renderedStreamingText,
+    imageModeEnabled,
+    imageStatusText,
+    onMessageContentClick,
+    onTogglePinMessage,
+}: ChatMessagesProps) {
+    return (
+        <div ref={messagesContainerRef} className={styles.messagesContainer}>
+            <div className={styles.messages}>
+                {wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1] && (
+                    <div className={styles.wfContextCard}>
+                        <div className={styles.wfContextLabel}>
+                            上一步（{wfState.steps[wfState.currentStep - 1]?.botName}）的成果：
+                        </div>
+                        <div className={styles.wfContextContent}>
+                            {wfState.stepOutputs[wfState.currentStep - 1].slice(0, 300)}
+                            {wfState.stepOutputs[wfState.currentStep - 1].length > 300 ? '...' : ''}
+                        </div>
+                    </div>
+                )}
+                {renderedMessages.map((message) => (
+                    <div
+                        key={message.id}
+                        className={`${styles.message} ${message.role === 'user' ? styles.userMsg : styles.assistantMsg} ${wfState && selectedMsgIds.has(message.id) ? styles.msgPinned : ''}`}
+                    >
+                        <div className={styles.msgBubble}>
+                            {message.kind === 'image' && message.imageUrls?.length ? (
+                                <div className={styles.imageMessage}>
+                                    {message.content ? (
+                                        <div className={styles.msgContent} onClick={onMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                    ) : null}
+                                    <div className={styles.imageGrid}>
+                                        {message.imageUrls.map((imageUrl, imageIndex) => (
+                                            <a
+                                                key={`${imageUrl}-${imageIndex}`}
+                                                href={imageUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className={styles.imageLink}
+                                            >
+                                                {/* eslint-disable-next-line @next/next/no-img-element -- generated chat images are data URIs or remote assets returned at runtime */}
+                                                <img
+                                                    src={imageUrl}
+                                                    alt={`generated-${imageIndex + 1}`}
+                                                    className={styles.imageThumb}
+                                                    loading="lazy"
+                                                />
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className={styles.attachmentMessage}>
+                                    {message.attachments?.length ? (
+                                        <div className={styles.messageAttachmentGroup}>
+                                            {message.attachments.map((attachment, attachmentIndex) => (
+                                                <div
+                                                    key={`${attachment.fileName}-${attachmentIndex}`}
+                                                    className={`${styles.messageAttachmentCard} ${attachment.kind === 'video' ? styles.messageAttachmentVideo : ''}`}
+                                                >
+                                                    <div className={styles.messageAttachmentHead}>
+                                                        <span className={styles.messageAttachmentBadge}>
+                                                            {attachment.kind === 'video' ? (
+                                                                <><Video size={14} /> 视频</>
+                                                            ) : attachment.kind === 'image' ? (
+                                                                <><ImageIcon size={14} /> 图片</>
+                                                            ) : (
+                                                                <><FileText size={14} /> 文件</>
+                                                            )}
+                                                        </span>
+                                                        {attachment.kind === 'video' && attachment.durationMs ? (
+                                                            <span className={styles.messageAttachmentMeta}>
+                                                                时长 {formatDuration(attachment.durationMs)}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                    <div className={styles.messageAttachmentName}>{attachment.fileName}</div>
+                                                    {attachment.kind === 'video' && attachment.frames?.length ? (
+                                                        <div className={styles.videoFrameGrid}>
+                                                            {attachment.frames.map((frame, frameIndex) => (
+                                                                <div key={`${frame.url}-${frameIndex}`} className={styles.videoFrameItem}>
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element -- persisted video keyframes are served from local static files */}
+                                                                    <img
+                                                                        src={frame.url}
+                                                                        alt={`${attachment.fileName}-frame-${frameIndex + 1}`}
+                                                                        className={styles.videoFrameThumb}
+                                                                        loading="lazy"
+                                                                    />
+                                                                    <span className={styles.videoFrameTime}>{formatDuration(frame.timestampMs)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : attachment.kind === 'image' && attachment.previewUrl ? (
+                                                        /* eslint-disable-next-line @next/next/no-img-element -- image attachment previews may come from object URLs or persisted paths */
+                                                        <img
+                                                            src={attachment.previewUrl}
+                                                            alt={attachment.fileName}
+                                                            className={styles.messageAttachmentPreview}
+                                                            loading="lazy"
+                                                        />
+                                                    ) : null}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                    {message.textContent ? (
+                                        <div className={styles.msgContent} onClick={onMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
+                                    ) : null}
+                                </div>
+                            )}
+                            {wfState && message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image' && (
+                                <button
+                                    className={`${styles.pinBtn} ${selectedMsgIds.has(message.id) ? styles.pinBtnActive : ''}`}
+                                    onClick={() => onTogglePinMessage(message.id)}
+                                >
+                                    <Pin size={14} />
+                                    {selectedMsgIds.has(message.id) ? '已选' : '选择'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                ))}
+                {showLoadingBubble && (
+                    <div className={`${styles.message} ${styles.assistantMsg}`}>
+                        <div className={styles.msgBubble}>
+                            <div className={styles.thinking}>
+                                <span />
+                                <span />
+                                <span />
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {showStreamingBubble && (
+                    <div className={`${styles.message} ${styles.assistantMsg}`}>
+                        <div className={styles.msgBubble}>
+                            {streamingText ? (
+                                renderedStreamingText ? (
+                                    <div className={styles.msgContent} onClick={onMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
+                                ) : (
+                                    <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
+                                        {streamingText}
+                                    </div>
+                                )
+                            ) : imageModeEnabled ? (
+                                <div className={styles.imagePending}>
+                                    <div className={styles.thinking}>
+                                        <span />
+                                        <span />
+                                        <span />
+                                    </div>
+                                    <div className={styles.imagePendingText}>
+                                        {imageStatusText || '正在生成图片，通常需要 10 到 40 秒。'}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className={styles.thinking}>
+                                    <span />
+                                    <span />
+                                    <span />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+                <div ref={messagesEndRef} className={styles.scrollAnchor} />
+            </div>
+        </div>
+    );
+});
 
 function createClientVideoId(): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -1235,7 +1436,7 @@ export default function ChatPage() {
         }
         return base;
     }, [botId, botName]);
-    const renderedMessages = useMemo(
+    const renderedMessages = useMemo<RenderedMessageItem[]>(
         () => messages.map((message) => {
             const rawTextContent = message.attachments?.length
                 ? stripAttachmentDisplayLabels(message.content, message.attachments)
@@ -1357,7 +1558,7 @@ export default function ChatPage() {
         }
     }, [resetCopiedTableButton, serializeTableToPlainText]);
 
-    const handleMessageContentClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const handleMessageContentClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
         const button = target?.closest('[data-copy-table-button="true"]');
         if (!(button instanceof HTMLButtonElement)) {
@@ -2121,12 +2322,15 @@ export default function ChatPage() {
         }
     };
 
-    const assistantMessages = messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image');
+    const assistantMessages = useMemo(
+        () => messages.filter((message) => message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image'),
+        [messages],
+    );
     const showLoadingBubble = isLoadingConversation && !isStreaming && messages.length <= 1;
     const showStreamingBubble = isStreaming;
     const showConversationVideoLibrary = canUseVideoBreakdownAttachments;
 
-    const togglePinMsg = (id: string) => setSelectedMsgIds((current) => {
+    const togglePinMsg = useCallback((id: string) => setSelectedMsgIds((current) => {
         const next = new Set(current);
         if (next.has(id)) {
             next.delete(id);
@@ -2134,7 +2338,7 @@ export default function ChatPage() {
             next.add(id);
         }
         return next;
-    });
+    }), []);
 
     const handleNextStep = () => {
         if (!wfState) return;
@@ -2358,167 +2562,21 @@ export default function ChatPage() {
                 </div>
             )}
 
-            <div ref={messagesContainerRef} className={styles.messagesContainer}>
-                <div className={styles.messages}>
-                    {wfState && wfState.currentStep > 0 && wfState.stepOutputs[wfState.currentStep - 1] && (
-                        <div className={styles.wfContextCard}>
-                            <div className={styles.wfContextLabel}>
-                                上一步（{wfState.steps[wfState.currentStep - 1]?.botName}）的成果：
-                            </div>
-                            <div className={styles.wfContextContent}>
-                                {wfState.stepOutputs[wfState.currentStep - 1].slice(0, 300)}
-                                {wfState.stepOutputs[wfState.currentStep - 1].length > 300 ? '...' : ''}
-                            </div>
-                        </div>
-                    )}
-                    {renderedMessages.map((message) => (
-                        <div
-                            key={message.id}
-                            className={`${styles.message} ${message.role === 'user' ? styles.userMsg : styles.assistantMsg} ${wfState && selectedMsgIds.has(message.id) ? styles.msgPinned : ''}`}
-                        >
-                            <div className={styles.msgBubble}>
-                                {message.kind === 'image' && message.imageUrls?.length ? (
-                                    <div className={styles.imageMessage}>
-                                        {message.content ? (
-                                            <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
-                                        ) : null}
-                                        <div className={styles.imageGrid}>
-                                            {message.imageUrls.map((imageUrl, imageIndex) => (
-                                                <a
-                                                    key={`${imageUrl}-${imageIndex}`}
-                                                    href={imageUrl}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className={styles.imageLink}
-                                                >
-                                                    {/* eslint-disable-next-line @next/next/no-img-element -- generated chat images are data URIs or remote assets returned at runtime */}
-                                                    <img
-                                                        src={imageUrl}
-                                                        alt={`generated-${imageIndex + 1}`}
-                                                        className={styles.imageThumb}
-                                                        loading="lazy"
-                                                    />
-                                                </a>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className={styles.attachmentMessage}>
-                                        {message.attachments?.length ? (
-                                            <div className={styles.messageAttachmentGroup}>
-                                                {message.attachments.map((attachment, attachmentIndex) => (
-                                                    <div
-                                                        key={`${attachment.fileName}-${attachmentIndex}`}
-                                                        className={`${styles.messageAttachmentCard} ${attachment.kind === 'video' ? styles.messageAttachmentVideo : ''}`}
-                                                    >
-                                                        <div className={styles.messageAttachmentHead}>
-                                                            <span className={styles.messageAttachmentBadge}>
-                                                                {attachment.kind === 'video' ? (
-                                                                    <><Video size={14} /> 视频</>
-                                                                ) : attachment.kind === 'image' ? (
-                                                                    <><ImageIcon size={14} /> 图片</>
-                                                                ) : (
-                                                                    <><FileText size={14} /> 文件</>
-                                                                )}
-                                                            </span>
-                                                            {attachment.kind === 'video' && attachment.durationMs ? (
-                                                                <span className={styles.messageAttachmentMeta}>
-                                                                    时长 {formatDuration(attachment.durationMs)}
-                                                                </span>
-                                                            ) : null}
-                                                        </div>
-                                                        <div className={styles.messageAttachmentName}>{attachment.fileName}</div>
-                                                        {attachment.kind === 'video' && attachment.frames?.length ? (
-                                                            <div className={styles.videoFrameGrid}>
-                                                                {attachment.frames.map((frame, frameIndex) => (
-                                                                    <div key={`${frame.url}-${frameIndex}`} className={styles.videoFrameItem}>
-                                                                        {/* eslint-disable-next-line @next/next/no-img-element -- persisted video keyframes are served from local static files */}
-                                                                        <img
-                                                                            src={frame.url}
-                                                                            alt={`${attachment.fileName}-frame-${frameIndex + 1}`}
-                                                                            className={styles.videoFrameThumb}
-                                                                            loading="lazy"
-                                                                        />
-                                                                        <span className={styles.videoFrameTime}>{formatDuration(frame.timestampMs)}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        ) : attachment.kind === 'image' && attachment.previewUrl ? (
-                                                            /* eslint-disable-next-line @next/next/no-img-element -- image attachment previews may come from object URLs or persisted paths */
-                                                            <img
-                                                                src={attachment.previewUrl}
-                                                                alt={attachment.fileName}
-                                                                className={styles.messageAttachmentPreview}
-                                                                loading="lazy"
-                                                            />
-                                                        ) : null}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : null}
-                                        {message.textContent ? (
-                                            <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: message.html }} />
-                                        ) : null}
-                                    </div>
-                                )}
-                                {wfState && message.role === 'assistant' && message.id !== 'welcome' && message.kind !== 'image' && (
-                                    <button
-                                        className={`${styles.pinBtn} ${selectedMsgIds.has(message.id) ? styles.pinBtnActive : ''}`}
-                                        onClick={() => togglePinMsg(message.id)}
-                                    >
-                                        <Pin size={14} />
-                                        {selectedMsgIds.has(message.id) ? '已选' : '选择'}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                    {showLoadingBubble && (
-                        <div className={`${styles.message} ${styles.assistantMsg}`}>
-                            <div className={styles.msgBubble}>
-                                <div className={styles.thinking}>
-                                    <span />
-                                    <span />
-                                    <span />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {showStreamingBubble && (
-                        <div className={`${styles.message} ${styles.assistantMsg}`}>
-                            <div className={styles.msgBubble}>
-                                {streamingText ? (
-                                    renderedStreamingText ? (
-                                        <div className={styles.msgContent} onClick={handleMessageContentClick} dangerouslySetInnerHTML={{ __html: renderedStreamingText }} />
-                                    ) : (
-                                        <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
-                                            {streamingText}
-                                        </div>
-                                    )
-                                ) : imageModeEnabled ? (
-                                    <div className={styles.imagePending}>
-                                        <div className={styles.thinking}>
-                                            <span />
-                                            <span />
-                                            <span />
-                                        </div>
-                                        <div className={styles.imagePendingText}>
-                                            {imageStatusText || '正在生成图片，通常需要 10 到 40 秒。'}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className={styles.thinking}>
-                                        <span />
-                                        <span />
-                                        <span />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} className={styles.scrollAnchor} />
-                </div>
-            </div>
+            <MemoizedChatMessages
+                messagesContainerRef={messagesContainerRef}
+                messagesEndRef={messagesEndRef}
+                renderedMessages={renderedMessages}
+                wfState={wfState}
+                selectedMsgIds={selectedMsgIds}
+                showLoadingBubble={showLoadingBubble}
+                showStreamingBubble={showStreamingBubble}
+                streamingText={streamingText}
+                renderedStreamingText={renderedStreamingText}
+                imageModeEnabled={imageModeEnabled}
+                imageStatusText={imageStatusText}
+                onMessageContentClick={handleMessageContentClick}
+                onTogglePinMessage={togglePinMsg}
+            />
 
             {suggestions.length > 0 && !isStreaming && !imageModeEnabled && (
                 <div className={styles.suggestions}>
