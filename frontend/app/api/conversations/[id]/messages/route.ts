@@ -80,6 +80,9 @@ const GLOBAL_RULES = `
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
 const STREAM_HEARTBEAT_INTERVAL_MS = 15000;
 const VIDEO_BREAKDOWN_HISTORY_TURNS = 10;
+const CHAT_CONTEXT_RECENT_USER_TURNS = 10;
+const CHAT_CONTEXT_HISTORY_PAGE_SIZE = 30;
+const CHAT_CONTEXT_HISTORY_MAX_PAGES = 6;
 const VIDEO_BREAKDOWN_STREAM_STATUS = '正在分析视频内容，请稍候...';
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
@@ -120,6 +123,21 @@ interface InlineVideoUpload {
 
 interface CurrentTurnAttachment extends ChatAttachmentUpload {
     inlineVideoData?: InlineVideoUpload;
+}
+
+interface StoredPromptAttachment {
+    fileName: string;
+    fileSize: number;
+    fileType: string;
+    fileUrl: string;
+    parsedText: string | null;
+}
+
+interface StoredPromptMessage {
+    role: string;
+    content: string;
+    inputType: string;
+    attachments: StoredPromptAttachment[];
 }
 
 function isMissingPresetBotDocumentTable(error: unknown): boolean {
@@ -228,13 +246,7 @@ async function parseMessageRequest(req: NextRequest): Promise<z.infer<typeof mes
 
 function buildStoredMessagePromptText(message: {
     content: string;
-    attachments: Array<{
-        fileName: string;
-        fileSize: number;
-        fileType: string;
-        fileUrl: string;
-        parsedText: string | null;
-    }>;
+    attachments: StoredPromptAttachment[];
 }, options?: {
     excludeVideoAttachments?: boolean;
 }): string {
@@ -249,6 +261,89 @@ function buildStoredMessagePromptText(message: {
     return attachments.length
         ? buildMessagePromptText(baseText, attachments)
         : baseText;
+}
+
+function toStoredPromptMessage(message: {
+    role: string;
+    content: string;
+    inputType: string;
+    attachments: StoredPromptAttachment[];
+}): StoredPromptMessage {
+    return {
+        role: message.role,
+        content: message.content,
+        inputType: message.inputType,
+        attachments: message.attachments,
+    };
+}
+
+async function loadFullStoredPromptMessages(conversationId: string): Promise<StoredPromptMessage[]> {
+    const messages = await prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        select: {
+            role: true,
+            content: true,
+            inputType: true,
+            attachments: {
+                select: {
+                    fileName: true,
+                    fileSize: true,
+                    fileType: true,
+                    fileUrl: true,
+                    parsedText: true,
+                },
+            },
+        },
+    });
+
+    return messages.map(toStoredPromptMessage);
+}
+
+async function loadRecentStoredPromptMessages(
+    conversationId: string,
+    maxRecentUserTurns: number,
+): Promise<StoredPromptMessage[]> {
+    const newestMessages: StoredPromptMessage[] = [];
+    let skip = 0;
+
+    for (let page = 0; page < CHAT_CONTEXT_HISTORY_MAX_PAGES; page += 1) {
+        const pageMessages = await prisma.message.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: CHAT_CONTEXT_HISTORY_PAGE_SIZE,
+            select: {
+                role: true,
+                content: true,
+                inputType: true,
+                attachments: {
+                    select: {
+                        fileName: true,
+                        fileSize: true,
+                        fileType: true,
+                        fileUrl: true,
+                        parsedText: true,
+                    },
+                },
+            },
+        });
+
+        if (pageMessages.length === 0) {
+            break;
+        }
+
+        newestMessages.push(...pageMessages.map(toStoredPromptMessage));
+
+        const userTurns = newestMessages.filter((message) => message.role === 'user').length;
+        if (userTurns >= maxRecentUserTurns || pageMessages.length < CHAT_CONTEXT_HISTORY_PAGE_SIZE) {
+            break;
+        }
+
+        skip += pageMessages.length;
+    }
+
+    return newestMessages.reverse();
 }
 
 function buildGeminiCurrentTurnKnowledgeText(
@@ -506,20 +601,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         },
                     },
                 },
-                messages: {
-                    orderBy: { createdAt: 'asc' },
-                    include: {
-                        attachments: {
-                            select: {
-                                fileName: true,
-                                fileSize: true,
-                                fileType: true,
-                                fileUrl: true,
-                                parsedText: true,
-                            },
-                        },
-                    },
-                },
             },
         });
 
@@ -530,21 +611,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const bot = getConversationBotPayload(conversation);
         const isVideoBreakdownBot = bot.kind === 'builtin'
             && bot.routeId === VIDEO_BREAKDOWN_BOT_ID;
+        const needsFullHistory = inputType === 'image' || isVideoBreakdownBot;
+        const [storedConversationMessages, previousUserMessage] = await Promise.all([
+            needsFullHistory
+                ? loadFullStoredPromptMessages(conversationId)
+                : loadRecentStoredPromptMessages(conversationId, CHAT_CONTEXT_RECENT_USER_TURNS),
+            prisma.message.findFirst({
+                where: {
+                    conversationId,
+                    role: 'user',
+                },
+                select: { id: true },
+            }),
+        ]);
+        const hasPreviousUserMessage = Boolean(previousUserMessage);
         const excludeHistoricalVideoAttachments = isVideoBreakdownBot;
-        const filteredConversationMessages = conversation.messages
+        const filteredConversationMessages = storedConversationMessages
             .filter((message) => !isConversationImageTurn({ content: message.content, inputType: message.inputType }));
         const contextConversationMessages = isVideoBreakdownBot
             ? takeRecentUserTurns(filteredConversationMessages, VIDEO_BREAKDOWN_HISTORY_TURNS)
-            : filteredConversationMessages;
+            : takeRecentUserTurns(filteredConversationMessages, CHAT_CONTEXT_RECENT_USER_TURNS);
         const buildHistoryPromptText = (message: {
             content: string;
-            attachments: Array<{
-                fileName: string;
-                fileSize: number;
-                fileType: string;
-                fileUrl: string;
-                parsedText: string | null;
-            }>;
+            attachments: StoredPromptAttachment[];
         }): string => buildStoredMessagePromptText(message, {
             excludeVideoAttachments: excludeHistoricalVideoAttachments,
         });
@@ -655,7 +744,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 content: buildHistoryPromptText(message),
             }));
 
-        const shouldSetInitialTitle = !conversation.messages.some((message) => message.role === 'user');
+        const shouldSetInitialTitle = !hasPreviousUserMessage;
         const shouldStreamOpenAI = inputType !== 'image' && responseModel === 'gpt-5.4';
         const shouldStreamClaude = inputType !== 'image' && responseModel === 'claude-opus-4.6';
         const shouldStreamVideoBreakdownGpt = shouldStreamOpenAI
@@ -708,11 +797,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                         jobId,
                                         contentLength: content.length,
                                         aspectRatio: aspectRatio || '1:1',
-                                        storedMessageCount: conversation.messages.length,
+                                        storedMessageCount: storedConversationMessages.length,
                                         attachmentCount: attachments.length,
                                     });
 
-                                    const imageContextMessages: ImageGenerationContextMessage[] = conversation.messages.map((message) => {
+                                    const imageContextMessages: ImageGenerationContextMessage[] = storedConversationMessages.map((message) => {
                                         const imagePayload = parseConversationImageMessage(message.content);
                                         return {
                                             role: message.role,
