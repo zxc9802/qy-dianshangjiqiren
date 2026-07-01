@@ -41,6 +41,7 @@ import {
     formatMessage as formatRichMessage,
     stripSuggestionBlock as stripRichSuggestionBlock,
 } from '../../lib/formatMessage';
+import { splitStreamingMarkdownBlocks } from '../../lib/streaming-markdown';
 import styles from './chat.module.css';
 import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
@@ -203,6 +204,17 @@ interface StreamingMessageProps {
     streamingText: string;
     imageModeEnabled: boolean;
     imageStatusText: string;
+    onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+}
+
+interface StreamingMarkdownMessageProps {
+    text: string;
+    onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+}
+
+interface StreamingMarkdownBlockProps {
+    html: string;
+    onMessageContentClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }
 
 const BOT_NAMES = BUILTIN_BOT_NAME_MAP;
@@ -430,11 +442,78 @@ const LoadingMessage = memo(function LoadingMessage({ show }: LoadingMessageProp
     );
 });
 
+const StreamingMarkdownBlock = memo(function StreamingMarkdownBlock({
+    html,
+    onMessageContentClick,
+}: StreamingMarkdownBlockProps) {
+    if (!html) {
+        return null;
+    }
+
+    return (
+        <div
+            className={styles.streamingMarkdownBlock}
+            onClick={onMessageContentClick}
+            dangerouslySetInnerHTML={{ __html: html }}
+        />
+    );
+});
+
+const StreamingMarkdownMessage = memo(function StreamingMarkdownMessage({
+    text,
+    onMessageContentClick,
+}: StreamingMarkdownMessageProps) {
+    const cleanText = stripSuggestionBlock(text);
+    const { stableBlocks, activeBlock } = useMemo(
+        () => splitStreamingMarkdownBlocks(cleanText),
+        [cleanText],
+    );
+    const stableBlocksKey = useMemo(() => JSON.stringify(stableBlocks), [stableBlocks]);
+    const renderedStableBlocks = useMemo(() => {
+        const blocks = JSON.parse(stableBlocksKey) as string[];
+        return blocks.map((block, index) => {
+            const key = `${index}:${block}`;
+            return {
+                key,
+                html: formatMessage(block, false),
+            };
+        });
+    }, [stableBlocksKey]);
+    const activeHtml = useMemo(
+        () => (activeBlock ? formatMessage(activeBlock, false) : ''),
+        [activeBlock],
+    );
+
+    if (!cleanText.trim()) {
+        return null;
+    }
+
+    return (
+        <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
+            {renderedStableBlocks.map((block) => (
+                <StreamingMarkdownBlock
+                    key={block.key}
+                    html={block.html}
+                    onMessageContentClick={onMessageContentClick}
+                />
+            ))}
+            {activeHtml ? (
+                <StreamingMarkdownBlock
+                    key="active"
+                    html={activeHtml}
+                    onMessageContentClick={onMessageContentClick}
+                />
+            ) : null}
+        </div>
+    );
+});
+
 const StreamingMessage = memo(function StreamingMessage({
     show,
     streamingText,
     imageModeEnabled,
     imageStatusText,
+    onMessageContentClick,
 }: StreamingMessageProps) {
     if (!show) {
         return null;
@@ -444,9 +523,10 @@ const StreamingMessage = memo(function StreamingMessage({
         <div className={`${styles.message} ${styles.assistantMsg} ${styles.streamingMessage}`}>
             <div className={styles.msgBubble}>
                 {streamingText ? (
-                    <div className={`${styles.msgContent} ${styles.streamingMsgContent}`}>
-                        {streamingText}
-                    </div>
+                    <StreamingMarkdownMessage
+                        text={streamingText}
+                        onMessageContentClick={onMessageContentClick}
+                    />
                 ) : imageModeEnabled ? (
                     <div className={styles.imagePending}>
                         <div className={styles.thinking}>
@@ -2612,6 +2692,7 @@ export default function ChatPage() {
                         streamingText={streamingText}
                         imageModeEnabled={imageModeEnabled}
                         imageStatusText={imageStatusText}
+                        onMessageContentClick={handleMessageContentClick}
                     />
                     <div ref={messagesEndRef} className={styles.scrollAnchor} />
                 </div>

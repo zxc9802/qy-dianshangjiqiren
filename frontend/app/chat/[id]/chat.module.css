@@ -616,6 +616,18 @@
     font-weight: 600;
 }
 
+.streamingMarkdownBlock + .streamingMarkdownBlock {
+    margin-top: 0.75em;
+}
+
+.streamingMarkdownBlock > :first-child {
+    margin-top: 0;
+}
+
+.streamingMarkdownBlock > :last-child {
+    margin-bottom: 0;
+}
+
 .imageMessage {
     display: grid;
     gap: 14px;

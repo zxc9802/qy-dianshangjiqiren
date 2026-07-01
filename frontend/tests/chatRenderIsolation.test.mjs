@@ -45,7 +45,7 @@ test('streaming message rendering is isolated from historical message rendering'
   assert.match(chatPageBody, /<StreamingMessage[\s\S]*streamingText=\{streamingText\}/)
 })
 
-test('streaming text avoids full markdown html replacement until completion', async () => {
+test('streaming text uses incremental markdown rendering instead of full html replacement', async () => {
   const source = await readFile(chatPagePath, 'utf8')
   const streamingStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage')
   const chatPageStart = source.indexOf('export default function ChatPage()')
@@ -54,10 +54,31 @@ test('streaming text avoids full markdown html replacement until completion', as
   assert.notEqual(chatPageStart, -1)
 
   const streamingBlock = source.slice(streamingStart, chatPageStart)
-  assert.doesNotMatch(streamingBlock, /dangerouslySetInnerHTML/)
+  assert.match(source, /const StreamingMarkdownMessage = memo\(function StreamingMarkdownMessage/)
+  assert.match(source, /const StreamingMarkdownBlock = memo\(function StreamingMarkdownBlock/)
+  assert.match(streamingBlock, /<StreamingMarkdownMessage[\s\S]*text=\{streamingText\}/)
+  assert.doesNotMatch(streamingBlock, /\{streamingText\}\s*<\/div>/)
   assert.doesNotMatch(source, /\brenderedStreamingText\b/)
   assert.doesNotMatch(source, /formatMessage\(deferredStreamingText/)
   assert.doesNotMatch(source, /\buseDeferredValue\(streamingText\)/)
+})
+
+test('streaming markdown renderer caches stable blocks and only formats the active block live', async () => {
+  const source = await readFile(chatPagePath, 'utf8')
+  const rendererStart = source.indexOf('const StreamingMarkdownMessage = memo(function StreamingMarkdownMessage')
+  const streamingMessageStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage', rendererStart)
+
+  assert.notEqual(rendererStart, -1)
+  assert.notEqual(streamingMessageStart, -1)
+
+  const rendererBlock = source.slice(rendererStart, streamingMessageStart)
+  assert.match(rendererBlock, /splitStreamingMarkdownBlocks\(cleanText\)/)
+  assert.match(rendererBlock, /const stableBlocksKey = useMemo/)
+  assert.match(rendererBlock, /JSON\.stringify\(stableBlocks\)/)
+  assert.match(rendererBlock, /JSON\.parse\(stableBlocksKey\) as string\[\]/)
+  assert.match(rendererBlock, /formatMessage\(block, false\)/)
+  assert.match(rendererBlock, /const activeHtml = useMemo/)
+  assert.match(rendererBlock, /formatMessage\(activeBlock, false\)/)
 })
 
 test('streaming completion does not force a duplicate final flush before appending the message', async () => {
