@@ -59,7 +59,8 @@ type DemoBot = {
   description: string;
   icon: ReactNode;
   iconColor: string;
-  path: string;
+  path?: string;
+  externalUrl?: string;
   requiresAuth: boolean;
   videoSite?: VideoSiteKey;
 };
@@ -108,6 +109,16 @@ const FEATURED_BOTS: DemoBot[] = [
     icon: <Video size={22} strokeWidth={1.8} />,
     iconColor: '#e35b52',
     path: `/chat/${VIDEO_BREAKDOWN_BOT_ID}`,
+    requiresAuth: true,
+  },
+  {
+    id: 'xiaohongshu-auto-generation',
+    name: '小红书图文自动生成',
+    category: '小红书',
+    description: '进入小红书图文自动生成工具，完成内容生成与发布素材制作。',
+    icon: <BookOpen size={22} strokeWidth={1.8} />,
+    iconColor: '#e35b52',
+    externalUrl: 'https://xhstw.qycm.top/',
     requiresAuth: true,
   },
   {
@@ -217,7 +228,7 @@ export default function Home2Page() {
   }, [searchQuery]);
 
   const botGroups = useMemo(() => {
-    const categoryOrder = ['管理工具', '电商工具', '绘图机器人', '视频工作台'];
+    const categoryOrder = ['管理工具', '电商工具', '小红书', '绘图机器人', '视频工作台'];
     return categoryOrder
       .map((category) => ({ category, bots: filteredBots.filter((bot) => bot.category === category) }))
       .filter((group) => group.bots.length > 0);
@@ -296,6 +307,15 @@ export default function Home2Page() {
   }, [isAuthenticated, isRecording, router, submitPrompt]);
 
   const openBot = useCallback(async (bot: DemoBot) => {
+    if (bot.externalUrl) {
+      if (!isAuthenticated) {
+        router.push(`/login?redirect=${encodeURIComponent(bot.externalUrl)}`);
+        return;
+      }
+      window.open(bot.externalUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (!bot.path) return;
     if (bot.videoSite) {
       const launchPath = `${bot.path}?autostart=1`;
       if (!isAuthenticated) {
@@ -323,7 +343,7 @@ export default function Home2Page() {
           <div className={styles.brandMark}><Bot size={18} /></div>
           <div>
             <div className={styles.brandName}>电商 AI 智能平台</div>
-            <div className={styles.brandSubline}>精选工作台 · 07</div>
+            <div className={styles.brandSubline}>精选工作台 · 08</div>
           </div>
         </div>
         <div className={styles.headerSearch}>
@@ -414,7 +434,7 @@ export default function Home2Page() {
           </section>
 
           <section className={styles.toolsSection}>
-            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 7 个电商工作入口</p></div>
+            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 8 个电商工作入口</p></div>
             {botGroups.map((group) => <div className={styles.category} key={group.category}><div className={styles.categoryHeading}><h3>{group.category}</h3><span>{String(group.bots.length).padStart(2, '0')}</span></div><div className={styles.botGrid}>{group.bots.map((bot, index) => <button key={bot.id} className={styles.botCard} style={{ '--card-index': index } as CSSProperties} onClick={() => void openBot(bot)}><span className={styles.botIcon} style={{ color: bot.iconColor, backgroundColor: `${bot.iconColor}15` }}>{bot.icon}</span><span className={styles.botInfo}><span className={styles.botTitleRow}><strong>{bot.name}</strong><em>正式版</em></span><small>{bot.description}</small></span><ArrowUpRight className={styles.botArrow} size={17} /></button>)}</div></div>)}
             {filteredBots.length === 0 && <div className={styles.emptyState}><Search size={18} /><p>没有找到匹配的精选入口</p><button onClick={() => setSearchQuery('')}>清除搜索</button></div>}
           </section>
