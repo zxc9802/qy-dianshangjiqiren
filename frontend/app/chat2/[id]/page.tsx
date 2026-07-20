@@ -1126,7 +1126,6 @@ export default function ChatPage() {
     const launcherDraftKeyRef = useRef<string | null>(null);
     const hydratedLaunchDraftIdRef = useRef<string | null>(null);
     const draftConversationScopeRef = useRef<string | null>(null);
-    const conversationVideoPickerRef = useRef<HTMLDivElement>(null);
     const streamingFlushTimerRef = useRef<number | null>(null);
     const streamingScrollFrameRef = useRef<number | null>(null);
     const pendingStreamingTextRef = useRef('');
@@ -1146,7 +1145,6 @@ export default function ChatPage() {
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
     const [conversationVideos, setConversationVideos] = useState<ConversationVideoCatalogItem[]>([]);
     const [selectedConversationVideoIds, setSelectedConversationVideoIds] = useState<string[]>([]);
-    const [conversationVideoPickerOpen, setConversationVideoPickerOpen] = useState(false);
     const [videoResolutionNotice, setVideoResolutionNotice] = useState<VideoResolutionNotice | null>(null);
     const [isAttachmentDragActive, setIsAttachmentDragActive] = useState(false);
 
@@ -1255,7 +1253,6 @@ export default function ChatPage() {
     useEffect(() => {
         setSelectedMsgIds(new Set());
         setSelectedConversationVideoIds([]);
-        setConversationVideoPickerOpen(false);
         setVideoResolutionNotice(null);
     }, [botId, conversationId]);
 
@@ -1554,36 +1551,9 @@ export default function ChatPage() {
     useEffect(() => {
         if (!canUseVideoBreakdownAttachments) {
             setSelectedConversationVideoIds([]);
-            setConversationVideoPickerOpen(false);
             setVideoResolutionNotice(null);
         }
     }, [canUseVideoBreakdownAttachments]);
-
-    useEffect(() => {
-        if (!canUseVideoBreakdownAttachments) {
-            setConversationVideoPickerOpen(false);
-        }
-    }, [canUseVideoBreakdownAttachments]);
-
-    useEffect(() => {
-        if (!conversationVideoPickerOpen || typeof window === 'undefined') {
-            return;
-        }
-
-        const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-            const target = event.target as Node | null;
-            if (!conversationVideoPickerRef.current?.contains(target)) {
-                setConversationVideoPickerOpen(false);
-            }
-        };
-
-        window.addEventListener('mousedown', handlePointerDown);
-        window.addEventListener('touchstart', handlePointerDown);
-        return () => {
-            window.removeEventListener('mousedown', handlePointerDown);
-            window.removeEventListener('touchstart', handlePointerDown);
-        };
-    }, [conversationVideoPickerOpen]);
 
     const botConversations = useMemo(
         () => conversations.filter((conversation) => conversation.botId === botId).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -2048,7 +2018,6 @@ export default function ChatPage() {
         setInputText('');
         setSuggestions([]);
         setSelectedConversationVideoIds([]);
-        setConversationVideoPickerOpen(false);
         setIsStreaming(true);
         setStreamingText('');
         setImageStatusText(isImageRequest ? '正在提交图片生成请求...' : '');
@@ -2367,7 +2336,6 @@ export default function ChatPage() {
         setSuggestions([]);
         setConversationVideos([]);
         setSelectedConversationVideoIds([]);
-        setConversationVideoPickerOpen(false);
         setVideoResolutionNotice(null);
         setStreamingText('');
         setIsStreaming(false);
@@ -2554,7 +2522,7 @@ export default function ChatPage() {
             router.push('/');
             return;
         }
-        router.push(`/chat/${wfState.steps[nextStep].botId}?wf=1`);
+        router.push(`/chat2/${wfState.steps[nextStep].botId}?wf=1`);
     };
 
     const handleBackStep = () => {
@@ -2573,42 +2541,32 @@ export default function ChatPage() {
         <div className={styles.layout}>
             <aside className={`${styles.chatSidebar} ${sidebarOpen ? styles.chatSidebarOpen : ''}`}>
                 <div className={styles.chatSidebarHeader}>
-                    <div style={{ display: 'flex', width: '100%' }}>
+                    <div className={styles.sidebarTabs}>
                         <button
+                            type="button"
                             onClick={() => setSidebarTab('history')}
-                            style={{
-                                flex: 1,
-                                padding: '8px 0',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                background: sidebarTab === 'history' ? 'var(--bg-surface, #fff)' : 'transparent',
-                                color: sidebarTab === 'history' ? 'var(--text-primary, #0f172a)' : 'var(--text-tertiary, #94a3b8)',
-                                borderBottom: sidebarTab === 'history' ? '2px solid #2563eb' : '2px solid transparent',
-                            }}
+                            className={`${styles.sidebarTab} ${sidebarTab === 'history' ? styles.sidebarTabActive : ''}`}
                         >
-                            <MessageSquare size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                            <MessageSquare size={14} />
                             聊天记录
                         </button>
                         <button
+                            type="button"
                             onClick={() => setSidebarTab('favorites')}
-                            style={{
-                                flex: 1,
-                                padding: '8px 0',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                background: sidebarTab === 'favorites' ? 'var(--bg-surface, #fff)' : 'transparent',
-                                color: sidebarTab === 'favorites' ? '#eab308' : 'var(--text-tertiary, #94a3b8)',
-                                borderBottom: sidebarTab === 'favorites' ? '2px solid #eab308' : '2px solid transparent',
-                            }}
+                            className={`${styles.sidebarTab} ${sidebarTab === 'favorites' ? styles.sidebarTabActive : ''}`}
                         >
-                            <Star size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                            <Star size={14} />
                             收藏
                         </button>
                     </div>
+                    <button
+                        type="button"
+                        className={styles.drawerCloseButton}
+                        onClick={() => setSidebarOpen(false)}
+                        aria-label="关闭历史记录"
+                    >
+                        <X size={18} />
+                    </button>
                 </div>
                 <div className={styles.chatSidebarList}>
                     {(sidebarTab === 'history' ? botConversations : botFavorites).length === 0 ? (
@@ -2905,137 +2863,21 @@ export default function ChatPage() {
                         )}
                     </div>
                 )}
-                <div className={styles.inputMeta}>
-                    <div className={styles.metaControls}>
-                        <button
-                            type="button"
-                            className={`${styles.modeToggle} ${imageModeEnabled ? styles.modeToggleActive : ''}`}
-                            onClick={toggleImageMode}
-                            disabled={isStreaming || isUploading || isTranscribing}
-                        >
-                            <ImageIcon size={16} />
-                            {imageModeEnabled ? '绘图已开' : '绘图已关'}
-                        </button>
-                        <div className={styles.modelSwitcher}>
-                            <select
-                                aria-label="回答模型"
-                                className={styles.modelSelect}
-                                value={responseModel}
-                                onChange={(event) => {
-                                    if (isSelectableResponseModel(event.target.value)) {
-                                        setResponseModel(event.target.value);
-                                    }
-                                }}
-                                disabled={isStreaming || isUploading || isTranscribing}
-                            >
-                                {RESPONSE_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <ChevronDown size={16} className={styles.modelSelectChevron} />
-                        </div>
-                        <div className={styles.modelSwitcher}>
-                            <select
-                                aria-label="联网搜索模式"
-                                className={styles.modelSelect}
-                                value={webSearchMode}
-                                onChange={(event) => {
-                                    if (isWebSearchMode(event.target.value)) {
-                                        setWebSearchMode(event.target.value);
-                                    }
-                                }}
-                                disabled={isStreaming || isUploading || isTranscribing}
-                            >
-                                {WEB_SEARCH_MODE_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <ChevronDown size={16} className={styles.modelSelectChevron} />
-                        </div>
-                        {showConversationVideoLibrary && (
-                            <div ref={conversationVideoPickerRef} className={styles.conversationVideoPicker}>
-                                <button
-                                    type="button"
-                                    className={`${styles.modeToggle} ${conversationVideoPickerOpen ? styles.modeToggleActive : ''}`}
-                                    onClick={() => setConversationVideoPickerOpen((current) => !current)}
-                                    aria-expanded={conversationVideoPickerOpen}
-                                    aria-haspopup="dialog"
-                                >
-                                    <Video size={16} />
-                                    会话视频
-                                    {selectedConversationVideoIds.length > 0 && (
-                                        <span className={styles.conversationVideoToggleCount}>
-                                            {selectedConversationVideoIds.length}
-                                        </span>
-                                    )}
-                                    <ChevronDown size={14} className={styles.conversationVideoToggleChevron} />
-                                </button>
-                                {conversationVideoPickerOpen && (
-                                    <div className={styles.conversationVideoPopover}>
-                                        <div className={styles.conversationVideoShelf}>
-                                            <div className={styles.conversationVideoShelfHeader}>
-                                                <div>
-                                                    <strong>本会话视频</strong>
-                                                    <span>点击选择历史视频参与本轮分析</span>
-                                                </div>
-                                                <span className={styles.conversationVideoShelfMeta}>
-                                                    {selectedConversationVideoIds.length > 0
-                                                        ? `已选 ${selectedConversationVideoIds.length}/${MAX_AUTO_REFERENCED_HISTORY_VIDEOS}`
-                                                        : '最多可选 2 个历史视频'}
-                                                </span>
-                                            </div>
-                                            {conversationVideos.length > 0 ? (
-                                                <div className={styles.conversationVideoGrid}>
-                                                    {conversationVideos.map((video) => {
-                                                        const selected = selectedConversationVideoIds.includes(video.clientVideoId);
-                                                        const summaryText = (video.transcript || video.extractedText || '').trim();
-                                                        const reusable = canReuseConversationVideo(video);
-                                                        return (
-                                                            <button
-                                                                key={video.clientVideoId}
-                                                                type="button"
-                                                                className={`${styles.conversationVideoCard} ${selected ? styles.conversationVideoCardSelected : ''} ${!reusable ? styles.conversationVideoCardUnavailable : ''}`}
-                                                                onClick={() => toggleConversationVideoSelection(video)}
-                                                                aria-pressed={selected}
-                                                                title={getConversationVideoStateLabel(video)}
-                                                            >
-                                                                <div className={styles.conversationVideoCardTop}>
-                                                                    <span className={styles.conversationVideoBadge}>{video.videoLabel}</span>
-                                                                    <span className={styles.conversationVideoState}>
-                                                                        {video.isAvailableLocally ? '本机可用' : '需重传'}
-                                                                    </span>
-                                                                </div>
-                                                                <div className={styles.conversationVideoName}>{video.fileName}</div>
-                                                                <div className={styles.conversationVideoSummary}>
-                                                                    {summaryText || '可作为历史视频参与本轮分析。'}
-                                                                </div>
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <div className={styles.conversationVideoEmpty}>
-                                                    <strong>当前会话还没有可复用视频</strong>
-                                                    <span>先上传一个视频并完成一次分析，之后这里会一直保留会话视频选择入口。</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    <span className={styles.inputHint}>
-                        {isStreaming && imageModeEnabled
-                            ? (imageStatusText || '正在生成图片，通常需要 10 到 40 秒。')
-                            : imageModeEnabled
-                            ? '当前输入会直接调用绘图能力，回答模型切换不会影响绘图结果。'
-                            : `当前回答模型：${getResponseModelLabel(responseModel)}；${getWebSearchModeLabel(webSearchMode)}。`}
+                <div className={styles.capabilitySummary}>
+                    <span className={styles.capabilityStatus}>
+                        {imageModeEnabled
+                            ? '绘图模式'
+                            : `${getResponseModelLabel(responseModel)} · ${getWebSearchModeLabel(webSearchMode)}`}
                     </span>
+                    <button
+                        type="button"
+                        className={styles.capabilityOpenButton}
+                        onClick={() => setCapabilityPanelOpen(true)}
+                        aria-expanded={capabilityPanelOpen}
+                    >
+                        <SlidersHorizontal size={15} />
+                        能力设置
+                    </button>
                 </div>
                 <div className={styles.inputWrapper}>
                     <input
@@ -3093,6 +2935,145 @@ export default function ChatPage() {
                     </button>
                 </div>
             </div>
+            {capabilityPanelOpen && (
+                <>
+                    <button
+                        type="button"
+                        className={styles.drawerBackdrop}
+                        onClick={() => setCapabilityPanelOpen(false)}
+                        aria-label="关闭能力设置"
+                    />
+                    <aside className={styles.capabilityDrawer} aria-label="能力设置" aria-modal="true" role="dialog">
+                        <div className={styles.capabilityDrawerHeader}>
+                            <div>
+                                <span className={styles.capabilityDrawerEyebrow}>当前智能体</span>
+                                <h2>能力设置</h2>
+                            </div>
+                            <button
+                                type="button"
+                                className={styles.drawerCloseButton}
+                                onClick={() => setCapabilityPanelOpen(false)}
+                                aria-label="关闭能力设置"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className={styles.capabilityDrawerBody}>
+                            <section className={styles.capabilityGroup}>
+                                <div className={styles.capabilityGroupHeading}>
+                                    <h3>输出方式</h3>
+                                    <span>控制当前对话的生成类型和模型</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    className={`${styles.capabilityModeButton} ${imageModeEnabled ? styles.capabilityModeButtonActive : ''}`}
+                                    onClick={toggleImageMode}
+                                    disabled={isStreaming || isUploading || isTranscribing}
+                                    aria-pressed={imageModeEnabled}
+                                >
+                                    <ImageIcon size={18} />
+                                    <span>
+                                        <strong>绘图模式</strong>
+                                        <small>{imageModeEnabled ? '已开启，输入内容将用于生成图片' : '关闭时由智能体生成文字回答'}</small>
+                                    </span>
+                                </button>
+                                <label className={styles.capabilityField}>
+                                    <span>回答模型</span>
+                                    <div className={styles.capabilitySelectWrap}>
+                                        <select
+                                            aria-label="回答模型"
+                                            value={responseModel}
+                                            onChange={(event) => {
+                                                if (isSelectableResponseModel(event.target.value)) {
+                                                    setResponseModel(event.target.value);
+                                                }
+                                            }}
+                                            disabled={isStreaming || isUploading || isTranscribing || imageModeEnabled}
+                                        >
+                                            {RESPONSE_MODEL_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown size={16} />
+                                    </div>
+                                </label>
+                            </section>
+                            <section className={styles.capabilityGroup}>
+                                <div className={styles.capabilityGroupHeading}>
+                                    <h3>联网能力</h3>
+                                    <span>决定回答是否调用外部搜索</span>
+                                </div>
+                                <label className={styles.capabilityField}>
+                                    <span>联网搜索</span>
+                                    <div className={styles.capabilitySelectWrap}>
+                                        <select
+                                            aria-label="联网搜索模式"
+                                            value={webSearchMode}
+                                            onChange={(event) => {
+                                                if (isWebSearchMode(event.target.value)) {
+                                                    setWebSearchMode(event.target.value);
+                                                }
+                                            }}
+                                            disabled={isStreaming || isUploading || isTranscribing || imageModeEnabled}
+                                        >
+                                            {WEB_SEARCH_MODE_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <ChevronDown size={16} />
+                                    </div>
+                                </label>
+                            </section>
+                            {showConversationVideoLibrary && (
+                                <section className={styles.capabilityGroup}>
+                                    <div className={styles.capabilityGroupHeading}>
+                                        <h3>会话视频</h3>
+                                        <span>
+                                            {selectedConversationVideoIds.length > 0
+                                                ? `已选 ${selectedConversationVideoIds.length}/${MAX_AUTO_REFERENCED_HISTORY_VIDEOS}`
+                                                : '最多选择 2 个历史视频参与本轮分析'}
+                                        </span>
+                                    </div>
+                                    {conversationVideos.length > 0 ? (
+                                        <div className={styles.capabilityVideoGrid}>
+                                            {conversationVideos.map((video) => {
+                                                const selected = selectedConversationVideoIds.includes(video.clientVideoId);
+                                                const summaryText = (video.transcript || video.extractedText || '').trim();
+                                                const reusable = canReuseConversationVideo(video);
+                                                return (
+                                                    <button
+                                                        key={video.clientVideoId}
+                                                        type="button"
+                                                        className={`${styles.capabilityVideoCard} ${selected ? styles.capabilityVideoCardSelected : ''} ${!reusable ? styles.capabilityVideoCardUnavailable : ''}`}
+                                                        onClick={() => toggleConversationVideoSelection(video)}
+                                                        aria-pressed={selected}
+                                                        title={getConversationVideoStateLabel(video)}
+                                                    >
+                                                        <span className={styles.capabilityVideoIcon}><Video size={16} /></span>
+                                                        <span className={styles.capabilityVideoCopy}>
+                                                            <strong>{video.videoLabel} · {video.fileName}</strong>
+                                                            <small>{summaryText || (video.isAvailableLocally ? '可参与本轮分析' : '需要重新上传后使用')}</small>
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className={styles.capabilityVideoEmpty}>
+                                            <Video size={18} />
+                                            <span>先上传并分析一个视频，这里会保留后续可复用的视频。</span>
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+                        </div>
+                    </aside>
+                </>
+            )}
             {isAdmin && (
                 <AdminBotPanel
                     botId={botId}
