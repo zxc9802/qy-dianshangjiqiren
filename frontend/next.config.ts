@@ -7,6 +7,18 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/*': ['system_prompts.md', 'system_prompts_part2.md'],
   },
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: '/',
+          destination: '/home2',
+        },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
 };
 
 export default nextConfig;
