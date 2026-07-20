@@ -969,3 +969,76 @@ Use Playwright or browser responsive tools at 1440×1000 and 390×844. Confirm d
 - [ ] **Step 4: Record the handoff state**
 
 Report the local preview URLs, checks passed, any feature that requires a physical microphone or real video file for final confirmation, and confirm that no GitHub push or production route replacement occurred.
+
+### Task 9: Center the wide-screen workbench and expose capabilities
+
+**Files:**
+- Modify: `frontend/tests/chat2Preview.test.mjs`
+- Modify: `frontend/app/chat2/[id]/page.tsx`
+- Modify: `frontend/app/chat2/[id]/chat2.module.css`
+
+- [ ] **Step 1: Update the preview contract before implementation**
+
+Replace the capability-drawer assertions with assertions that require an always-visible capability toolbar and a shared centered width token:
+
+```js
+assert.match(preview, /className=\{styles\.capabilityToolbar\}/)
+assert.doesNotMatch(preview, /capabilityPanelOpen/)
+assert.match(css, /--preview-workbench-width:\s*1120px/)
+assert.match(css, /margin-inline:\s*auto/)
+assert.match(css, /\.capabilityToolbar/)
+```
+
+- [ ] **Step 2: Run the contract and confirm it fails**
+
+```bash
+cd frontend && node --test tests/chat2Preview.test.mjs
+```
+
+Expected: the focus-workbench or CSS test fails because the page still uses `capabilityPanelOpen` and `capabilityDrawer`.
+
+- [ ] **Step 3: Replace the drawer trigger with the real inline controls**
+
+In `frontend/app/chat2/[id]/page.tsx`, remove the capability drawer state, Escape handler, trigger summary, backdrop, and dialog. Render one `capabilityToolbar` above the input using the existing `toggleImageMode`, `responseModel`, `setResponseModel`, `webSearchMode`, `setWebSearchMode`, and video-selection handlers. Do not change API payloads or persistence keys.
+
+- [ ] **Step 4: Apply one centered width contract**
+
+In `frontend/app/chat2/[id]/chat2.module.css`, add `--preview-workbench-width: 1120px` and apply `width: min(100%, var(--preview-workbench-width)); margin-inline: auto` to `.messages`, `.suggestions`, `.attachmentList`, `.videoResolutionNotice`, `.pointsCost`, `.capabilityToolbar`, and `.inputWrapper`. Keep the assistant document card full width inside the centered workbench.
+
+- [ ] **Step 5: Preserve mobile behavior**
+
+At `max-width: 768px`, make `.capabilityToolbar` horizontally scrollable with hidden scrollbar styling, keep controls on one row, and retain `overflow-x: hidden` on the page layout.
+
+- [ ] **Step 6: Run focused validation and commit**
+
+```bash
+cd frontend
+node --test tests/chat2Preview.test.mjs
+npx eslint 'app/chat2/[id]/page.tsx'
+npx tsc --noEmit
+npm run build
+```
+
+Expected: all commands pass and the build route list still includes both `/chat/[id]` and `/chat2/[id]`.
+
+```bash
+git add docs/superpowers/specs/2026-07-20-internal-agent-chat-preview-design.md docs/superpowers/plans/2026-07-20-internal-agent-chat-preview.md frontend/tests/chat2Preview.test.mjs 'frontend/app/chat2/[id]/page.tsx' 'frontend/app/chat2/[id]/chat2.module.css'
+git commit -m "fix: center and expose internal chat capabilities"
+```
+
+### Task 10: Verify the revised desktop composition
+
+**Files:**
+- Verify only.
+
+- [ ] **Step 1: Verify 1536px desktop geometry**
+
+Open `http://127.0.0.1:3018/chat2/35` at `1536×900` and confirm the message and input rectangles have equal left and right margins within a two-pixel tolerance.
+
+- [ ] **Step 2: Verify real controls**
+
+Confirm the page exposes one answer-model select, one web-search select, and the image-mode button without opening a drawer. On `/chat2/37`, confirm the conversation-video control remains available.
+
+- [ ] **Step 3: Verify 390px mobile geometry**
+
+At `390×844`, confirm the capability toolbar scrolls independently and `document.documentElement.scrollWidth` does not exceed `window.innerWidth`.
