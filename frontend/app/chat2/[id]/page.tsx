@@ -52,6 +52,7 @@ import {
     MessageSquare, BarChart3, Trash2, Sparkles, FileText,
     ClipboardList, Paperclip, Mic, Loader2, Send, ArrowLeft,
     Plus, ChevronDown, Star, Pin, CheckSquare, Square, ArrowRight, Undo2, ImageIcon, Video, Settings,
+    SlidersHorizontal, X, Leaf,
 } from 'lucide-react';
 
 const URL_MATCH_REGEX = /https?:\/\/[^\s<>"'`]+/gi;
@@ -70,6 +71,32 @@ const KNOWN_VIDEO_HOST_PATTERNS = [
     /(^|\.)kuaishou\.com$/i,
     /(^|\.)weishi\.qq\.com$/i,
 ];
+
+const CHAT2_STARTER_PROMPTS: Record<string, string[]> = {
+    '35': [
+        '帮我拆解当前最重要的问题',
+        '帮我把目标整理成可执行的 OKR',
+        '帮我优化一个团队 SOP',
+    ],
+    '37': [
+        '分析这个视频的结构、镜头与节奏',
+        '把视频拆成可复用的分镜脚本',
+        '总结这个视频最值得复用的创作方法',
+    ],
+    '36': [
+        '帮我梳理今天最重要的一件事',
+        '分析一份材料并给出行动建议',
+        '把一个模糊想法整理成清晰方案',
+    ],
+};
+
+function getStarterPrompts(botId: string, botName: string): string[] {
+    return CHAT2_STARTER_PROMPTS[botId] || [
+        `请介绍${botName}最适合处理的任务`,
+        '帮我分析当前问题并给出下一步',
+        '根据我提供的材料整理一份执行方案',
+    ];
+}
 
 interface MessageAttachment extends Omit<AttachmentInfo, 'id' | 'fileType' | 'fileUrl' | 'kind'> {
     id?: string;
@@ -1110,6 +1137,7 @@ export default function ChatPage() {
     const [wfState, setWfState] = useState<WfState | null>(null);
     const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [capabilityPanelOpen, setCapabilityPanelOpen] = useState(false);
     const [botSwitcherOpen, setBotSwitcherOpen] = useState(false);
     const [sidebarTab, setSidebarTab] = useState<'history' | 'favorites'>('history');
 
@@ -1131,6 +1159,23 @@ export default function ChatPage() {
     const isAdmin = user?.role === 'admin';
     const adminBotKind: 'builtin' | 'custom' = botId.startsWith('custom-') ? 'custom' : 'builtin';
     const canUseVideoBreakdownAttachments = isVideoBreakdownBot && !imageModeEnabled;
+    const starterPrompts = useMemo(() => getStarterPrompts(botId, botName), [botId, botName]);
+    const showStarterPrompts = !conversationId
+        && messages.length === 1
+        && messages[0]?.id === 'welcome'
+        && !isStreaming
+        && !isLoadingConversation;
+
+    useEffect(() => {
+        if (!capabilityPanelOpen) return;
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setCapabilityPanelOpen(false);
+        };
+
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [capabilityPanelOpen]);
 
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
         const container = messagesContainerRef.current;
@@ -2724,6 +2769,22 @@ export default function ChatPage() {
                         onMessageContentClick={handleMessageContentClick}
                         onTogglePinMessage={togglePinMsg}
                     />
+                    {showStarterPrompts && (
+                        <section className={styles.starterPanel} aria-label="推荐开场问题">
+                            <div className={styles.starterEyebrow}>
+                                <Leaf size={14} />
+                                从一个清晰动作开始
+                            </div>
+                            <div className={styles.starterGrid}>
+                                {starterPrompts.map((prompt) => (
+                                    <button key={prompt} type="button" onClick={() => void sendMessage(prompt)}>
+                                        <span>{prompt}</span>
+                                        <ArrowRight size={15} />
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+                    )}
                     <LoadingMessage show={showLoadingBubble} />
                     <StreamingMessage
                         show={showStreamingBubble}
