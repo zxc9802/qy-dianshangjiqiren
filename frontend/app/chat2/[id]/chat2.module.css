@@ -15,6 +15,7 @@
     --preview-muted: #6d887c;
     --preview-line: rgba(56, 112, 88, 0.16);
     --preview-shadow: 0 18px 50px rgba(38, 88, 66, 0.08);
+    --preview-workbench-width: 1120px;
     overflow-x: hidden;
     background:
         radial-gradient(circle at 12% 8%, rgba(161, 220, 185, 0.24), transparent 28rem),
@@ -136,7 +137,9 @@
 }
 
 .messages {
-    max-width: 960px;
+    width: min(100%, var(--preview-workbench-width));
+    max-width: none;
+    margin-inline: auto;
     gap: 18px;
 }
 
@@ -258,7 +261,9 @@
 }
 
 .suggestions {
-    max-width: 960px;
+    width: min(100%, var(--preview-workbench-width));
+    max-width: none;
+    margin-inline: auto;
 }
 
 .suggestionBtn {
@@ -282,39 +287,169 @@
     backdrop-filter: blur(20px);
 }
 
-.capabilitySummary {
+.capabilityToolbar {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    width: 100%;
-    max-width: 960px;
-    margin: 0 auto 8px;
+    gap: 8px;
+    width: min(100%, var(--preview-workbench-width));
+    max-width: none;
+    margin: 0 auto 9px;
+    overflow: visible;
 }
 
-.capabilityStatus {
-    color: var(--preview-muted);
-    font-size: 11px;
-    line-height: 1.4;
+.capabilityToolbarLabel {
+    flex: 0 0 auto;
+    padding-right: 2px;
+    color: var(--preview-mint-strong);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
 }
 
-.capabilityOpenButton {
+.capabilityPill,
+.capabilitySelectPill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 9px;
-    border-radius: 9px;
-    color: var(--preview-mint-strong);
+    min-height: 34px;
+    flex: 0 0 auto;
+    padding: 0 10px;
+    border: 1px solid var(--preview-line);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--color-card) 88%, #edf8f1);
+    color: var(--preview-muted);
     font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.capabilityPill:hover:not(:disabled),
+.capabilitySelectPill:hover {
+    border-color: rgba(47, 143, 104, 0.34);
+    background: var(--preview-mint-soft);
+    color: var(--preview-mint-strong);
+}
+
+.capabilityPillActive {
+    border-color: rgba(47, 143, 104, 0.4);
+    background: var(--preview-mint-soft);
+    color: var(--preview-mint-strong);
+}
+
+.capabilityPill:disabled,
+.capabilitySelectPill:has(select:disabled) {
+    opacity: 0.52;
+    cursor: not-allowed;
+}
+
+.capabilitySelectPill > span {
+    color: var(--preview-muted);
+    font-size: 11px;
     font-weight: 700;
 }
 
-.capabilityOpenButton:hover {
+.capabilitySelectPill select {
+    max-width: 132px;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--preview-ink);
+    font-size: 12px;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+}
+
+.capabilitySelectPill select:disabled {
+    cursor: not-allowed;
+}
+
+.capabilitySelectPill svg {
+    color: var(--preview-muted);
+    pointer-events: none;
+}
+
+.capabilityCount {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: rgba(47, 143, 104, 0.12);
+    color: var(--preview-mint-strong);
+    font-size: 10px;
+}
+
+.videoCapabilityMenu {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.videoCapabilityMenu summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.videoCapabilityMenu summary::-webkit-details-marker {
+    display: none;
+}
+
+.videoCapabilityMenu[open] > summary {
+    border-color: rgba(47, 143, 104, 0.42);
     background: var(--preview-mint-soft);
+    color: var(--preview-mint-strong);
+}
+
+.videoCapabilityPopover {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 10px);
+    z-index: 90;
+    display: grid;
+    gap: 12px;
+    width: min(480px, calc(100vw - 32px));
+    max-height: min(58vh, 520px);
+    padding: 14px;
+    overflow-y: auto;
+    border: 1px solid var(--preview-line);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--preview-mint-faint) 94%, white);
+    box-shadow: 0 20px 54px rgba(24, 70, 50, 0.18);
+}
+
+:global(.dark) .videoCapabilityPopover {
+    background: #16261f;
+}
+
+.videoCapabilityHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.videoCapabilityHeader > div {
+    display: grid;
+    gap: 3px;
+}
+
+.videoCapabilityHeader strong {
+    color: var(--preview-ink);
+    font-size: 13px;
+}
+
+.videoCapabilityHeader span {
+    color: var(--preview-muted);
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .inputWrapper {
-    max-width: 960px;
+    width: min(100%, var(--preview-workbench-width));
+    max-width: none;
+    margin-inline: auto;
     min-height: 58px;
     padding: 8px 8px 8px 14px;
     border-color: rgba(53, 112, 86, 0.2);
@@ -361,7 +496,9 @@
 .attachmentList,
 .videoResolutionNotice,
 .pointsCost {
-    max-width: 960px;
+    width: min(100%, var(--preview-workbench-width));
+    max-width: none;
+    margin-inline: auto;
 }
 
 .chatSidebar {
@@ -463,173 +600,8 @@
     color: var(--preview-muted);
 }
 
-.drawerBackdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 330;
-    border: 0;
-    border-radius: 0;
-    background: rgba(16, 45, 32, 0.18);
-    backdrop-filter: blur(2px);
-    cursor: default;
-}
-
-.capabilityDrawer {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    bottom: 16px;
-    z-index: 340;
-    display: flex;
-    flex-direction: column;
-    width: min(420px, calc(100vw - 32px));
-    border: 1px solid var(--preview-line);
-    border-radius: 24px;
-    background: color-mix(in srgb, var(--preview-mint-faint) 94%, white);
-    box-shadow: 0 24px 80px rgba(22, 69, 48, 0.2);
-    overflow: hidden;
-    animation: capabilityDrawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-:global(.dark) .capabilityDrawer,
 :global(.dark) .chatSidebar {
     background: #16261f;
-}
-
-.capabilityDrawerHeader {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 22px 22px 18px;
-    border-bottom: 1px solid var(--preview-line);
-}
-
-.capabilityDrawerEyebrow {
-    display: block;
-    margin-bottom: 5px;
-    color: var(--preview-mint);
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-}
-
-.capabilityDrawerHeader h2 {
-    margin: 0;
-    color: var(--preview-ink);
-    font-size: 22px;
-    letter-spacing: -0.03em;
-}
-
-.capabilityDrawerBody {
-    display: grid;
-    gap: 14px;
-    padding: 16px;
-    overflow-y: auto;
-}
-
-.capabilityGroup {
-    display: grid;
-    gap: 13px;
-    padding: 16px;
-    border: 1px solid var(--preview-line);
-    border-radius: 17px;
-    background: color-mix(in srgb, var(--color-card) 90%, #eef8f2);
-}
-
-.capabilityGroupHeading {
-    display: grid;
-    gap: 4px;
-}
-
-.capabilityGroupHeading h3 {
-    margin: 0;
-    color: var(--preview-ink);
-    font-size: 14px;
-}
-
-.capabilityGroupHeading span {
-    color: var(--preview-muted);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.capabilityModeButton {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 13px;
-    border: 1px solid var(--preview-line);
-    border-radius: 13px;
-    background: transparent;
-    color: var(--preview-muted);
-    text-align: left;
-}
-
-.capabilityModeButton > span:not(:first-child) {
-    display: grid;
-    gap: 3px;
-}
-
-.capabilityModeButton strong {
-    color: var(--preview-ink);
-    font-size: 13px;
-}
-
-.capabilityModeButton small {
-    color: var(--preview-muted);
-    font-size: 11px;
-    line-height: 1.5;
-}
-
-.capabilityModeButtonActive {
-    border-color: rgba(47, 143, 104, 0.4);
-    background: var(--preview-mint-soft);
-    color: var(--preview-mint-strong);
-}
-
-.capabilityField {
-    display: grid;
-    gap: 7px;
-    color: var(--preview-muted);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.capabilitySelectWrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-}
-
-.capabilitySelectWrap select {
-    width: 100%;
-    min-height: 42px;
-    padding: 0 38px 0 12px;
-    appearance: none;
-    border: 1px solid var(--preview-line);
-    border-radius: 11px;
-    background: color-mix(in srgb, var(--color-card) 95%, white);
-    color: var(--preview-ink);
-    font-size: 13px;
-    font-weight: 600;
-}
-
-.capabilitySelectWrap select:focus {
-    border-color: rgba(47, 143, 104, 0.52);
-    box-shadow: 0 0 0 3px rgba(47, 143, 104, 0.1);
-}
-
-.capabilitySelectWrap select:disabled {
-    opacity: 0.55;
-}
-
-.capabilitySelectWrap svg {
-    position: absolute;
-    right: 12px;
-    color: var(--preview-muted);
-    pointer-events: none;
 }
 
 .capabilityVideoGrid {
@@ -707,25 +679,14 @@
     line-height: 1.55;
 }
 
-@keyframes capabilityDrawerIn {
-    from {
-        transform: translateX(24px);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
 .backBtn:focus-visible,
 .newChatBtn:focus-visible,
 .historyBtn:focus-visible,
 .botName:focus-visible,
 .sidebarTab:focus-visible,
 .drawerCloseButton:focus-visible,
-.capabilityOpenButton:focus-visible,
-.capabilityModeButton:focus-visible,
+.capabilityPill:focus-visible,
+.capabilitySelectPill:focus-within,
 .capabilityVideoCard:focus-visible,
 .starterGrid button:focus-visible,
 .toolBtn:focus-visible,
@@ -812,15 +773,37 @@
         padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
     }
 
-    .capabilitySummary {
-        margin-bottom: 6px;
+    .capabilityToolbar {
+        gap: 6px;
+        margin-bottom: 7px;
+        padding-bottom: 2px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        overscroll-behavior-x: contain;
     }
 
-    .capabilityStatus {
-        max-width: 190px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .capabilityToolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .capabilityToolbarLabel {
+        padding-left: 2px;
+    }
+
+    .capabilityPill,
+    .capabilitySelectPill {
+        min-height: 32px;
+        padding-inline: 9px;
+    }
+
+    .videoCapabilityPopover {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: calc(82px + env(safe-area-inset-bottom));
+        width: auto;
+        max-height: 52vh;
     }
 
     .inputWrapper {
@@ -839,8 +822,7 @@
         height: 38px;
     }
 
-    .chatSidebar,
-    .capabilityDrawer {
+    .chatSidebar {
         top: 8px;
         right: 8px;
         bottom: 8px;
@@ -849,19 +831,11 @@
         border-radius: 20px;
     }
 
-    .capabilityDrawerHeader {
-        padding: 18px 18px 15px;
-    }
-
-    .capabilityDrawerBody {
-        padding: 12px;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .chatSidebar,
     .chatSidebarOpen,
-    .capabilityDrawer,
     .message,
     .starterGrid button,
     .sendBtn {

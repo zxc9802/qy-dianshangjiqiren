@@ -28,14 +28,14 @@ test('chat2 is an isolated real-function chat route', async () => {
 test('chat2 exposes the approved focus-workbench controls', async () => {
   const preview = await readFile(previewPagePath, 'utf8')
 
-  assert.match(preview, /capabilityPanelOpen/)
-  assert.match(preview, /能力设置/)
-  assert.match(preview, /aria-label="关闭能力设置"/)
+  assert.match(preview, /className=\{styles\.capabilityToolbar\}/)
+  assert.doesNotMatch(preview, /capabilityPanelOpen/)
+  assert.match(preview, /回答模型/)
+  assert.match(preview, /联网搜索模式/)
+  assert.match(preview, /绘图模式/)
   assert.match(preview, /aria-label="关闭历史记录"/)
   assert.match(preview, /starterPrompts/)
   assert.match(preview, /sendMessage\(prompt\)/)
-  assert.match(preview, /getResponseModelLabel\(responseModel\)/)
-  assert.match(preview, /getWebSearchModeLabel\(webSearchMode\)/)
 })
 
 test('chat2 provides useful starters for the featured internal agents', async () => {
@@ -47,12 +47,14 @@ test('chat2 provides useful starters for the featured internal agents', async ()
   assert.match(preview, /分析这个视频的结构、镜头与节奏/)
 })
 
-test('chat2 CSS provides document responses and responsive drawers', async () => {
+test('chat2 CSS provides centered document responses and responsive controls', async () => {
   const css = await readFile(previewCssPath, 'utf8')
 
   assert.match(css, /--preview-mint:/)
+  assert.match(css, /--preview-workbench-width:\s*1120px/)
   assert.match(css, /\.assistantMsg \.msgBubble[\s\S]*max-width:\s*100%/)
-  assert.match(css, /\.capabilityDrawer/)
+  assert.match(css, /\.capabilityToolbar/)
+  assert.match(css, /margin-inline:\s*auto/)
   assert.match(css, /\.chatSidebarOpen/)
   assert.match(css, /@media \(max-width:\s*768px\)/)
   assert.match(css, /prefers-reduced-motion/)
