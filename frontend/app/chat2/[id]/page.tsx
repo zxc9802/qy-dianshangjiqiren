@@ -2850,7 +2850,6 @@ export default function ChatPage() {
                     </div>
                 )}
                 <div className={styles.capabilityToolbar}>
-                    <span className={styles.capabilityToolbarLabel}>能力</span>
                     <button
                         type="button"
                         className={`${styles.capabilityPill} ${imageModeEnabled ? styles.capabilityPillActive : ''}`}

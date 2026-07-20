@@ -297,15 +297,6 @@
     overflow: visible;
 }
 
-.capabilityToolbarLabel {
-    flex: 0 0 auto;
-    padding-right: 2px;
-    color: var(--preview-mint-strong);
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-}
-
 .capabilityPill,
 .capabilitySelectPill {
     display: inline-flex;
@@ -785,10 +776,6 @@
 
     .capabilityToolbar::-webkit-scrollbar {
         display: none;
-    }
-
-    .capabilityToolbarLabel {
-        padding-left: 2px;
     }
 
     .capabilityPill,

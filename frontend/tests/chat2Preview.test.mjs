@@ -29,6 +29,7 @@ test('chat2 exposes the approved focus-workbench controls', async () => {
   const preview = await readFile(previewPagePath, 'utf8')
 
   assert.match(preview, /className=\{styles\.capabilityToolbar\}/)
+  assert.doesNotMatch(preview, /capabilityToolbarLabel/)
   assert.doesNotMatch(preview, /capabilityPanelOpen/)
   assert.match(preview, /回答模型/)
   assert.match(preview, /联网搜索模式/)
