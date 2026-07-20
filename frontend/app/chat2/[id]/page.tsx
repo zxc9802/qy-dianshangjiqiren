@@ -308,7 +308,7 @@ function buildRoute(botId: string, params: { cid?: string | null; wf?: string | 
     if (params.wf) query.set('wf', params.wf);
     if (params.name) query.set('name', params.name);
     const search = query.toString();
-    return `/chat2/${botId}${search ? `?${search}` : ''}`;
+    return `/chat/${botId}${search ? `?${search}` : ''}`;
 }
 
 function toMessages(conversation: Conversation, fallback: string): MessageItem[] {
@@ -2508,7 +2508,7 @@ export default function ChatPage() {
             router.push('/');
             return;
         }
-        router.push(`/chat2/${wfState.steps[nextStep].botId}?wf=1`);
+        router.push(`/chat/${wfState.steps[nextStep].botId}?wf=1`);
     };
 
     const handleBackStep = () => {
@@ -2516,7 +2516,7 @@ export default function ChatPage() {
         const prevStep = wfState.currentStep - 1;
         sessionStorage.setItem('wf_state', JSON.stringify({ ...wfState, currentStep: prevStep }));
         setSelectedMsgIds(new Set());
-        router.push(`/chat2/${wfState.steps[prevStep].botId}?wf=1`);
+        router.push(`/chat/${wfState.steps[prevStep].botId}?wf=1`);
     };
 
     const openConversation = (conversation: Conversation) => {

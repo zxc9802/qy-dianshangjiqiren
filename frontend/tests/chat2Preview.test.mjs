@@ -9,7 +9,7 @@ const previewPagePath = path.join(__dirname, '..', 'app', 'chat2', '[id]', 'page
 const previewCssPath = path.join(__dirname, '..', 'app', 'chat2', '[id]', 'chat2.module.css')
 const productionPagePath = path.join(__dirname, '..', 'app', 'chat', '[id]', 'page.tsx')
 
-test('chat2 is an isolated real-function chat route', async () => {
+test('production chat route uses the approved real-function workbench', async () => {
   const [preview, production] = await Promise.all([
     readFile(previewPagePath, 'utf8'),
     readFile(productionPagePath, 'utf8'),
@@ -19,10 +19,11 @@ test('chat2 is an isolated real-function chat route', async () => {
   assert.match(preview, /useAuthStore/)
   assert.match(preview, /startPcm16kMonoRecorder/)
   assert.match(preview, /normalizeChatStreamEvent/)
-  assert.match(preview, /return `\/chat2\/\$\{botId\}/)
+  assert.match(preview, /return `\/chat\/\$\{botId\}/)
   assert.match(preview, /from '\.\/chat2\.module\.css'/)
   assert.doesNotMatch(preview, /mockMessages|setTimeout\([^)]*fake/i)
-  assert.match(production, /return `\/chat\/\$\{botId\}/)
+  assert.doesNotMatch(preview, /\/chat2\//)
+  assert.match(production, /export \{ default \} from '\.\.\/\.\.\/chat2\/\[id\]\/page'/)
 })
 
 test('chat2 exposes the approved focus-workbench controls', async () => {
