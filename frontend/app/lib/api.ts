@@ -406,7 +406,6 @@ export interface MessageInfo {
     role: 'user' | 'assistant';
     content: string;
     inputType: string;
-    suggestions: string | null;
     createdAt: string;
     kind?: 'text' | 'image';
     imageUrls?: string[];

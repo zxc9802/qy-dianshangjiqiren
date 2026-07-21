@@ -25,10 +25,6 @@ import {
     RESPONSE_MODEL_VALUES,
     WEB_SEARCH_MODE_VALUES,
 } from '../../../../lib/chat-models';
-import {
-    extractSuggestions as extractSharedSuggestions,
-    stripSuggestionBlock as stripSharedSuggestionBlock,
-} from '../../../../lib/formatMessage';
 import { streamGeminiDeepThinkingChat } from '../../../../lib/gemini-deep-chat';
 import { getSystemPromptBySortOrder, isPlaceholderPrompt } from '../../../../lib/systemPrompts';
 import { buildConversationTitle, getConversationBotPayload } from '../../../../lib/server-conversations';
@@ -54,11 +50,7 @@ const GLOBAL_RULES = `
 # Global interaction rules
 
 1. The user can end discovery early. If they ask for the answer directly, provide it based on current context and mark assumptions when needed.
-2. End every reply with a JSON suggestions block:
-\`\`\`json
-{"suggestions":["Option A","Option B","Option C","Give me the answer directly"]}
-\`\`\`
-3. Keep the answer structured, concise, and practical.
+2. Keep the answer structured, concise, and practical.
 `;
 
 const XHS_GLOBAL_RULES = `${GLOBAL_RULES}\n4. XiaoHongShu related bots may use a small amount of emoji when appropriate.`;
@@ -129,18 +121,6 @@ async function loadPresetBotDocuments(botId: string): Promise<Array<{ fileName: 
 
         throw error;
     }
-}
-
-function stripSuggestionBlock(text: string): string {
-    return stripSharedSuggestionBlock(text);
-}
-
-function extractSuggestions(text: string): { suggestions: string[]; cleanResponse: string } {
-    const cleanResponse = stripSuggestionBlock(text).trim();
-    return {
-        suggestions: extractSharedSuggestions(text),
-        cleanResponse,
-    };
 }
 
 function normalizeIncomingAttachments(input: z.infer<typeof attachmentSchema>[]): ChatAttachmentUpload[] {
@@ -693,7 +673,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     }
 
                     const flushVisibleText = () => {
-                        const visibleResponse = stripSuggestionBlock(fullResponse);
+                        const visibleResponse = fullResponse;
                         if (visibleResponse.length <= streamedVisibleLength) {
                             return;
                         }
@@ -802,15 +782,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         });
                     }
 
-                    const { suggestions, cleanResponse } = extractSuggestions(fullResponse);
+                    const finalResponse = fullResponse.trim();
 
                     await prisma.$transaction(async (tx) => {
                         await tx.message.create({
                             data: {
                                 conversationId,
                                 role: 'assistant',
-                                content: cleanResponse,
-                                suggestions: suggestions.length ? JSON.stringify(suggestions) : null,
+                                content: finalResponse,
                             },
                         });
 
@@ -830,12 +809,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         botRouteId: bot.routeId,
                         conversationId,
                         userMessage: currentPromptText,
-                        assistantMessage: cleanResponse,
+                        assistantMessage: finalResponse,
                     });
 
-                    if (suggestions.length) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'suggestions', content: suggestions })}\n\n`));
-                    }
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({

@@ -153,15 +153,8 @@ router.post('/:id/messages', async (req: AuthRequest, res: Response) => {
             }
         }
 
-        let suggestions: string | null = null;
-        const match = fullResponse.match(/```json\s*(\{"suggestions":\s*\[.*?\]\})\s*```/s);
-        if (match) {
-            suggestions = match[1];
-            fullResponse = fullResponse.replace(match[0], '').trim();
-        }
-
         await prisma.message.create({
-            data: { conversationId, role: 'assistant', content: fullResponse, suggestions },
+            data: { conversationId, role: 'assistant', content: fullResponse.trim() },
         });
 
         await prisma.conversation.update({
@@ -169,7 +162,6 @@ router.post('/:id/messages', async (req: AuthRequest, res: Response) => {
             data: { updatedAt: new Date() },
         });
 
-        res.write(`data: ${JSON.stringify({ type: 'suggestions', content: suggestions })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
         res.end();
     } catch (error) {

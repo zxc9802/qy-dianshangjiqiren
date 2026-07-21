@@ -322,7 +322,7 @@ model Message {
   role           String // "user" | "assistant"
   content        String   @db.Text
   inputType      String   @default("text") @map("input_type") // "text" | "voice" | "file"
-  suggestions    String?  @db.Text // JSON string of suggestion buttons
+  suggestions    String?  @db.Text // Legacy field retained for existing database compatibility
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

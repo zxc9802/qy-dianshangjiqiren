@@ -145,43 +145,8 @@ function formatCodeBlock(code: string): string {
     return `<pre><code>${escaped}</code></pre>`;
 }
 
-const COMPLETE_SUGGESTION_BLOCK_PATTERNS = [
-    /(?:\n|^)\s*```json\s*(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})\s*```\s*$/i,
-    /(?:\n|^)\s*(\{\s*"suggestions"\s*:\s*\[[\s\S]*?\]\s*\})\s*$/i,
-];
-
-const PARTIAL_SUGGESTION_BLOCK_PATTERNS = [
-    /(?:\n|^)\s*```json\s*\{\s*"suggestions"\s*:\s*\[[\s\S]*$/i,
-    /(?:\n|^)\s*\{\s*"suggestions"\s*:\s*\[[\s\S]*$/i,
-];
-
-function findSuggestionBlock(text: string): RegExpMatchArray | null {
-    for (const pattern of COMPLETE_SUGGESTION_BLOCK_PATTERNS) {
-        const match = text.match(pattern);
-        if (match) {
-            return match;
-        }
-    }
-
-    return null;
-}
-
-export function stripSuggestionBlock(text: string): string {
-    let nextText = text.trimEnd();
-
-    for (const pattern of PARTIAL_SUGGESTION_BLOCK_PATTERNS) {
-        nextText = nextText.replace(pattern, '').trimEnd();
-    }
-
-    for (const pattern of COMPLETE_SUGGESTION_BLOCK_PATTERNS) {
-        nextText = nextText.replace(pattern, '').trimEnd();
-    }
-
-    return nextText;
-}
-
 export function extractMarkdownTables(text: string): string[] {
-    const cleaned = stripSuggestionBlock(text.replace(/\r/g, ''));
+    const cleaned = text.replace(/\r/g, '');
     const lines = cleaned.split('\n');
     const tables: string[] = [];
     let currentTable: string[] = [];
@@ -226,7 +191,7 @@ export function extractMarkdownTables(text: string): string[] {
 }
 
 export function formatMessage(text: string, options: FormatMessageOptions = {}): string {
-    const cleaned = stripSuggestionBlock(text.replace(/\r/g, ''));
+    const cleaned = text.replace(/\r/g, '');
     const lines = cleaned.split('\n');
     const parts: string[] = [];
     let inTable = false;
@@ -372,23 +337,4 @@ export function formatMessage(text: string, options: FormatMessageOptions = {}):
     return parts.join('')
         .replace(/^(<br>\s*)+/, '')
         .replace(/(<br>\s*)+$/, '');
-}
-
-export function extractSuggestions(text: string): string[] {
-    const match = findSuggestionBlock(text.trimEnd());
-
-    if (!match) {
-        return [];
-    }
-
-    try {
-        const parsed = JSON.parse(match[1]);
-        if (Array.isArray(parsed.suggestions)) {
-            return parsed.suggestions;
-        }
-    } catch {
-        return [];
-    }
-
-    return [];
 }
