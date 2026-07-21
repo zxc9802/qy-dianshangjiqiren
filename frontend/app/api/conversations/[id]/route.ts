@@ -77,7 +77,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
                     role: message.role,
                     content: normalized.decoded.content,
                     inputType: message.inputType,
-                    suggestions: message.suggestions,
                     createdAt: message.createdAt.toISOString(),
                     kind: normalized.decoded.kind,
                     imageUrls: normalized.decoded.imageUrls,

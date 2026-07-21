@@ -15,13 +15,6 @@ export interface WfState {
     stepOutputs: string[];
 }
 
-function stripTrailingSuggestionJson(text: string): string {
-    return text
-        .replace(/```json[\s\S]*?```/g, '')
-        .replace(/\n?\{\s*"suggestions"\s*:\s*\[[\s\S]*$/g, '')
-        .trim();
-}
-
 export default function WorkflowReportPage({ params }: { params: Promise<{ templateId: string }> }) {
     const { templateId } = use(params);
     const router = useRouter();
@@ -74,7 +67,7 @@ export default function WorkflowReportPage({ params }: { params: Promise<{ templ
             const contentType = res.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
                 const payload = await res.json() as { data?: { content?: string } };
-                setReportText(typeof payload.data?.content === 'string' ? stripTrailingSuggestionJson(payload.data.content) : '');
+                setReportText(typeof payload.data?.content === 'string' ? payload.data.content.trim() : '');
                 setDone(true);
                 setIsGenerating(false);
                 return;
@@ -97,7 +90,7 @@ export default function WorkflowReportPage({ params }: { params: Promise<{ templ
                         const event = JSON.parse(line.slice(6)) as { type?: string; content?: string };
                         if (event.type === 'text' && event.content) {
                             full += event.content;
-                            setReportText(stripTrailingSuggestionJson(full));
+                            setReportText(full.trim());
                         }
                     } catch {
                         // ignore malformed event frames

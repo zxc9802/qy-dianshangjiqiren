@@ -19,12 +19,6 @@ export type ChatStreamProjection =
         seq?: number;
     }
     | {
-        channel: 'suggestions';
-        suggestions: string[];
-        runId?: string;
-        seq?: number;
-    }
-    | {
         channel: 'status';
         status: string;
         runId?: string;
@@ -130,17 +124,6 @@ function normalizeSources(input: unknown): ChatStreamSource[] {
         .filter((item): item is ChatStreamSource => item !== null);
 }
 
-function normalizeSuggestions(input: unknown): string[] {
-    if (!Array.isArray(input)) {
-        return [];
-    }
-
-    return input
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-
 function normalizeLangGraphMessageEvent(input: Record<string, unknown>): ChatStreamProjection | null {
     if (input.method !== 'messages') {
         return null;
@@ -217,10 +200,6 @@ export function normalizeChatStreamEvent(input: unknown): ChatStreamProjection |
 
     if (type === 'sources') {
         return withStreamMeta({ channel: 'sources', sources: normalizeSources(content) }, event) as ChatStreamProjection;
-    }
-
-    if (type === 'suggestions') {
-        return withStreamMeta({ channel: 'suggestions', suggestions: normalizeSuggestions(content) }, event) as ChatStreamProjection;
     }
 
     if (type === 'status') {

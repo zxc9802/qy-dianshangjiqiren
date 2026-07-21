@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const chatPagePath = path.join(__dirname, '..', 'app', 'chat', '[id]', 'page.tsx')
+const chatPagePath = path.join(__dirname, '..', 'app', 'chat2', '[id]', 'page.tsx')
 
 test('chat message rendering is memoized away from input text updates', async () => {
   const source = await readFile(chatPagePath, 'utf8')
@@ -82,7 +82,7 @@ test('streaming markdown renderer caches stable blocks and only formats the acti
   assert.match(rendererBlock, /formatMessage\(activeBlock, false\)/)
 })
 
-test('streaming markdown does not rescan the full text to strip suggestions on every flush', async () => {
+test('streaming markdown uses the current text without rescanning prior blocks', async () => {
   const source = await readFile(chatPagePath, 'utf8')
   const rendererStart = source.indexOf('const StreamingMarkdownMessage = memo(function StreamingMarkdownMessage')
   const streamingMessageStart = source.indexOf('const StreamingMessage = memo(function StreamingMessage', rendererStart)
@@ -92,12 +92,11 @@ test('streaming markdown does not rescan the full text to strip suggestions on e
 
   const rendererBlock = source.slice(rendererStart, streamingMessageStart)
   assert.match(rendererBlock, /const cleanText = text/)
-  assert.doesNotMatch(rendererBlock, /stripSuggestionBlock\(text\)/)
 })
 
 test('streaming completion does not force a duplicate final flush before appending the message', async () => {
   const source = await readFile(chatPagePath, 'utf8')
-  const finalTextStart = source.indexOf('const finalText = stripSuggestionBlock(fullText).trim()')
+  const finalTextStart = source.indexOf('const finalText = fullText.trim()')
   const completionStart = source.indexOf('if (imageJobId)', finalTextStart)
 
   assert.notEqual(finalTextStart, -1)
@@ -136,7 +135,7 @@ test('sidebar report markers are derived outside the conversation row render', a
 test('chat stream reader dispatches typed projections instead of branching on raw events', async () => {
   const source = await readFile(chatPagePath, 'utf8')
   const readerStart = source.indexOf('const reader = response.body?.getReader()')
-  const finalTextStart = source.indexOf('const finalText = stripSuggestionBlock(fullText).trim()', readerStart)
+  const finalTextStart = source.indexOf('const finalText = fullText.trim()', readerStart)
 
   assert.notEqual(readerStart, -1)
   assert.notEqual(finalTextStart, -1)

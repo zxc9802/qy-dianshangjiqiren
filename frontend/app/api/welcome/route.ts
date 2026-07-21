@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractSuggestions, stripSuggestionBlock } from '../../lib/formatMessage';
 import { readServerEnv } from '../../lib/server-env';
 
 const DEFAULT_API_URL = 'https://yunwu.ai/v1beta/models/gemini-3-flash-preview:generateContent';
@@ -61,10 +60,7 @@ export async function POST(req: NextRequest) {
             ?.map((p: { text?: string }) => p.text || '')
             ?.join('') || '你好，请告诉我你的需求。';
 
-        const content = stripSuggestionBlock(text).trim();
-        const suggestions = extractSuggestions(text);
-
-        return NextResponse.json({ content, suggestions });
+        return NextResponse.json({ content: text.trim() });
     } catch (err) {
         const msg = err instanceof Error ? err.message : '未知错误';
         return NextResponse.json({ error: msg }, { status: 500 });

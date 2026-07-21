@@ -35,10 +35,7 @@ import {
     putLocalConversationVideo,
 } from '../../lib/local-conversation-videos';
 import { consumeLaunchChatDraft } from '../../lib/launch-chat-drafts';
-import {
-    formatMessage as formatRichMessage,
-    stripSuggestionBlock as stripRichSuggestionBlock,
-} from '../../lib/formatMessage';
+import { formatMessage as formatRichMessage } from '../../lib/formatMessage';
 import { splitStreamingMarkdownBlocks } from '../../lib/streaming-markdown';
 import {
     normalizeChatStreamEvent,
@@ -260,7 +257,6 @@ type ConversationMessageResponsePayload = {
     data?: {
         kind?: 'text' | 'image';
         content?: string;
-        suggestions?: string[];
     };
     error?: string;
     message?: string;
@@ -329,10 +325,6 @@ function toMessages(conversation: Conversation, fallback: string): MessageItem[]
     }
 
     return [{ id: 'welcome', role: 'assistant', content: fallback, timestamp: Date.now() }, ...history];
-}
-
-function stripSuggestionBlock(text: string): string {
-    return stripRichSuggestionBlock(text);
 }
 
 function getCachedStreamingMarkdownHtml(block: string): string {
@@ -1116,7 +1108,6 @@ export default function ChatPage() {
     const [isHydratingLaunchDraft, setIsHydratingLaunchDraft] = useState(Boolean(launchDraftId));
     const [streamingText, setStreamingText] = useState('');
     const [imageStatusText, setImageStatusText] = useState('');
-    const [suggestions, setSuggestions] = useState<string[]>([]);
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
     const messagesContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1341,7 +1332,6 @@ export default function ChatPage() {
             skipHydrationConversationIdRef.current = null;
             setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
             setStreamingText('');
-            setSuggestions([]);
             setIsStreaming(false);
             return;
         }
@@ -1589,7 +1579,7 @@ export default function ChatPage() {
                 const rendered = {
                     ...message,
                     textContent,
-                    html: formatMessage(stripSuggestionBlock(textContent), message.role === 'assistant'),
+                    html: formatMessage(textContent, message.role === 'assistant'),
                 };
 
                 nextCache.set(message.id, { message, rendered });
@@ -2002,7 +1992,6 @@ export default function ChatPage() {
             },
         ]);
         setInputText('');
-        setSuggestions([]);
         setSelectedConversationVideoIds([]);
         setIsStreaming(true);
         setStreamingText('');
@@ -2076,16 +2065,9 @@ export default function ChatPage() {
 
             if (responseContentType.includes('application/json')) {
                 const payload = await response.json() as ConversationMessageResponsePayload;
-                const payloadSuggestions = Array.isArray(payload.data?.suggestions)
-                    ? payload.data.suggestions.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-                    : [];
                 const finalText = typeof payload.data?.content === 'string'
-                    ? stripSuggestionBlock(payload.data.content).trim()
+                    ? payload.data.content.trim()
                     : '';
-
-                if (payloadSuggestions.length > 0) {
-                    setSuggestions(payloadSuggestions);
-                }
 
                 if (finalText) {
                     const assistantTimestamp = Date.now();
@@ -2160,11 +2142,6 @@ export default function ChatPage() {
                     return;
                 }
 
-                if (projection.channel === 'suggestions') {
-                    setSuggestions(projection.suggestions);
-                    return;
-                }
-
                 if (projection.channel === 'status') {
                     setImageStatusText(projection.status);
                     return;
@@ -2217,7 +2194,7 @@ export default function ChatPage() {
                 }
             }
 
-            const finalText = stripSuggestionBlock(fullText).trim();
+            const finalText = fullText.trim();
             if (finalText) {
                 pendingStreamingTextRef.current = finalText;
                 const assistantTimestamp = Date.now();
@@ -2319,7 +2296,6 @@ export default function ChatPage() {
         clearAttachments();
         setMessages([{ id: 'welcome', role: 'assistant', content: fallbackWelcome, timestamp: Date.now() }]);
         setInputText('');
-        setSuggestions([]);
         setConversationVideos([]);
         setSelectedConversationVideoIds([]);
         setVideoResolutionNotice(null);
@@ -2740,20 +2716,6 @@ export default function ChatPage() {
                     <div ref={messagesEndRef} className={styles.scrollAnchor} />
                 </div>
             </div>
-
-            {suggestions.length > 0 && !isStreaming && !imageModeEnabled && (
-                <div className={styles.suggestions}>
-                    {suggestions.map((suggestion, index) => (
-                        <button
-                            key={`${suggestion}-${index}`}
-                            className={styles.suggestionBtn}
-                            onClick={() => void sendMessage(suggestion)}
-                        >
-                            {suggestion}
-                        </button>
-                    ))}
-                </div>
-            )}
 
             {wfState && (
                 <div className={styles.wfActionBar}>

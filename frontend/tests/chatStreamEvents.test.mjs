@@ -46,11 +46,6 @@ test('chat stream events normalize legacy SSE payloads into typed channels', asy
     sources: [{ title: 'A', url: 'https://example.com/a' }],
   })
 
-  assert.deepEqual(normalizeChatStreamEvent({ type: 'suggestions', content: ['继续', '', '总结'] }), {
-    channel: 'suggestions',
-    suggestions: ['继续', '总结'],
-  })
-
   assert.deepEqual(normalizeChatStreamEvent({
     type: 'image_job',
     content: { jobId: 'job-1', status: 'queued', message: '正在生成图片' },

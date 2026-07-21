@@ -260,25 +260,6 @@
     background: rgba(255, 255, 255, 0.035);
 }
 
-.suggestions {
-    width: min(100%, var(--preview-workbench-width));
-    max-width: none;
-    margin-inline: auto;
-}
-
-.suggestionBtn {
-    border-color: var(--preview-line);
-    background: rgba(255, 255, 255, 0.62);
-    color: var(--preview-muted);
-}
-
-.suggestionBtn:hover {
-    transform: none;
-    border-color: rgba(47, 143, 104, 0.32);
-    background: var(--preview-mint-soft);
-    color: var(--preview-mint-strong);
-}
-
 .inputBar {
     z-index: 40;
     padding: 12px 24px calc(18px + env(safe-area-inset-bottom));
@@ -748,16 +729,6 @@
     .starterGrid button {
         min-height: 56px;
         padding: 12px 14px;
-    }
-
-    .suggestions {
-        flex-wrap: nowrap;
-        padding: 0 12px 8px;
-        overflow-x: auto;
-    }
-
-    .suggestionBtn {
-        flex: 0 0 auto;
     }
 
     .inputBar {
@@ -1640,36 +1611,6 @@
     }
 }
 
-/* Suggestions */
-.suggestions {
-    padding: 0 var(--space-lg) var(--space-sm);
-    display: flex;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
-    max-width: 792px;
-    margin: 0 auto;
-    width: 100%;
-}
-
-.suggestionBtn {
-    padding: 8px 16px;
-    background: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
-    font-size: 13px;
-    color: var(--color-muted-foreground);
-    transition: all var(--duration-fast) var(--ease-smooth);
-    cursor: pointer;
-}
-
-.suggestionBtn:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-    background: var(--color-primary-light);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-sm);
-}
-
 /* Input Bar — floating capsule */
 .inputBar {
     padding: var(--space-md) var(--space-lg) var(--space-lg);
@@ -2213,10 +2154,6 @@
     .msgBubble {
         max-width: 85%;
         padding: 12px 14px;
-    }
-
-    .suggestions {
-        padding: 0 var(--space-md) var(--space-xs);
     }
 
     .inputBar {

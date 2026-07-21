@@ -78,13 +78,6 @@ const BOT_PROMPTS: Record<string, string> = {
     '33': '你是 AI 提示词调试专家。',
 };
 
-function stripTrailingSuggestionJson(text: string): string {
-    return text
-        .replace(/```json[\s\S]*?```/g, '')
-        .replace(/\n?\{\s*"suggestions"\s*:\s*\[[\s\S]*$/g, '')
-        .trim();
-}
-
 export default function WorkflowPage() {
     const router = useRouter();
     const [selectedWf, setSelectedWf] = useState<WorkflowTemplate | null>(null);
@@ -133,7 +126,7 @@ export default function WorkflowPage() {
                 if (contentType.includes('application/json')) {
                     const payload = await res.json() as { data?: { content?: string } };
                     const fullText = typeof payload.data?.content === 'string' ? payload.data.content : '';
-                    const cleaned = stripTrailingSuggestionJson(fullText);
+                    const cleaned = fullText.trim();
                     stepResults[i].content = cleaned;
                     stepResults[i].status = 'done';
                     prevOutput = cleaned;
@@ -159,7 +152,7 @@ export default function WorkflowPage() {
                             const event = JSON.parse(line.slice(6)) as { type?: string; content?: string };
                             if (event.type === 'text' && event.content) {
                                 fullText += event.content;
-                                stepResults[i].content = stripTrailingSuggestionJson(fullText);
+                                stepResults[i].content = fullText.trim();
                                 setResults([...stepResults]);
                             }
                         } catch {
@@ -168,7 +161,7 @@ export default function WorkflowPage() {
                     }
                 }
 
-                const cleaned = stripTrailingSuggestionJson(fullText);
+                const cleaned = fullText.trim();
                 stepResults[i].content = cleaned;
                 stepResults[i].status = 'done';
                 prevOutput = cleaned;
