@@ -1106,6 +1106,7 @@ export default function ChatPage() {
     const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
     const [isStreaming, setIsStreaming] = useState(false);
     const [isHydratingLaunchDraft, setIsHydratingLaunchDraft] = useState(Boolean(launchDraftId));
+    const [hydratedLaunchDraftPrompt, setHydratedLaunchDraftPrompt] = useState('');
     const [streamingText, setStreamingText] = useState('');
     const [imageStatusText, setImageStatusText] = useState('');
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
@@ -1282,6 +1283,7 @@ export default function ChatPage() {
     useEffect(() => {
         if (!launchDraftId) {
             hydratedLaunchDraftIdRef.current = null;
+            setHydratedLaunchDraftPrompt('');
             setIsHydratingLaunchDraft(false);
             return;
         }
@@ -1292,10 +1294,17 @@ export default function ChatPage() {
 
         let cancelled = false;
         setIsHydratingLaunchDraft(true);
+        setHydratedLaunchDraftPrompt('');
 
         void consumeLaunchChatDraft(launchDraftId)
             .then((draft) => {
-                if (cancelled || !draft?.files?.length) {
+                if (cancelled || !draft) {
+                    return;
+                }
+
+                setHydratedLaunchDraftPrompt(draft.prompt.trim());
+
+                if (!draft.files.length) {
                     return;
                 }
 
@@ -2270,11 +2279,12 @@ export default function ChatPage() {
         if (requestedResponseModel && responseModel !== requestedResponseModel) return;
         if (requestedWebSearchMode && webSearchMode !== requestedWebSearchMode) return;
 
-        const draftKey = `${botId}:${responseModel}:${webSearchMode}:${launchDraftId}:${launcherDraft}`;
+        const effectiveLauncherDraft = launcherDraft || hydratedLaunchDraftPrompt;
+        const draftKey = `${botId}:${responseModel}:${webSearchMode}:${launchDraftId}:${effectiveLauncherDraft}`;
         if (launcherDraftKeyRef.current === draftKey) return;
 
         launcherDraftKeyRef.current = draftKey;
-        void sendMessage(launcherDraft);
+        void sendMessage(effectiveLauncherDraft);
     }, [
         launchDraftId,
         botId,
@@ -2283,6 +2293,7 @@ export default function ChatPage() {
         isLoadingConversation,
         isStreaming,
         launcherDraft,
+        hydratedLaunchDraftPrompt,
         requestedResponseModel,
         requestedWebSearchMode,
         responseModel,
