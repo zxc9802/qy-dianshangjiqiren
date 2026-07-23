@@ -2,6 +2,7 @@ import type { ResponseModel, WebSearchMode } from './chat-models';
 
 const API_BASE = '/api';
 export type VideoSiteKey = 'seedance' | 'tiktok';
+export type ExternalSsoProduct = 'xhstw' | 'xiaoshou' | 'sabc' | 'baokuangaixie';
 
 export class ApiError extends Error {
     status: number;
@@ -270,6 +271,14 @@ export const api = {
     // Video workbench
     startVideoSso: (body?: { redirectPath?: string; site?: VideoSiteKey }) =>
         request<{ url: string; expiresAt: string }>('/video-sso/start', {
+            method: 'POST',
+            body: JSON.stringify(body || {}),
+        }, {
+            redirectOnUnauthorized: false,
+        }),
+
+    startExternalSso: (product: ExternalSsoProduct, body?: { redirectPath?: string }) =>
+        request<{ url: string; expiresAt: string }>(`/external-sso/${product}/start`, {
             method: 'POST',
             body: JSON.stringify(body || {}),
         }, {

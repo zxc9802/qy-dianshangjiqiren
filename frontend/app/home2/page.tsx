@@ -26,7 +26,7 @@ import {
 import { putLaunchChatDraft } from '../lib/launch-chat-drafts';
 import { VIDEO_SITE_METADATA, type VideoSiteKey } from '../lib/video-sites';
 import { startPcm16kMonoRecorder, type Pcm16Recorder } from '../lib/pcmRecorder';
-import { api } from '../lib/api';
+import { api, type ExternalSsoProduct } from '../lib/api';
 import {
   ArrowUpRight,
   BookOpen,
@@ -60,7 +60,7 @@ type DemoBot = {
   icon: ReactNode;
   iconColor: string;
   path?: string;
-  externalUrl?: string;
+  ssoProduct?: ExternalSsoProduct;
   requiresAuth: boolean;
   videoSite?: VideoSiteKey;
 };
@@ -108,7 +108,7 @@ const FEATURED_BOTS: DemoBot[] = [
     description: '进入销转智能体，围绕销售转化问题获取针对性建议。',
     icon: <MessageSquare size={22} strokeWidth={1.8} />,
     iconColor: '#c96a31',
-    externalUrl: 'http://xiaoshou.qycm.top',
+    ssoProduct: 'xiaoshou',
     requiresAuth: true,
   },
   {
@@ -118,7 +118,7 @@ const FEATURED_BOTS: DemoBot[] = [
     description: '进入爆款改写智能体，快速优化商品文案与内容表达。',
     icon: <PenTool size={22} strokeWidth={1.8} />,
     iconColor: '#b84965',
-    externalUrl: 'http://baokuangaixie.qycm.top',
+    ssoProduct: 'baokuangaixie',
     requiresAuth: true,
   },
   {
@@ -128,7 +128,7 @@ const FEATURED_BOTS: DemoBot[] = [
     description: '进入 SABC 项目评级智能体，完成项目评估与分级分析。',
     icon: <Star size={22} strokeWidth={1.8} />,
     iconColor: '#6d57ba',
-    externalUrl: 'http://sabc.qycm.top',
+    ssoProduct: 'sabc',
     requiresAuth: true,
   },
   {
@@ -148,7 +148,7 @@ const FEATURED_BOTS: DemoBot[] = [
     description: '进入小红书图文自动生成工具，完成内容生成与发布素材制作。',
     icon: <BookOpen size={22} strokeWidth={1.8} />,
     iconColor: '#e35b52',
-    externalUrl: 'https://xhstw.qycm.top/',
+    ssoProduct: 'xhstw',
     requiresAuth: true,
   },
   {
@@ -337,12 +337,17 @@ export default function Home2Page() {
   }, [isAuthenticated, isRecording, router, submitPrompt]);
 
   const openBot = useCallback(async (bot: DemoBot) => {
-    if (bot.externalUrl) {
+    if (bot.ssoProduct) {
       if (!isAuthenticated) {
-        router.push(`/login?redirect=${encodeURIComponent(bot.externalUrl)}`);
+        router.push(`/login?redirect=${encodeURIComponent('/home2')}`);
         return;
       }
-      window.open(bot.externalUrl, '_blank', 'noopener,noreferrer');
+      try {
+        const result = await api.startExternalSso(bot.ssoProduct);
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '无法打开智能体，请稍后重试');
+      }
       return;
     }
     if (!bot.path) return;
