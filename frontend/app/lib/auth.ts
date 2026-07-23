@@ -22,11 +22,11 @@ function getJwtSecret(): string {
     return readRequiredServerEnv('JWT_SECRET');
 }
 
-export function signToken(userId: string, authTokenVersion = 0): string {
+export function signToken(userId: string, authTokenVersion = 0, expiresIn = JWT_EXPIRES_IN): string {
     return jwt.sign(
         { userId, tokenVersion: authTokenVersion },
         getJwtSecret(),
-        { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions,
+        { expiresIn } as jwt.SignOptions,
     );
 }
 
