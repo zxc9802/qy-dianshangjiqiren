@@ -34,6 +34,21 @@ MAIN_APP_SSO_CLIENT_SECRET=<matching main-site product secret>
 APP_SESSION_SECRET=<unique random secret for this target>
 ```
 
+`xiaoshou` additionally uses a same-site API host:
+
+```dotenv
+# xiaoshou frontend build
+VITE_API_BASE_URL=https://xiaoshou-api.qycm.top
+
+# xiaoshou Fastify API
+PUBLIC_APP_URL=https://xiaoshou.qycm.top
+CORS_ORIGIN=https://xiaoshou.qycm.top
+```
+
+Bind `xiaoshou-api.qycm.top` to the Fastify API service. The main registry sends
+its ticket to `https://xiaoshou-api.qycm.top/api/sso/callback`; the API sets its
+host-only cookie and then redirects to `PUBLIC_APP_URL`.
+
 ## Task 1: Main-site SSO registry and ticket exchange
 
 **Repository:** `zxc9802/qy-dianshangjiqiren`  
@@ -146,4 +161,3 @@ APP_SESSION_SECRET=<unique random secret for this target>
 3. Re-run each repository’s full scoped test/build commands. Record failures that originate from existing unrelated project defects separately from SSO outcomes.
 4. Provide the exact environment-variable handoff. Do not invent or expose actual production secret values.
 5. After the user approves publishing, push each repository’s feature branch or fast-forward the explicitly requested branch; deploy/restart the five services only after the matching environment values are configured.
-

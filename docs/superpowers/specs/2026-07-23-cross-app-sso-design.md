@@ -40,7 +40,7 @@ ticket 只出现在一次 HTTPS 回调 URL 中；主站 token 永不暴露给浏
 | 产品 | 产品键 | 子站回调 URL | 主站环境变量 |
 | --- | --- | --- | --- |
 | 小红书图文自动生成 | `xhstw` | `https://xhstw.qycm.top/api/sso/callback` | `SSO_XHSTW_CLIENT_SECRET` |
-| 销转智能体 | `xiaoshou` | `https://xiaoshou.qycm.top/api/sso/callback` | `SSO_XIAOSHOU_CLIENT_SECRET` |
+| 销转智能体 | `xiaoshou` | `https://xiaoshou-api.qycm.top/api/sso/callback` | `SSO_XIAOSHOU_CLIENT_SECRET` |
 | SABC 项目评级智能体 | `sabc` | `https://sabc.qycm.top/api/sso/callback` | `SSO_SABC_CLIENT_SECRET` |
 | 爆款改写智能体 | `baokuangaixie` | `https://baokuangaixie.qycm.top/api/sso/callback` | `SSO_BAOKUANGAIXIE_CLIENT_SECRET` |
 
@@ -68,6 +68,12 @@ MAIN_APP_SSO_EXCHANGE_URL=https://www.qycm.top/api/external-sso/<product>/exchan
 MAIN_APP_SSO_CLIENT_SECRET=<与主站该产品变量匹配>
 APP_SESSION_SECRET=<该子站独有的随机密钥>
 ```
+
+`xiaoshou` 的页面与 Fastify API 是两个服务。API 服务需要绑定
+`xiaoshou-api.qycm.top`，并设置 `PUBLIC_APP_URL=https://xiaoshou.qycm.top`；
+前端构建设置 `VITE_API_BASE_URL=https://xiaoshou-api.qycm.top`，API 设置
+`CORS_ORIGIN=https://xiaoshou.qycm.top`。这样回调 Cookie 与 API 请求保持在
+`qycm.top` 同站范围内，同时换票后回到公开前端页面。
 
 子站回调必须拒绝缺失 ticket、主站换票失败、用户资料缺失、无效签名和跨站 `redirectPath`。任何失败均不能留下局部登录状态。
 

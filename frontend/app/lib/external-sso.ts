@@ -13,7 +13,7 @@ const EXTERNAL_SSO_PRODUCTS = {
         clientSecretEnv: 'SSO_XHSTW_CLIENT_SECRET',
     },
     xiaoshou: {
-        callbackUrl: 'https://xiaoshou.qycm.top/api/sso/callback',
+        callbackUrl: 'https://xiaoshou-api.qycm.top/api/sso/callback',
         clientSecretEnv: 'SSO_XIAOSHOU_CLIENT_SECRET',
     },
     sabc: {

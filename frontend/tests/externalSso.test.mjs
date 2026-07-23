@@ -16,7 +16,7 @@ test('external SSO registers only the four fixed HTTPS products', async () => {
 
   for (const [product, callbackUrl, secretEnv] of [
     ['xhstw', 'https://xhstw.qycm.top/api/sso/callback', 'SSO_XHSTW_CLIENT_SECRET'],
-    ['xiaoshou', 'https://xiaoshou.qycm.top/api/sso/callback', 'SSO_XIAOSHOU_CLIENT_SECRET'],
+    ['xiaoshou', 'https://xiaoshou-api.qycm.top/api/sso/callback', 'SSO_XIAOSHOU_CLIENT_SECRET'],
     ['sabc', 'https://sabc.qycm.top/api/sso/callback', 'SSO_SABC_CLIENT_SECRET'],
     ['baokuangaixie', 'https://baokuangaixie.qycm.top/api/sso/callback', 'SSO_BAOKUANGAIXIE_CLIENT_SECRET'],
   ]) {
