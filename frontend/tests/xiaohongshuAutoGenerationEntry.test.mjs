@@ -35,3 +35,11 @@ test('homepage starts SSO before opening a target in a new tab', async () => {
     /if \(bot\.ssoProduct\) \{[\s\S]*api\.startExternalSso\(bot\.ssoProduct\)[\s\S]*window\.open\(result\.url, '_blank', 'noopener,noreferrer'\)/,
   )
 })
+
+test('homepage can resume a target SSO launch after a direct target visit', async () => {
+  const source = await readFile(homePagePath, 'utf8')
+
+  assert.match(source, /searchParams\.get\('externalSso'\)/)
+  assert.match(source, /router\.replace\(`\/login\?redirect=\$\{encodeURIComponent\(`\/home2\?externalSso=\$\{product\}`\)\}`\)/)
+  assert.match(source, /api\.startExternalSso\(product\)[\s\S]*window\.location\.assign\(result\.url\)/)
+})

@@ -67,6 +67,7 @@ type DemoBot = {
 
 const MAX_ATTACHMENTS = 10;
 const ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v';
+const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie'];
 
 const builtin = (routeId: string) => BUILTIN_BOTS.find((bot) => bot.routeId === routeId);
 
@@ -220,6 +221,30 @@ export default function Home2Page() {
 
   useEffect(() => setMounted(true), []);
   useEffect(() => { void loadUser(); }, [loadUser]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const pendingProduct = searchParams.get('externalSso');
+    if (!pendingProduct || !EXTERNAL_SSO_PRODUCTS.includes(pendingProduct as ExternalSsoProduct) || isLoading) return;
+    const product = pendingProduct as ExternalSsoProduct;
+    if (!isAuthenticated) {
+      router.replace(`/login?redirect=${encodeURIComponent(`/home2?externalSso=${product}`)}`);
+      return;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.delete('externalSso');
+    window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+    let cancelled = false;
+    void api.startExternalSso(product)
+      .then((result) => {
+        if (!cancelled) window.location.assign(result.url);
+      })
+      .catch((error) => {
+        if (!cancelled) alert(error instanceof Error ? error.message : '无法打开智能体，请稍后重试');
+      });
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isLoading, router]);
   useEffect(() => {
     if (!isAuthenticated) return;
     void loadConversations().catch((error) => console.error('[Home2] Failed to load conversations', error));
