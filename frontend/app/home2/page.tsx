@@ -102,6 +102,36 @@ const FEATURED_BOTS: DemoBot[] = [
     requiresAuth: true,
   },
   {
+    id: 'sales-conversion-agent',
+    name: '销转智能体',
+    category: '电商工具',
+    description: '进入销转智能体，围绕销售转化问题获取针对性建议。',
+    icon: <MessageSquare size={22} strokeWidth={1.8} />,
+    iconColor: '#c96a31',
+    externalUrl: 'http://xiaoshou.qycm.top',
+    requiresAuth: true,
+  },
+  {
+    id: 'viral-copy-rewrite-agent',
+    name: '爆款改写智能体',
+    category: '电商工具',
+    description: '进入爆款改写智能体，快速优化商品文案与内容表达。',
+    icon: <PenTool size={22} strokeWidth={1.8} />,
+    iconColor: '#b84965',
+    externalUrl: 'http://baokuangaixie.qycm.top',
+    requiresAuth: true,
+  },
+  {
+    id: 'sabc-project-rating-agent',
+    name: 'SABC项目评级智能体',
+    category: '电商工具',
+    description: '进入 SABC 项目评级智能体，完成项目评估与分级分析。',
+    icon: <Star size={22} strokeWidth={1.8} />,
+    iconColor: '#6d57ba',
+    externalUrl: 'http://sabc.qycm.top',
+    requiresAuth: true,
+  },
+  {
     id: VIDEO_BREAKDOWN_BOT_ID,
     name: builtin(VIDEO_BREAKDOWN_BOT_ID)?.name || '视频拆解导演',
     category: '电商工具',
@@ -343,7 +373,7 @@ export default function Home2Page() {
           <div className={styles.brandMark}><Bot size={18} /></div>
           <div>
             <div className={styles.brandName}>电商 AI 智能平台</div>
-            <div className={styles.brandSubline}>精选工作台 · 08</div>
+            <div className={styles.brandSubline}>精选工作台 · 11</div>
           </div>
         </div>
         <div className={styles.headerSearch}>
@@ -434,7 +464,7 @@ export default function Home2Page() {
           </section>
 
           <section className={styles.toolsSection}>
-            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 8 个电商工作入口</p></div>
+            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 11 个电商工作入口</p></div>
             {botGroups.map((group) => <div className={styles.category} key={group.category}><div className={styles.categoryHeading}><h3>{group.category}</h3><span>{String(group.bots.length).padStart(2, '0')}</span></div><div className={styles.botGrid}>{group.bots.map((bot, index) => <button key={bot.id} className={styles.botCard} style={{ '--card-index': index } as CSSProperties} onClick={() => void openBot(bot)}><span className={styles.botIcon} style={{ color: bot.iconColor, backgroundColor: `${bot.iconColor}15` }}>{bot.icon}</span><span className={styles.botInfo}><span className={styles.botTitleRow}><strong>{bot.name}</strong><em>正式版</em></span><small>{bot.description}</small></span><ArrowUpRight className={styles.botArrow} size={17} /></button>)}</div></div>)}
             {filteredBots.length === 0 && <div className={styles.emptyState}><Search size={18} /><p>没有找到匹配的精选入口</p><button onClick={() => setSearchQuery('')}>清除搜索</button></div>}
           </section>
