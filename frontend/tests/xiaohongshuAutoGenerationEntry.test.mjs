@@ -23,8 +23,22 @@ test('homepage lists the four protected SSO agent entries', async () => {
     )
   }
   assert.match(source, /categoryOrder = \['管理工具', '电商工具', '小红书', '绘图机器人', '视频工作台'\]/)
-  assert.match(source, /精选工作台 · 11/)
-  assert.match(source, /当前只展示最常用的 11 个电商工作入口/)
+  assert.match(source, /精选工作台 · 12/)
+  assert.match(source, /当前只展示最常用的 12 个电商工作入口/)
+})
+
+test('homepage opens the product design agent directly without SSO', async () => {
+  const source = await readFile(homePagePath, 'utf8')
+
+  assert.match(source, /externalUrl\?:\s*string/)
+  assert.match(
+    source,
+    /id: 'product-design-agent',[\s\S]*name: '产品设计智能体',[\s\S]*externalUrl: 'https:\/\/chanpinsheji\.qycm\.top',[\s\S]*requiresAuth: false/,
+  )
+  assert.match(
+    source,
+    /if \(bot\.externalUrl\) \{\s*window\.open\(bot\.externalUrl, '_blank', 'noopener,noreferrer'\);\s*return;[\s\S]*if \(bot\.ssoProduct\)/,
+  )
 })
 
 test('homepage starts SSO before opening a target in a new tab', async () => {

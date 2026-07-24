@@ -40,6 +40,7 @@ import {
   Mic,
   Moon,
   Paperclip,
+  Package,
   PenTool,
   Search,
   Send,
@@ -60,6 +61,7 @@ type DemoBot = {
   icon: ReactNode;
   iconColor: string;
   path?: string;
+  externalUrl?: string;
   ssoProduct?: ExternalSsoProduct;
   requiresAuth: boolean;
   videoSite?: VideoSiteKey;
@@ -101,6 +103,16 @@ const FEATURED_BOTS: DemoBot[] = [
     iconColor: '#e35b52',
     path: '/bot/copywriting-agent?autostart=1&openMode=replace',
     requiresAuth: true,
+  },
+  {
+    id: 'product-design-agent',
+    name: '产品设计智能体',
+    category: '电商工具',
+    description: '打开产品设计智能体，完成从设计 Brief 到包装设计交付的全流程。',
+    icon: <Package size={22} strokeWidth={1.8} />,
+    iconColor: '#7c3aed',
+    externalUrl: 'https://chanpinsheji.qycm.top',
+    requiresAuth: false,
   },
   {
     id: 'sales-conversion-agent',
@@ -362,6 +374,10 @@ export default function Home2Page() {
   }, [isAuthenticated, isRecording, router, submitPrompt]);
 
   const openBot = useCallback(async (bot: DemoBot) => {
+    if (bot.externalUrl) {
+      window.open(bot.externalUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (bot.ssoProduct) {
       if (!isAuthenticated) {
         router.push(`/login?redirect=${encodeURIComponent('/home2')}`);
@@ -403,7 +419,7 @@ export default function Home2Page() {
           <div className={styles.brandMark}><Bot size={18} /></div>
           <div>
             <div className={styles.brandName}>电商 AI 智能平台</div>
-            <div className={styles.brandSubline}>精选工作台 · 11</div>
+            <div className={styles.brandSubline}>精选工作台 · 12</div>
           </div>
         </div>
         <div className={styles.headerSearch}>
@@ -494,7 +510,7 @@ export default function Home2Page() {
           </section>
 
           <section className={styles.toolsSection}>
-            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 11 个电商工作入口</p></div>
+            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 12 个电商工作入口</p></div>
             {botGroups.map((group) => <div className={styles.category} key={group.category}><div className={styles.categoryHeading}><h3>{group.category}</h3><span>{String(group.bots.length).padStart(2, '0')}</span></div><div className={styles.botGrid}>{group.bots.map((bot, index) => <button key={bot.id} className={styles.botCard} style={{ '--card-index': index } as CSSProperties} onClick={() => void openBot(bot)}><span className={styles.botIcon} style={{ color: bot.iconColor, backgroundColor: `${bot.iconColor}15` }}>{bot.icon}</span><span className={styles.botInfo}><span className={styles.botTitleRow}><strong>{bot.name}</strong><em>正式版</em></span><small>{bot.description}</small></span><ArrowUpRight className={styles.botArrow} size={17} /></button>)}</div></div>)}
             {filteredBots.length === 0 && <div className={styles.emptyState}><Search size={18} /><p>没有找到匹配的精选入口</p><button onClick={() => setSearchQuery('')}>清除搜索</button></div>}
           </section>
