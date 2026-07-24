@@ -30,6 +30,15 @@ export function signToken(userId: string, authTokenVersion = 0, expiresIn = JWT_
     );
 }
 
+export function getTokenExpiresAt(token: string): number {
+    const decoded = jwt.decode(token);
+    if (!decoded || typeof decoded === 'string' || typeof decoded.exp !== 'number') {
+        throw new Error('Signed token is missing an expiration.');
+    }
+
+    return decoded.exp * 1000;
+}
+
 export async function ensureAccessControlBootstrap(): Promise<void> {
     if (bootstrapComplete) {
         return;

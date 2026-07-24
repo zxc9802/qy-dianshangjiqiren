@@ -29,10 +29,11 @@ test('external SSO registers only the four fixed HTTPS products', async () => {
 })
 
 test('external SSO start authenticates users and exchange validates a product secret', async () => {
-  const [startRoute, exchangeRoute, source] = await Promise.all([
+  const [startRoute, exchangeRoute, source, auth] = await Promise.all([
     readAppFile('api', 'external-sso', '[product]', 'start', 'route.ts'),
     readAppFile('api', 'external-sso', '[product]', 'exchange', 'route.ts'),
     readAppFile('lib', 'external-sso.ts'),
+    readAppFile('lib', 'auth.ts'),
   ])
 
   assert.match(startRoute, /getAuthUser/)
@@ -40,7 +41,10 @@ test('external SSO start authenticates users and exchange validates a product se
   assert.match(startRoute, /buildExternalSsoCallbackUrl/)
   assert.match(exchangeRoute, /isValidExternalSsoClientSecret/)
   assert.match(exchangeRoute, /consumeExternalSsoTicket/)
-  assert.match(exchangeRoute, /signToken/)
+  assert.match(exchangeRoute, /const token = signToken\(result\.user\.id, result\.user\.authTokenVersion\)/)
+  assert.match(exchangeRoute, /expiresAt:\s*getTokenExpiresAt\(token\)/)
+  assert.doesNotMatch(exchangeRoute, /signToken\([^\n]*['\"]5m['\"]\)/)
+  assert.match(auth, /export function getTokenExpiresAt\(token: string\)/)
   assert.match(source, /product(?:\s*:\s*product)?/)
   assert.match(source, /usedAt:\s*null/)
   assert.match(source, /expiresAt:\s*\{\s*gt:\s*new Date\(\)/)

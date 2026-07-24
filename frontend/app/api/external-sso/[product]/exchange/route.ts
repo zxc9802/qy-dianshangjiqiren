@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { AppError, errorResponse, signToken } from '@/app/lib/auth';
+import { AppError, errorResponse, getTokenExpiresAt, signToken } from '@/app/lib/auth';
 import {
     consumeExternalSsoTicket,
     getExternalSsoClientSecretHeaderName,
@@ -24,12 +24,14 @@ export async function POST(
 
         const { ticket } = exchangeSchema.parse(await req.json());
         const result = await consumeExternalSsoTicket(product, ticket);
+        const token = signToken(result.user.id, result.user.authTokenVersion);
 
         return Response.json({
             success: true,
             data: {
                 ...result,
-                token: signToken(result.user.id, result.user.authTokenVersion, '5m'),
+                token,
+                expiresAt: getTokenExpiresAt(token),
             },
         });
     } catch (error) {
