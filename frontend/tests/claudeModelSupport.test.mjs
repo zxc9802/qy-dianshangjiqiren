@@ -91,6 +91,7 @@ test('chat model options include Claude Opus 4.6', async () => {
     JSON.parse(JSON.stringify(RESPONSE_MODEL_OPTIONS.map((option) => option.value))),
     ['gemini', 'gpt-5.4', 'claude-opus-4.6'],
   )
+  assert.equal(getResponseModelLabel('gpt-5.4'), 'GPT-5.5')
   assert.equal(getResponseModelLabel('claude-opus-4.6'), 'Claude Opus 4.6')
   assert.deepEqual(JSON.parse(JSON.stringify(WEB_SEARCH_MODE_VALUES)), ['auto', 'on', 'off'])
   assert.equal(DEFAULT_WEB_SEARCH_MODE, 'auto')
