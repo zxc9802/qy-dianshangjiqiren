@@ -244,6 +244,37 @@
     opacity: 0.55;
 }
 
+.creditNotice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-top: 12px;
+    padding: 13px 18px;
+    border: 1px solid var(--color-primary-light);
+    border-radius: var(--radius-md);
+    background: var(--color-primary-light);
+}
+
+.creditNoticeTitle {
+    color: var(--color-primary);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.creditRate {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-muted-foreground);
+    font-size: 12px;
+}
+
+.creditRate strong {
+    color: var(--color-foreground);
+    font-size: 13px;
+}
+
 .pointsLabel {
     font-size: 14px;
     opacity: 0.8;

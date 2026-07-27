@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Activity, ArrowLeft, BarChart3, Coins, KeyRound, Settings, ShieldCheck, Users } from 'lucide-react';
 import SearchableSelect from '../components/SearchableSelect';
 import { api, ApiError, UsageSummaryInfo } from '../lib/api';
+import { CREDITS_PER_CNY } from '../lib/ai-usage';
 import { FIXED_MEMBER_NAMES } from '../lib/member-directory';
 import { useAuthStore } from '../stores/auth';
 import styles from './profile.module.css';
@@ -239,6 +240,14 @@ export default function ProfilePage() {
                                     {redeeming ? '兑换中...' : '立即兑换'}
                                 </button>
                             </form>
+                        </div>
+                        <div className={styles.creditNotice}>
+                            <span className={styles.creditNoticeTitle}>积分说明</span>
+                            <span className={styles.creditRate}>
+                                <strong>{formatNumber(CREDITS_PER_CNY)} 积分</strong>
+                                <span>=</span>
+                                <strong>¥1</strong>
+                            </span>
                         </div>
                     </section>
                 )}
