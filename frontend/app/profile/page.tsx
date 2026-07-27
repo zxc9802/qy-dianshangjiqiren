@@ -384,7 +384,7 @@ export default function ProfilePage() {
 
                             <div className={styles.usageList}>
                                 <div className={styles.usageListHeader}>
-                                    <span>应用 / 模型</span>
+                                    <span>{user.billingAudience === 'internal' ? '应用 / 模型' : '应用'}</span>
                                     <span>用量</span>
                                     <span>计费积分</span>
                                     <span>时间</span>
@@ -395,7 +395,9 @@ export default function ProfilePage() {
                                     <div className={styles.usageListRow} key={record.id}>
                                         <span>
                                             <strong>{record.appId || record.channel}</strong>
-                                            <small>{record.model || '-'}</small>
+                                            {user.billingAudience === 'internal' ? (
+                                                <small>{record.model || '-'}</small>
+                                            ) : null}
                                         </span>
                                         <span>{formatUsageUnit(record)}</span>
                                         <span>{formatNumber(record.chargedCredits)}</span>
