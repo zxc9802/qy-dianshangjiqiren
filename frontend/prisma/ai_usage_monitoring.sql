@@ -1,7 +1,8 @@
 ALTER TABLE users
 ADD COLUMN IF NOT EXISTS billing_audience text NOT NULL DEFAULT 'external',
 ADD COLUMN IF NOT EXISTS account_status text NOT NULL DEFAULT 'active',
-ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
+ADD COLUMN IF NOT EXISTS auth_token_version integer NOT NULL DEFAULT 0;
 
 ALTER TABLE video_usage_logs
 ADD COLUMN IF NOT EXISTS app_id text,
