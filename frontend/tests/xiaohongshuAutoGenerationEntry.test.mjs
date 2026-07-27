@@ -7,11 +7,12 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const homePagePath = path.join(__dirname, '..', 'app', 'home2', 'page.tsx')
 
-test('homepage lists the four protected SSO agent entries', async () => {
+test('homepage lists the five protected SSO agent entries', async () => {
   const source = await readFile(homePagePath, 'utf8')
 
   assert.match(source, /ssoProduct\?:\s*ExternalSsoProduct/)
   for (const entry of [
+    { id: 'product-design-agent', name: '产品设计智能体', category: '电商工具', product: 'chanpinsheji' },
     { id: 'xiaohongshu-auto-generation', name: '小红书图文自动生成', category: '小红书', product: 'xhstw' },
     { id: 'sales-conversion-agent', name: '销转智能体', category: '电商工具', product: 'xiaoshou' },
     { id: 'viral-copy-rewrite-agent', name: '爆款改写智能体', category: '电商工具', product: 'baokuangaixie' },
@@ -27,18 +28,16 @@ test('homepage lists the four protected SSO agent entries', async () => {
   assert.match(source, /当前只展示最常用的 12 个电商工作入口/)
 })
 
-test('homepage opens the product design agent directly without SSO', async () => {
+test('homepage routes the product design agent through SSO', async () => {
   const source = await readFile(homePagePath, 'utf8')
+  const entryStart = source.indexOf("id: 'product-design-agent'")
+  const entryEnd = source.indexOf('\n  },', entryStart)
+  const entry = source.slice(entryStart, entryEnd)
 
-  assert.match(source, /externalUrl\?:\s*string/)
-  assert.match(
-    source,
-    /id: 'product-design-agent',[\s\S]*name: '产品设计智能体',[\s\S]*externalUrl: 'https:\/\/chanpinsheji\.qycm\.top',[\s\S]*requiresAuth: false/,
-  )
-  assert.match(
-    source,
-    /if \(bot\.externalUrl\) \{\s*window\.open\(bot\.externalUrl, '_blank', 'noopener,noreferrer'\);\s*return;[\s\S]*if \(bot\.ssoProduct\)/,
-  )
+  assert.notEqual(entryStart, -1)
+  assert.match(entry, /ssoProduct: 'chanpinsheji'/)
+  assert.match(entry, /requiresAuth: true/)
+  assert.doesNotMatch(entry, /externalUrl/)
 })
 
 test('homepage starts SSO before opening a target in a new tab', async () => {

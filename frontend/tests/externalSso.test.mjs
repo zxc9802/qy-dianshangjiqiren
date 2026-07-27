@@ -11,7 +11,7 @@ async function readAppFile(...segments) {
   return readFile(path.join(appRoot, ...segments), 'utf8')
 }
 
-test('external SSO registers only the four fixed HTTPS products', async () => {
+test('external SSO registers only the five fixed HTTPS products', async () => {
   const source = await readAppFile('lib', 'external-sso.ts')
 
   for (const [product, callbackUrl, secretEnv] of [
@@ -19,6 +19,7 @@ test('external SSO registers only the four fixed HTTPS products', async () => {
     ['xiaoshou', 'https://xiaoshou-api.qycm.top/api/sso/callback', 'SSO_XIAOSHOU_CLIENT_SECRET'],
     ['sabc', 'https://sabc.qycm.top/api/sso/callback', 'SSO_SABC_CLIENT_SECRET'],
     ['baokuangaixie', 'https://baokuangaixie.qycm.top/api/sso/callback', 'SSO_BAOKUANGAIXIE_CLIENT_SECRET'],
+    ['chanpinsheji', 'https://chanpinsheji.qycm.top/api/sso/callback', 'SSO_CHANPINSHEJI_CLIENT_SECRET'],
   ]) {
     assert.match(source, new RegExp(`${product}[\\s\\S]*${callbackUrl.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}[\\s\\S]*${secretEnv}`))
   }

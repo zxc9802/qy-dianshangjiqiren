@@ -24,6 +24,10 @@ const EXTERNAL_SSO_PRODUCTS = {
         callbackUrl: 'https://baokuangaixie.qycm.top/api/sso/callback',
         clientSecretEnv: 'SSO_BAOKUANGAIXIE_CLIENT_SECRET',
     },
+    chanpinsheji: {
+        callbackUrl: 'https://chanpinsheji.qycm.top/api/sso/callback',
+        clientSecretEnv: 'SSO_CHANPINSHEJI_CLIENT_SECRET',
+    },
 } as const;
 
 export type ExternalSsoProduct = keyof typeof EXTERNAL_SSO_PRODUCTS;

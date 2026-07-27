@@ -70,7 +70,7 @@ type DemoBot = {
 
 const MAX_ATTACHMENTS = 10;
 const ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v';
-const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie'];
+const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie', 'chanpinsheji'];
 
 const builtin = (routeId: string) => BUILTIN_BOTS.find((bot) => bot.routeId === routeId);
 
@@ -112,8 +112,8 @@ const FEATURED_BOTS: DemoBot[] = [
     description: '打开产品设计智能体，完成从设计 Brief 到包装设计交付的全流程。',
     icon: <Package size={22} strokeWidth={1.8} />,
     iconColor: '#7c3aed',
-    externalUrl: 'https://chanpinsheji.qycm.top',
-    requiresAuth: false,
+    ssoProduct: 'chanpinsheji',
+    requiresAuth: true,
   },
   {
     id: 'sales-conversion-agent',
