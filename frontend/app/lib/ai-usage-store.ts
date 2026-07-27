@@ -2,12 +2,17 @@ import { Prisma } from '@prisma/client';
 import {
     calculateFixedMediaBilling,
     calculateTextUsageBilling,
+    isExternallyBilledAccount,
     normalizeBillingAudience,
     type AiTokenUsage,
     type BillingAudience,
 } from './ai-usage';
 import { AppError, ensureAccessControlBootstrap } from './auth';
 import { prisma } from './prisma';
+import {
+    isRetryableTransactionError,
+    waitForTransactionRetry,
+} from './transaction-retry';
 
 const USAGE_TRANSACTION_OPTIONS = {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -78,6 +83,7 @@ export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
                     select: {
                         billingAudience: true,
                         accountStatus: true,
+                        role: true,
                     },
                 });
                 if (!user) {
@@ -86,7 +92,7 @@ export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
                 if (user.accountStatus !== 'active') {
                     throw new AppError('This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
                 }
-                if (user.billingAudience !== 'external') {
+                if (!isExternallyBilledAccount(user)) {
                     return 0;
                 }
                 if (amount <= 0) {
@@ -152,14 +158,13 @@ export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
                 return amount;
             }, USAGE_TRANSACTION_OPTIONS);
         } catch (error) {
-            const canRetry = (
-                error instanceof Prisma.PrismaClientKnownRequestError
-                && (error.code === 'P2002' || error.code === 'P2034')
-                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
-            );
-            if (!canRetry) {
+            if (!isRetryableTransactionError(error)) {
                 throw error;
             }
+            if (attempt >= USAGE_TRANSACTION_ATTEMPTS - 1) {
+                break;
+            }
+            await waitForTransactionRetry(attempt);
         }
     }
 
@@ -175,22 +180,20 @@ export async function releaseAiUsageCredits(input: AiUsageCreditKey): Promise<vo
     for (let attempt = 0; attempt < USAGE_TRANSACTION_ATTEMPTS; attempt += 1) {
         try {
             await prisma.$transaction(async (tx) => {
-                const [reservation, settlement] = await Promise.all([
-                    tx.pointsTransaction.findUnique({
-                        where: { referenceKey: reserveReferenceKey },
-                        select: {
-                            amount: true,
-                            userId: true,
-                        },
-                    }),
-                    tx.pointsTransaction.findUnique({
-                        where: { referenceKey: settleReferenceKey },
-                        select: {
-                            id: true,
-                            userId: true,
-                        },
-                    }),
-                ]);
+                const reservation = await tx.pointsTransaction.findUnique({
+                    where: { referenceKey: reserveReferenceKey },
+                    select: {
+                        amount: true,
+                        userId: true,
+                    },
+                });
+                const settlement = await tx.pointsTransaction.findUnique({
+                    where: { referenceKey: settleReferenceKey },
+                    select: {
+                        id: true,
+                        userId: true,
+                    },
+                });
                 if (!reservation || settlement) {
                     if (reservation && reservation.userId !== input.userId) {
                         throw new AppError(
@@ -237,14 +240,13 @@ export async function releaseAiUsageCredits(input: AiUsageCreditKey): Promise<vo
             }, USAGE_TRANSACTION_OPTIONS);
             return;
         } catch (error) {
-            const canRetry = (
-                error instanceof Prisma.PrismaClientKnownRequestError
-                && (error.code === 'P2002' || error.code === 'P2034')
-                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
-            );
-            if (!canRetry) {
+            if (!isRetryableTransactionError(error)) {
                 throw error;
             }
+            if (attempt >= USAGE_TRANSACTION_ATTEMPTS - 1) {
+                break;
+            }
+            await waitForTransactionRetry(attempt);
         }
     }
 
@@ -265,12 +267,17 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
 
     const billingOwner = await prisma.user.findUnique({
         where: { id: userId },
-        select: { billingAudience: true },
+        select: {
+            billingAudience: true,
+            role: true,
+        },
     });
     if (!billingOwner) {
         throw new AppError('Account not found.', 404, 'ACCOUNT_NOT_FOUND');
     }
-    const billingAudience = normalizeBillingAudience(billingOwner.billingAudience);
+    const billingAudience = isExternallyBilledAccount(billingOwner)
+        ? normalizeBillingAudience(billingOwner.billingAudience)
+        : 'internal';
     const billing = input.mediaProduct
         ? calculateFixedMediaBilling({
             product: input.mediaProduct,
@@ -361,27 +368,29 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                     },
                 });
 
+                if (billingAudience === 'internal') {
+                    return saved;
+                }
+
                 const previousCharge = serializeAiUsageNumber(existing?.chargedCredits);
                 const nextCharge = serializeAiUsageNumber(saved.chargedCredits);
                 const chargedDelta = nextCharge - previousCharge;
                 const reserveReferenceKey = reservationReference(channel, requestId);
                 const settleReferenceKey = settlementReference(channel, requestId);
-                const [reservation, settlement] = await Promise.all([
-                    tx.pointsTransaction.findUnique({
-                        where: { referenceKey: reserveReferenceKey },
-                        select: {
-                            amount: true,
-                            userId: true,
-                        },
-                    }),
-                    tx.pointsTransaction.findUnique({
-                        where: { referenceKey: settleReferenceKey },
-                        select: {
-                            id: true,
-                            userId: true,
-                        },
-                    }),
-                ]);
+                const reservation = await tx.pointsTransaction.findUnique({
+                    where: { referenceKey: reserveReferenceKey },
+                    select: {
+                        amount: true,
+                        userId: true,
+                    },
+                });
+                const settlement = await tx.pointsTransaction.findUnique({
+                    where: { referenceKey: settleReferenceKey },
+                    select: {
+                        id: true,
+                        userId: true,
+                    },
+                });
                 if (reservation && reservation.userId !== userId) {
                     throw new AppError(
                         'A credit reservation cannot be settled by another account.',
@@ -486,14 +495,13 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                 return saved;
             }, USAGE_TRANSACTION_OPTIONS);
         } catch (error) {
-            const canRetry = (
-                error instanceof Prisma.PrismaClientKnownRequestError
-                && (error.code === 'P2002' || error.code === 'P2034')
-                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
-            );
-            if (!canRetry) {
+            if (!isRetryableTransactionError(error)) {
                 throw error;
             }
+            if (attempt >= USAGE_TRANSACTION_ATTEMPTS - 1) {
+                break;
+            }
+            await waitForTransactionRetry(attempt);
         }
     }
 

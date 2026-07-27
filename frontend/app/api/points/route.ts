@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { AppError, errorResponse, getAuthUser } from '../../lib/auth';
+import { isExternallyBilledAccount } from '../../lib/ai-usage';
 import { prisma } from '../../lib/prisma';
 import {
     getRechargeCodeLast4,
@@ -59,23 +60,21 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
     try {
         const user = await getAuthUser(req);
-        if (user.billingAudience !== 'external') {
+        if (!isExternallyBilledAccount(user)) {
             throw new AppError('Only external accounts can redeem recharge codes.', 400, 'EXTERNAL_ACCOUNT_REQUIRED');
         }
-        await Promise.all([
-            enforceRateLimit({
-                scope: 'recharge-redeem:user',
-                identifier: user.id,
-                limit: 10,
-                windowMs: 10 * 60_000,
-            }),
-            enforceRateLimit({
-                scope: 'recharge-redeem:ip',
-                identifier: getClientAddress(req),
-                limit: 20,
-                windowMs: 10 * 60_000,
-            }),
-        ]);
+        await enforceRateLimit({
+            scope: 'recharge-redeem:user',
+            identifier: user.id,
+            limit: 10,
+            windowMs: 10 * 60_000,
+        });
+        await enforceRateLimit({
+            scope: 'recharge-redeem:ip',
+            identifier: getClientAddress(req),
+            limit: 20,
+            windowMs: 10 * 60_000,
+        });
 
         const { code: rawCode } = redeemSchema.parse(await req.json());
         const code = normalizeRechargeCode(rawCode);

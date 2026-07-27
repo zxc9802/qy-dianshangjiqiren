@@ -7,12 +7,14 @@ import { fileURLToPath } from 'node:url';
 import {
     calculateTextUsageBilling,
     estimateTextUsageReservationCredits,
+    isExternallyBilledAccount,
 } from '../app/lib/ai-usage.ts';
 import {
     hashRechargeCode,
     normalizeRechargeCode,
 } from '../app/lib/recharge-codes.ts';
 import { resolveRateLimitAttempt } from '../app/lib/security-rate-limit-core.ts';
+import { isRetryableTransactionError } from '../app/lib/transaction-retry.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.join(__dirname, '..');
@@ -55,6 +57,13 @@ test('rate limiting blocks the first request above the configured limit', () => 
     assert.ok(fourth.retryAfterSeconds > 0);
 });
 
+test('only external non-admin accounts use credit billing and usage rate limits', () => {
+    assert.equal(isExternallyBilledAccount({ billingAudience: 'external', role: 'user' }), true);
+    assert.equal(isExternallyBilledAccount({ billingAudience: 'internal', role: 'user' }), false);
+    assert.equal(isExternallyBilledAccount({ billingAudience: 'internal', role: 'admin' }), false);
+    assert.equal(isExternallyBilledAccount({ billingAudience: 'external', role: 'admin' }), false);
+});
+
 test('authentication checks IP and account rate limits sequentially', async () => {
     const source = await readFile(path.join(frontendRoot, 'app', 'api', 'auth', 'route.ts'), 'utf8');
 
@@ -63,6 +72,55 @@ test('authentication checks IP and account rate limits sequentially', async () =
         /await enforceRateLimit\(\{\s*scope: `auth:\$\{action\}:ip`[\s\S]*if \(account\) \{\s*await enforceRateLimit\(\{\s*scope: `auth:\$\{action\}:account`/,
     );
     assert.doesNotMatch(source, /Promise\.all\(checks\)/);
+});
+
+test('driver adapter transaction write conflicts are retryable', () => {
+    const error = Object.assign(new Error('TransactionWriteConflict'), {
+        name: 'DriverAdapterError',
+        cause: {
+            kind: 'TransactionWriteConflict',
+            originalCode: '40001',
+        },
+    });
+
+    assert.equal(isRetryableTransactionError(error), true);
+    assert.equal(isRetryableTransactionError({ code: 'P2034' }), true);
+    assert.equal(isRetryableTransactionError(new Error('unrelated')), false);
+});
+
+test('chat rate limits and transaction queries run sequentially', async () => {
+    const chatSource = await readFile(path.join(frontendRoot, 'app', 'api', 'chat', 'route.ts'), 'utf8');
+    const conversationSource = await readFile(
+        path.join(frontendRoot, 'app', 'api', 'conversations', '[id]', 'messages', 'route.ts'),
+        'utf8',
+    );
+    const pointsSource = await readFile(path.join(frontendRoot, 'app', 'api', 'points', 'route.ts'), 'utf8');
+    const usageSource = await readFile(path.join(frontendRoot, 'app', 'lib', 'ai-usage-store.ts'), 'utf8');
+
+    for (const source of [chatSource, conversationSource, pointsSource]) {
+        assert.doesNotMatch(source, /await Promise\.all\(\[\s*enforceRateLimit\(/);
+    }
+    assert.doesNotMatch(usageSource, /const \[reservation, settlement\] = await Promise\.all\(/);
+});
+
+test('internal and admin requests bypass usage rate limits and credit-ledger queries', async () => {
+    const chatSource = await readFile(path.join(frontendRoot, 'app', 'api', 'chat', 'route.ts'), 'utf8');
+    const conversationSource = await readFile(
+        path.join(frontendRoot, 'app', 'api', 'conversations', '[id]', 'messages', 'route.ts'),
+        'utf8',
+    );
+    const reportSource = await readFile(path.join(frontendRoot, 'app', 'api', 'report', 'route.ts'), 'utf8');
+    const ssoBillingSource = await readFile(path.join(frontendRoot, 'app', 'api', 'sso', 'billing', 'route.ts'), 'utf8');
+    const usageSource = await readFile(path.join(frontendRoot, 'app', 'lib', 'ai-usage-store.ts'), 'utf8');
+
+    for (const source of [chatSource, conversationSource, reportSource, ssoBillingSource]) {
+        assert.match(
+            source,
+            /const isExternallyBilled = isExternallyBilledAccount\([^)]+\);[\s\S]{0,1200}if \(isExternallyBilled\) \{[\s\S]{0,600}await enforceRateLimit\(/,
+        );
+    }
+    assert.match(ssoBillingSource, /if \(isExternallyBilled\) \{[\s\S]{0,1800}reserveAiUsageCredits\(/);
+    assert.match(usageSource, /if \(billingAudience === 'internal'\) \{\s*return saved;\s*\}/);
 });
 
 test('new recharge codes can be looked up without storing their plaintext value', () => {

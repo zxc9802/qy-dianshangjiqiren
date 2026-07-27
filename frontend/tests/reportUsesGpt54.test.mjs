@@ -132,6 +132,7 @@ test('report endpoint asks the OpenAI chat helper to analyze with GPT-5.4', asyn
           nickname: '测试用户',
           groupName: '测试组',
           billingAudience: 'internal',
+          role: 'user',
         }),
       },
       '../../lib/ai-usage-store': {
@@ -141,6 +142,9 @@ test('report endpoint asks the OpenAI chat helper to analyze with GPT-5.4', asyn
       },
       '../../lib/ai-usage': {
         estimateTextUsageReservationCredits: () => 0,
+        isExternallyBilledAccount: ({ billingAudience, role }) => (
+          billingAudience === 'external' && role !== 'admin'
+        ),
       },
       '../../lib/security-rate-limit': {
         enforceRateLimit: async () => {},

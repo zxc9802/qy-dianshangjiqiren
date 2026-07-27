@@ -9,6 +9,7 @@ import {
 import {
     calculateFixedMediaBilling,
     calculateTextUsageBilling,
+    isExternallyBilledAccount,
 } from '@/app/lib/ai-usage';
 import {
     getExternalSsoClientSecretHeaderName,
@@ -159,53 +160,61 @@ export async function POST(req: NextRequest) {
         }
 
         const user = await getBillingUser(req, input.userId);
-        await enforceRateLimit({
-            scope: `sso-billing:${product}`,
-            identifier: user.id,
-            limit: 600,
-            windowMs: 60_000,
-            blockMs: 60_000,
-        });
+        const isExternallyBilled = isExternallyBilledAccount(user);
+        if (isExternallyBilled) {
+            await enforceRateLimit({
+                scope: `sso-billing:${product}`,
+                identifier: user.id,
+                limit: 600,
+                windowMs: 60_000,
+                blockMs: 60_000,
+            });
+        }
 
         const channel = `sso:${product}:${input.operation}`;
         if (input.action === 'release') {
-            await releaseAiUsageCredits({
-                userId: user.id,
-                channel,
-                requestId: input.requestId,
-            });
-        } else if (input.action === 'reserve') {
-            const billing = input.mediaProduct
-                ? calculateFixedMediaBilling({
-                    product: input.mediaProduct,
-                    units: input.billableUnits || 0,
-                    billingAudience: user.billingAudience === 'internal' ? 'internal' : 'external',
-                })
-                : calculateTextUsageBilling({
-                    model: input.model || '',
-                    usage: {
-                        inputTokens: input.estimatedInputTokens || 0,
-                        cachedInputTokens: 0,
-                        outputTokens: input.maxOutputTokens || 0,
-                        reasoningTokens: 0,
-                        totalTokens: (input.estimatedInputTokens || 0) + (input.maxOutputTokens || 0),
-                    },
-                    billingAudience: user.billingAudience === 'internal' ? 'internal' : 'external',
+            if (isExternallyBilled) {
+                await releaseAiUsageCredits({
+                    userId: user.id,
+                    channel,
+                    requestId: input.requestId,
                 });
-            if (!billing) {
-                throw new AppError(
-                    'This model is not available for external credit billing.',
-                    403,
-                    'MODEL_NOT_AVAILABLE_FOR_EXTERNAL_BILLING',
-                );
             }
-            const reservedCredits = await reserveAiUsageCredits({
-                userId: user.id,
-                channel,
-                requestId: input.requestId,
-                amount: billing.chargedCredits,
-                description: `SSO AI 请求预留 · ${product} / ${input.model || input.mediaProduct}`,
-            });
+        } else if (input.action === 'reserve') {
+            let reservedCredits = 0;
+            if (isExternallyBilled) {
+                const billing = input.mediaProduct
+                    ? calculateFixedMediaBilling({
+                        product: input.mediaProduct,
+                        units: input.billableUnits || 0,
+                        billingAudience: 'external',
+                    })
+                    : calculateTextUsageBilling({
+                        model: input.model || '',
+                        usage: {
+                            inputTokens: input.estimatedInputTokens || 0,
+                            cachedInputTokens: 0,
+                            outputTokens: input.maxOutputTokens || 0,
+                            reasoningTokens: 0,
+                            totalTokens: (input.estimatedInputTokens || 0) + (input.maxOutputTokens || 0),
+                        },
+                        billingAudience: 'external',
+                    });
+                if (!billing) {
+                    throw new AppError(
+                        'This model is not available for external credit billing.',
+                        403,
+                        'MODEL_NOT_AVAILABLE_FOR_EXTERNAL_BILLING',
+                    );
+                }
+                reservedCredits = await reserveAiUsageCredits({
+                    userId: user.id,
+                    channel,
+                    requestId: input.requestId,
+                    amount: billing.chargedCredits,
+                    description: `SSO AI 请求预留 · ${product} / ${input.model || input.mediaProduct}`,
+                });
+            }
             const balance = await prisma.user.findUniqueOrThrow({
                 where: { id: user.id },
                 select: { pointsBalance: true },
@@ -217,7 +226,7 @@ export async function POST(req: NextRequest) {
                     requestId: input.requestId,
                     reservedCredits,
                     pointsBalance: balance.pointsBalance,
-                    chargeRequired: user.billingAudience === 'external',
+                    chargeRequired: isExternallyBilled,
                 },
             });
         } else {
@@ -247,7 +256,7 @@ export async function POST(req: NextRequest) {
                     requestId: input.requestId,
                     usage: serializeSavedUsage(saved),
                     pointsBalance: balance.pointsBalance,
-                    chargeRequired: user.billingAudience === 'external',
+                    chargeRequired: isExternallyBilled,
                 },
             });
         }
@@ -262,7 +271,7 @@ export async function POST(req: NextRequest) {
                 action: input.action,
                 requestId: input.requestId,
                 pointsBalance: balance.pointsBalance,
-                chargeRequired: user.billingAudience === 'external',
+                chargeRequired: isExternallyBilled,
             },
         });
     } catch (error) {

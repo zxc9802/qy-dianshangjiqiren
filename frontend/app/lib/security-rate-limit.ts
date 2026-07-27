@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { AppError } from './auth';
 import { prisma } from './prisma';
 import { resolveRateLimitAttempt } from './security-rate-limit-core';
+import {
+    isRetryableTransactionError,
+    waitForTransactionRetry,
+} from './transaction-retry';
 
 const RATE_LIMIT_TRANSACTION_OPTIONS = {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -77,14 +81,13 @@ export async function enforceRateLimit(input: {
             }
             return;
         } catch (error) {
-            const canRetry = (
-                error instanceof Prisma.PrismaClientKnownRequestError
-                && (error.code === 'P2002' || error.code === 'P2034')
-                && attempt < RATE_LIMIT_TRANSACTION_ATTEMPTS - 1
-            );
-            if (!canRetry) {
+            if (!isRetryableTransactionError(error)) {
                 throw error;
             }
+            if (attempt >= RATE_LIMIT_TRANSACTION_ATTEMPTS - 1) {
+                break;
+            }
+            await waitForTransactionRetry(attempt);
         }
     }
 

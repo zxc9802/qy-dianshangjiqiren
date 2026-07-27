@@ -6,6 +6,13 @@ export const AI_USAGE_PRICE_VERSION = '2026-07-27';
 
 export type BillingAudience = 'internal' | 'external';
 
+export function isExternallyBilledAccount(account: {
+    billingAudience: string;
+    role: string;
+}): boolean {
+    return account.billingAudience === 'external' && account.role !== 'admin';
+}
+
 export type AiTokenUsage = {
     inputTokens: number;
     cachedInputTokens: number;

@@ -31,7 +31,7 @@ test('admin recharge-code creation requires administrator access', async () => {
 test('redemption atomically claims a code and increments the external user balance', async () => {
     const source = await readFile(path.join(appRoot, 'api', 'points', 'route.ts'), 'utf8');
 
-    assert.match(source, /billingAudience\s*!==\s*'external'/);
+    assert.match(source, /!isExternallyBilledAccount\(user\)/);
     assert.match(source, /tx\.redeemCode\.updateMany\(/);
     assert.match(source, /isUsed:\s*false/);
     assert.match(source, /pointsBalance:\s*\{\s*increment:\s*rechargeCode\.pointsAmount/s);

@@ -6,7 +6,10 @@ import {
     releaseAiUsageCredits,
     reserveAiUsageCredits,
 } from '../../lib/ai-usage-store';
-import { estimateTextUsageReservationCredits } from '../../lib/ai-usage';
+import {
+    estimateTextUsageReservationCredits,
+    isExternallyBilledAccount,
+} from '../../lib/ai-usage';
 import { enforceRateLimit } from '../../lib/security-rate-limit';
 import { GPT_5_4_MODEL, requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
 
@@ -40,12 +43,15 @@ const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基
 export async function POST(req: NextRequest) {
     try {
         const authUser = await getAuthUser(req);
-        await enforceRateLimit({
-            scope: 'report:user',
-            identifier: authUser.id,
-            limit: 10,
-            windowMs: 60_000,
-        });
+        const isExternallyBilled = isExternallyBilledAccount(authUser);
+        if (isExternallyBilled) {
+            await enforceRateLimit({
+                scope: 'report:user',
+                identifier: authUser.id,
+                limit: 10,
+                windowMs: 60_000,
+            });
+        }
         const { botId, botName, messages } = await req.json();
 
         if (!Array.isArray(messages) || messages.length < 2) {
@@ -65,7 +71,7 @@ export async function POST(req: NextRequest) {
 
         const usageRequestId = randomUUID();
         let creditsReserved = false;
-        if (authUser.billingAudience === 'external') {
+        if (isExternallyBilled) {
             const reservationAmount = estimateTextUsageReservationCredits({
                 model: GPT_5_4_MODEL,
                 promptText: `${REPORT_PROMPT}\n${reportMessages.map((message) => message.content).join('\n')}`,
@@ -98,7 +104,7 @@ export async function POST(req: NextRequest) {
                         userEmail: authUser.email,
                         userNickname: authUser.nickname,
                         userGroup: authUser.groupName,
-                        billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                        billingAudience: isExternallyBilled ? 'external' : 'internal',
                         appId: 'main',
                         channel: REPORT_USAGE_CHANNEL,
                         providerId: 'yunwu-openai',

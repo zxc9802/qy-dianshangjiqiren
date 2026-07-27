@@ -6,7 +6,10 @@ import {
     releaseAiUsageCredits,
     reserveAiUsageCredits,
 } from '../../lib/ai-usage-store';
-import { estimateTextUsageReservationCredits } from '../../lib/ai-usage';
+import {
+    estimateTextUsageReservationCredits,
+    isExternallyBilledAccount,
+} from '../../lib/ai-usage';
 import { BUILTIN_BOT_MAP } from '../../lib/builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
 import {
@@ -50,6 +53,7 @@ type UsageUser = {
     nickname: string;
     groupName: string;
     billingAudience: string;
+    role: string;
 };
 
 const MAIN_CHAT_USAGE_CHANNEL = 'main-chat';
@@ -148,7 +152,7 @@ async function streamByResponseModel(
                         userEmail: usageContext.user.email,
                         userNickname: usageContext.user.nickname,
                         userGroup: usageContext.user.groupName,
-                        billingAudience: usageContext.user.billingAudience === 'internal' ? 'internal' : 'external',
+                        billingAudience: isExternallyBilledAccount(usageContext.user) ? 'external' : 'internal',
                         appId: 'main',
                         channel: MAIN_CHAT_USAGE_CHANNEL,
                         providerId: 'yunwu-openai',
@@ -205,20 +209,21 @@ async function streamByResponseModel(
 export async function POST(req: NextRequest) {
     try {
         const usageUser = await getAuthUser(req);
-        await Promise.all([
-            enforceRateLimit({
+        const isExternallyBilled = isExternallyBilledAccount(usageUser);
+        if (isExternallyBilled) {
+            await enforceRateLimit({
                 scope: 'chat:user',
                 identifier: usageUser.id,
                 limit: 30,
                 windowMs: 60_000,
-            }),
-            enforceRateLimit({
+            });
+            await enforceRateLimit({
                 scope: 'chat:ip',
                 identifier: getClientAddress(req),
                 limit: 60,
                 windowMs: 60_000,
-            }),
-        ]);
+            });
+        }
         const usageRequestId = randomUUID();
         const body = await req.json() as {
             botId?: unknown;
@@ -233,7 +238,7 @@ export async function POST(req: NextRequest) {
 
         const botIdString = String(body.botId ?? '').trim();
         const responseModel = isResponseModel(body.responseModel) ? body.responseModel : DEFAULT_RESPONSE_MODEL;
-        if (usageUser.billingAudience === 'external' && responseModel !== 'gpt-5.4') {
+        if (isExternallyBilled && responseModel !== 'gpt-5.4') {
             throw new AppError(
                 'External accounts can currently use GPT-5.4 for metered chat.',
                 403,
@@ -271,7 +276,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        if (usageUser.billingAudience === 'external') {
+        if (isExternallyBilled) {
             const reservationAmount = estimateTextUsageReservationCredits({
                 model: 'gpt-5.4',
                 promptText: [
@@ -313,7 +318,7 @@ export async function POST(req: NextRequest) {
                     const messageText = getPublicErrorMessage(error, 'AI service temporarily unavailable.');
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: messageText })}\n\n`));
                 } finally {
-                    if (usageUser.billingAudience === 'external') {
+                    if (isExternallyBilled) {
                         await releaseAiUsageCredits({
                             userId: usageUser.id,
                             channel: MAIN_CHAT_USAGE_CHANNEL,

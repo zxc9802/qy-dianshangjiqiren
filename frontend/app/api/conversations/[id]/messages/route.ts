@@ -11,6 +11,7 @@ import {
 import {
     calculateFixedMediaBilling,
     estimateTextUsageReservationCredits,
+    isExternallyBilledAccount,
 } from '../../../../lib/ai-usage';
 import {
     buildAttachmentContextBlock,
@@ -556,20 +557,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     try {
         const authUser = await getAuthUser(req);
         const userId = authUser.id;
-        await Promise.all([
-            enforceRateLimit({
+        const isExternallyBilled = isExternallyBilledAccount(authUser);
+        if (isExternallyBilled) {
+            await enforceRateLimit({
                 scope: 'conversation-message:user',
                 identifier: userId,
                 limit: 30,
                 windowMs: 60_000,
-            }),
-            enforceRateLimit({
+            });
+            await enforceRateLimit({
                 scope: 'conversation-message:ip',
                 identifier: getClientAddress(req),
                 limit: 60,
                 windowMs: 60_000,
-            }),
-        ]);
+            });
+        }
         const usageRequestId = randomUUID();
         const { id: conversationId } = await params;
         const {
@@ -583,7 +585,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             inlineVideoUploads,
         } = await parseMessageRequest(req);
         if (
-            authUser.billingAudience === 'external'
+            isExternallyBilled
             && inputType !== 'image'
             && responseModel !== 'gpt-5.4'
         ) {
@@ -849,7 +851,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                 try {
                     if (inputType === 'image') {
-                        if (authUser.billingAudience === 'external') {
+                        if (isExternallyBilled) {
                             await reserveAiUsageCredits({
                                 userId,
                                 channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
@@ -966,7 +968,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                         userEmail: authUser.email,
                                         userNickname: authUser.nickname,
                                         userGroup: authUser.groupName,
-                                        billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                                        billingAudience: isExternallyBilled ? 'external' : 'internal',
                                         appId: 'main',
                                         channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
                                         providerId: 'yunwu',
@@ -1023,7 +1025,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     });
                                     throw error;
                                     } finally {
-                                        if (authUser.billingAudience === 'external') {
+                                        if (isExternallyBilled) {
                                             await releaseAiUsageCredits({
                                                 userId,
                                                 channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
@@ -1036,7 +1038,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                 },
                             });
                         } catch (error) {
-                            if (authUser.billingAudience === 'external') {
+                            if (isExternallyBilled) {
                                 await releaseAiUsageCredits({
                                     userId,
                                     channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
@@ -1085,7 +1087,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         webSearchMode,
                     });
                     const systemPromptWithWebSearch = enriched.systemPrompt;
-                    if (authUser.billingAudience === 'external') {
+                    if (isExternallyBilled) {
                         const reservationAmount = estimateTextUsageReservationCredits({
                             model: GPT_5_4_MODEL,
                             promptText: [
@@ -1131,7 +1133,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     userEmail: authUser.email,
                                     userNickname: authUser.nickname,
                                     userGroup: authUser.groupName,
-                                    billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                                    billingAudience: isExternallyBilled ? 'external' : 'internal',
                                     appId: 'main',
                                     channel: CONVERSATION_USAGE_CHANNEL,
                                     providerId: 'yunwu-openai',
