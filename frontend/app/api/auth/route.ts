@@ -10,6 +10,7 @@ import {
     resolveRegistrationProfile,
 } from '../../lib/account-registration';
 import { readServerEnv } from '../../lib/server-env';
+import { enforceRateLimit, getClientAddress } from '../../lib/security-rate-limit';
 import {
     signToken,
     AppError,
@@ -20,7 +21,8 @@ import {
 
 const accountSchema = z.string().trim().min(3, 'Account must be at least 3 characters.').max(64, 'Account is too long.');
 const externalAccountSchema = z.string().trim().email('Please enter a valid email address.').max(191, 'Email is too long.');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters.').max(128, 'Password is too long.');
+const passwordSchema = z.string().min(8, 'Password must be at least 8 characters.').max(128, 'Password is too long.');
+const credentialPasswordSchema = z.string().min(1, 'Password is required.').max(128, 'Password is too long.');
 const externalPasswordSchema = z.string().min(8, 'Password must be at least 8 characters.').max(128, 'Password is too long.');
 const inviteCodeSchema = z.string().trim().min(6, 'Invite code is required.').max(32, 'Invite code is invalid.');
 const nicknameSchema = z.string().trim().min(1, 'Name is required.').max(20, 'Name is too long.');
@@ -31,7 +33,7 @@ const optionalGroupNameSchema = z.string().trim().max(50, 'Group is too long.').
 
 const internalRegisterSchema = z.object({
     account: accountSchema,
-    password: passwordSchema,
+    password: credentialPasswordSchema,
     nickname: nicknameSchema,
     groupName: groupNameSchema,
     inviteCode: inviteCodeSchema,
@@ -45,12 +47,12 @@ const externalRegisterSchema = z.object({
 
 const loginSchema = z.object({
     account: z.string().trim().min(3, 'Account must be at least 3 characters.').max(191, 'Account is too long.'),
-    password: z.string().max(128, 'Password is too long.'),
+    password: credentialPasswordSchema,
 });
 
 const activateSchema = z.object({
     account: accountSchema,
-    password: z.string(),
+    password: credentialPasswordSchema,
     inviteCode: inviteCodeSchema,
     nickname: optionalNicknameSchema,
     groupName: optionalGroupNameSchema,
@@ -60,6 +62,52 @@ const AUTH_TRANSACTION_OPTIONS = {
     maxWait: 10_000,
     timeout: 20_000,
 } as const;
+const DUMMY_PASSWORD_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
+
+async function enforceAuthActionRateLimit(
+    req: NextRequest,
+    action: string | null,
+    body: unknown,
+): Promise<void> {
+    if (!action || action === 'logout') {
+        return;
+    }
+
+    const isRegistration = action === 'register'
+        || action === 'register-internal'
+        || action === 'register-external';
+    const limit = isRegistration ? 5 : 8;
+    const windowMs = isRegistration ? 60 * 60_000 : 10 * 60_000;
+    const blockMs = isRegistration ? 60 * 60_000 : 15 * 60_000;
+    const account = (
+        body
+        && typeof body === 'object'
+        && 'account' in body
+        && typeof body.account === 'string'
+    )
+        ? body.account.trim().toLowerCase()
+        : '';
+
+    const checks = [
+        enforceRateLimit({
+            scope: `auth:${action}:ip`,
+            identifier: getClientAddress(req),
+            limit,
+            windowMs,
+            blockMs,
+        }),
+    ];
+    if (account) {
+        checks.push(enforceRateLimit({
+            scope: `auth:${action}:account`,
+            identifier: account,
+            limit: isRegistration ? 3 : limit,
+            windowMs,
+            blockMs,
+        }));
+    }
+    await Promise.all(checks);
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -68,6 +116,7 @@ export async function POST(req: NextRequest) {
         const url = new URL(req.url);
         const action = url.searchParams.get('action');
         const body = await req.json();
+        await enforceAuthActionRateLimit(req, action, body);
 
         switch (action) {
             case 'register':
@@ -241,7 +290,7 @@ async function handleInternalRegister(body: unknown) {
             if (existing.role !== 'admin' && !existing.accessGrantedAt) {
                 const valid = await bcrypt.compare(data.password, existing.passwordHash);
                 if (!valid) {
-                    throw new AppError('Incorrect password.', 400);
+                    throw new AppError('Invalid account or password.', 401, 'INVALID_CREDENTIALS');
                 }
 
                 await consumeInviteCode(tx, inviteCode, existing.id);
@@ -276,6 +325,7 @@ async function handleInternalRegister(body: unknown) {
             throw new AppError('Account already exists.', 409);
         }
 
+        passwordSchema.parse(data.password);
         const passwordHash = await bcrypt.hash(data.password, 10);
         const createdUser = await tx.user.create({
             data: {
@@ -427,12 +477,13 @@ async function handleLogin(body: unknown) {
     }
 
     if (!user) {
-        throw new AppError('Account not found.', 404);
+        await bcrypt.compare(data.password, DUMMY_PASSWORD_HASH);
+        throw new AppError('Invalid account or password.', 401, 'INVALID_CREDENTIALS');
     }
 
     const valid = await bcrypt.compare(data.password, user.passwordHash);
     if (!valid) {
-        throw new AppError('Incorrect password.', 400);
+        throw new AppError('Invalid account or password.', 401, 'INVALID_CREDENTIALS');
     }
 
     if (user.accountStatus !== 'active') {
@@ -492,12 +543,13 @@ async function handleActivate(body: unknown) {
         });
 
         if (!existing) {
-            throw new AppError('Account not found.', 404);
+            await bcrypt.compare(data.password, DUMMY_PASSWORD_HASH);
+            throw new AppError('Invalid account or password.', 401, 'INVALID_CREDENTIALS');
         }
 
         const valid = await bcrypt.compare(data.password, existing.passwordHash);
         if (!valid) {
-            throw new AppError('Incorrect password.', 400);
+            throw new AppError('Invalid account or password.', 401, 'INVALID_CREDENTIALS');
         }
 
         if (existing.accountStatus !== 'active') {

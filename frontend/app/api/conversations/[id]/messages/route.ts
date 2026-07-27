@@ -2,8 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
-import { getAuthUser, AppError, errorResponse } from '../../../../lib/auth';
-import { recordAiUsageEvent } from '../../../../lib/ai-usage-store';
+import { getAuthUser, AppError, errorResponse, getPublicErrorMessage } from '../../../../lib/auth';
+import {
+    recordAiUsageEvent,
+    releaseAiUsageCredits,
+    reserveAiUsageCredits,
+} from '../../../../lib/ai-usage-store';
+import {
+    calculateFixedMediaBilling,
+    estimateTextUsageReservationCredits,
+} from '../../../../lib/ai-usage';
 import {
     buildAttachmentContextBlock,
     buildMessageDisplayContent,
@@ -60,6 +68,7 @@ import {
     startConversationImageJob,
     type ConversationImageJobResult,
 } from '../../../../lib/server-conversation-image-jobs';
+import { enforceRateLimit, getClientAddress } from '../../../../lib/security-rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,6 +87,14 @@ const CHAT_CONTEXT_RECENT_USER_TURNS = 10;
 const CHAT_CONTEXT_HISTORY_PAGE_SIZE = 30;
 const CHAT_CONTEXT_HISTORY_MAX_PAGES = 6;
 const VIDEO_BREAKDOWN_STREAM_STATUS = '正在分析视频内容，请稍候...';
+const CONVERSATION_USAGE_CHANNEL = 'main-conversation';
+const CONVERSATION_IMAGE_USAGE_CHANNEL = 'main-conversation-image';
+const MAX_CONVERSATION_OUTPUT_TOKENS = 8192;
+const IMAGE_RESERVATION_CREDITS = calculateFixedMediaBilling({
+    product: 'nanobanana2',
+    units: 1,
+    billingAudience: 'external',
+}).chargedCredits;
 const attachmentSchema = z.object({
     kind: z.enum(['document', 'image', 'video']),
     fileName: z.string().min(1).max(255),
@@ -539,6 +556,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     try {
         const authUser = await getAuthUser(req);
         const userId = authUser.id;
+        await Promise.all([
+            enforceRateLimit({
+                scope: 'conversation-message:user',
+                identifier: userId,
+                limit: 30,
+                windowMs: 60_000,
+            }),
+            enforceRateLimit({
+                scope: 'conversation-message:ip',
+                identifier: getClientAddress(req),
+                limit: 60,
+                windowMs: 60_000,
+            }),
+        ]);
         const usageRequestId = randomUUID();
         const { id: conversationId } = await params;
         const {
@@ -551,7 +582,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             attachments: incomingAttachments,
             inlineVideoUploads,
         } = await parseMessageRequest(req);
-
+        if (
+            authUser.billingAudience === 'external'
+            && inputType !== 'image'
+            && responseModel !== 'gpt-5.4'
+        ) {
+            throw new AppError(
+                'External accounts can currently use GPT-5.4 for metered chat.',
+                403,
+                'MODEL_NOT_AVAILABLE_FOR_EXTERNAL_BILLING',
+            );
+        }
         const normalizedAttachments = normalizeIncomingAttachments(incomingAttachments);
         let inlineVideoIndex = 0;
         const attachments: CurrentTurnAttachment[] = await Promise.all(normalizedAttachments.map(async (attachment) => {
@@ -782,6 +823,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 let fullResponse = '';
                 let streamedVisibleLength = 0;
                 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+                let creditsReserved = false;
                 const emitStreamEvent = createChatStreamEmitter(controller, encoder);
 
                 const startHeartbeat = () => {
@@ -807,14 +849,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
                 try {
                     if (inputType === 'image') {
+                        if (authUser.billingAudience === 'external') {
+                            await reserveAiUsageCredits({
+                                userId,
+                                channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
+                                requestId: usageRequestId,
+                                amount: IMAGE_RESERVATION_CREDITS,
+                                description: `AI 请求预留 · main / nanobanana2 · 最多 ${IMAGE_RESERVATION_CREDITS} 积分`,
+                            });
+                        }
                         const requestHeaders = new Headers(req.headers);
                         const requestOrigin = req.nextUrl.origin;
-                        const imageJob = startConversationImageJob({
-                            conversationId,
-                            userId,
-                            initialMessage: '正在生成图片，通常需要 10 到 40 秒。',
-                            run: async ({ jobId, updateStatus }): Promise<ConversationImageJobResult> => {
-                                try {
+                        let imageJob: ReturnType<typeof startConversationImageJob>;
+                        try {
+                            imageJob = startConversationImageJob({
+                                conversationId,
+                                userId,
+                                initialMessage: '正在生成图片，通常需要 10 到 40 秒。',
+                                run: async ({ jobId, updateStatus }): Promise<ConversationImageJobResult> => {
+                                    try {
                                     updateStatus('正在整理图片上下文。');
                                     console.info('[Conversations] image request started', {
                                         conversationId,
@@ -908,6 +961,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                         throw new Error(generated?.errorMessage || 'Image generation failed');
                                     }
 
+                                    await recordAiUsageEvent({
+                                        userId,
+                                        userEmail: authUser.email,
+                                        userNickname: authUser.nickname,
+                                        userGroup: authUser.groupName,
+                                        billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                                        appId: 'main',
+                                        channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
+                                        providerId: 'yunwu',
+                                        model: 'nanobanana2',
+                                        requestId: usageRequestId,
+                                        usageSource: 'estimated',
+                                        mediaProduct: 'nanobanana2',
+                                        billableUnits: generated.resultImagePaths.length,
+                                    });
+
                                     updateStatus('图片已生成，正在整理结果。');
                                     const assistantText = buildConversationImageSummary(generated.resultImagePaths.length);
                                     const encodedAssistantMessage = encodeConversationImageMessage({
@@ -953,9 +1022,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                         errorStack: error instanceof Error ? error.stack : undefined,
                                     });
                                     throw error;
-                                }
-                            },
-                        });
+                                    } finally {
+                                        if (authUser.billingAudience === 'external') {
+                                            await releaseAiUsageCredits({
+                                                userId,
+                                                channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
+                                                requestId: usageRequestId,
+                                            }).catch((error) => {
+                                                console.error('[credit-reservation] Failed to release image reservation:', error);
+                                            });
+                                        }
+                                    }
+                                },
+                            });
+                        } catch (error) {
+                            if (authUser.billingAudience === 'external') {
+                                await releaseAiUsageCredits({
+                                    userId,
+                                    channel: CONVERSATION_IMAGE_USAGE_CHANNEL,
+                                    requestId: usageRequestId,
+                                }).catch((releaseError) => {
+                                    console.error('[credit-reservation] Failed to release unstarted image reservation:', releaseError);
+                                });
+                            }
+                            throw error;
+                        }
 
                         emitStreamEvent({
                             type: 'status',
@@ -994,6 +1085,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         webSearchMode,
                     });
                     const systemPromptWithWebSearch = enriched.systemPrompt;
+                    if (authUser.billingAudience === 'external') {
+                        const reservationAmount = estimateTextUsageReservationCredits({
+                            model: GPT_5_4_MODEL,
+                            promptText: [
+                                systemPromptWithWebSearch,
+                                ...textModelMessages.map((message) => (
+                                    typeof message.content === 'string'
+                                        ? `${message.role}:${message.content}`
+                                        : `${message.role}:${JSON.stringify(message.content)}`
+                                )),
+                            ].join('\n'),
+                            maxOutputTokens: MAX_CONVERSATION_OUTPUT_TOKENS,
+                            billingAudience: 'external',
+                            groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                            usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                        });
+                        await reserveAiUsageCredits({
+                            userId,
+                            channel: CONVERSATION_USAGE_CHANNEL,
+                            requestId: usageRequestId,
+                            amount: reservationAmount,
+                            description: `AI 请求预留 · main / ${GPT_5_4_MODEL} · 最多 ${reservationAmount} 积分`,
+                        });
+                        creditsReserved = true;
+                    }
 
                     if (shouldStreamOpenAI) {
                         startHeartbeat();
@@ -1017,7 +1133,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     userGroup: authUser.groupName,
                                     billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
                                     appId: 'main',
-                                    channel: 'main-conversation',
+                                    channel: CONVERSATION_USAGE_CHANNEL,
                                     providerId: 'yunwu-openai',
                                     model: GPT_5_4_MODEL,
                                     requestId: usageRequestId,
@@ -1025,8 +1141,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     usageSource: 'response',
                                     groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
                                     usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
-                                }).catch((error) => {
-                                    console.error('[usage-monitor] Conversation usage write failed:', error);
                                 });
                             },
                             onText: (textChunk) => {
@@ -1146,10 +1260,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     }
                     emitStreamEvent({
                         type: 'error',
-                        content: error instanceof Error ? error.message : 'Request failed',
+                        content: getPublicErrorMessage(error),
                     });
                 } finally {
                     stopHeartbeat();
+                    if (creditsReserved) {
+                        await releaseAiUsageCredits({
+                            userId,
+                            channel: CONVERSATION_USAGE_CHANNEL,
+                            requestId: usageRequestId,
+                        }).catch((error) => {
+                            console.error('[credit-reservation] Failed to release conversation reservation:', error);
+                        });
+                    }
                     await Promise.all(tempVideoTokensToCleanup.map((token) => deleteTempVideo(token)));
                     controller.close();
                 }

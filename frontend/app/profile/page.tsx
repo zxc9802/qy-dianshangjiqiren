@@ -351,7 +351,7 @@ export default function ProfilePage() {
                             <p>
                                 {user.billingAudience === 'internal'
                                     ? '内部账号只记录实际成本，不扣计费积分。'
-                                    : '外部账号按实际成本的 1.8 倍计算计费积分。'}
+                                    : '100 积分 = ¥1，实际使用产生的积分明细会记录在下方。'}
                             </p>
                         </div>
                         <span className={styles.audienceBadge}>

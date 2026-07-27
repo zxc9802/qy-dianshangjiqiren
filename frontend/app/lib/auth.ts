@@ -56,6 +56,7 @@ export async function ensureAccessControlBootstrap(): Promise<void> {
 
 async function runAccessControlBootstrap(): Promise<void> {
     await ensureAuthTokenVersionColumn();
+    await ensureSecurityStorage();
 
     const adminAccount = readServerEnv('ADMIN_ACCOUNT')?.trim();
     const adminPassword = readServerEnv('ADMIN_PASSWORD');
@@ -97,6 +98,65 @@ async function ensureAuthTokenVersionColumn(): Promise<void> {
     await prisma.$executeRawUnsafe(`
         ALTER TABLE users
         ADD COLUMN IF NOT EXISTS auth_token_version integer NOT NULL DEFAULT 0
+    `);
+}
+
+async function ensureSecurityStorage(): Promise<void> {
+    await prisma.$executeRawUnsafe(`
+        ALTER TABLE points_transactions
+        ADD COLUMN IF NOT EXISTS reference_key text
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS points_transactions_reference_key_key
+        ON points_transactions (reference_key)
+        WHERE reference_key IS NOT NULL
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS points_transactions_user_id_created_at_idx
+        ON points_transactions (user_id, created_at DESC)
+    `);
+    await prisma.$executeRawUnsafe(`
+        ALTER TABLE redeem_codes
+        ADD COLUMN IF NOT EXISTS code_hash text,
+        ADD COLUMN IF NOT EXISTS code_last4 text NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS expires_at timestamp(3),
+        ADD COLUMN IF NOT EXISTS revoked_at timestamp(3),
+        ADD COLUMN IF NOT EXISTS created_by_user_id text,
+        ADD COLUMN IF NOT EXISTS revoked_by_user_id text,
+        ADD COLUMN IF NOT EXISTS remark text NOT NULL DEFAULT ''
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE UNIQUE INDEX IF NOT EXISTS redeem_codes_code_hash_key
+        ON redeem_codes (code_hash)
+        WHERE code_hash IS NOT NULL
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS request_rate_limits (
+            key text PRIMARY KEY,
+            count integer NOT NULL DEFAULT 0,
+            window_started_at timestamp(3) NOT NULL,
+            blocked_until timestamp(3),
+            updated_at timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS request_rate_limits_updated_at_idx
+        ON request_rate_limits (updated_at)
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS admin_audit_logs (
+            id text PRIMARY KEY,
+            admin_user_id text NOT NULL,
+            action text NOT NULL,
+            target_type text NOT NULL,
+            target_id text,
+            metadata jsonb,
+            created_at timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS admin_audit_logs_admin_user_id_created_at_idx
+        ON admin_audit_logs (admin_user_id, created_at DESC)
     `);
 }
 
@@ -260,6 +320,13 @@ export class AppError extends Error {
     }
 }
 
+export function getPublicErrorMessage(err: unknown, fallback = 'Request failed.'): string {
+    if (err instanceof AuthError || err instanceof AppError) {
+        return err.status < 500 ? err.message : fallback;
+    }
+    return fallback;
+}
+
 export function errorResponse(err: unknown) {
     if (err instanceof AuthError) {
         return Response.json(
@@ -268,6 +335,13 @@ export function errorResponse(err: unknown) {
         );
     }
     if (err instanceof AppError) {
+        if (err.status >= 500) {
+            console.error('[API Error]', err);
+            return Response.json(
+                { error: 'Internal server error.', ...(err.code ? { code: err.code } : {}) },
+                { status: err.status },
+            );
+        }
         return Response.json(
             { error: err.message, ...(err.code ? { code: err.code } : {}) },
             { status: err.status },
@@ -278,7 +352,6 @@ export function errorResponse(err: unknown) {
         return Response.json({ error: firstIssue?.message || 'Invalid request.' }, { status: 400 });
     }
 
-    const message = err instanceof Error ? err.message : 'Internal server error.';
-    console.error('[API Error]', message);
-    return Response.json({ error: message }, { status: 500 });
+    console.error('[API Error]', err);
+    return Response.json({ error: 'Internal server error.' }, { status: 500 });
 }

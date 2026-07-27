@@ -187,6 +187,33 @@ export function calculateTextUsageBilling(input: {
     };
 }
 
+export function estimateTextUsageReservationCredits(input: {
+    model: string;
+    promptText: string;
+    maxOutputTokens: number;
+    billingAudience?: BillingAudience;
+    groupMultiplier?: number;
+    usdCnyRate?: number;
+}): number {
+    const inputTokenUpperBound = new TextEncoder().encode(input.promptText).length;
+    const outputTokenUpperBound = Math.max(1, Math.trunc(input.maxOutputTokens));
+    const billing = calculateTextUsageBilling({
+        model: input.model,
+        usage: {
+            inputTokens: inputTokenUpperBound,
+            cachedInputTokens: 0,
+            outputTokens: outputTokenUpperBound,
+            reasoningTokens: 0,
+            totalTokens: inputTokenUpperBound + outputTokenUpperBound,
+        },
+        billingAudience: input.billingAudience,
+        groupMultiplier: input.groupMultiplier,
+        usdCnyRate: input.usdCnyRate,
+    });
+
+    return billing?.chargedCredits || 0;
+}
+
 export function calculateFixedMediaBilling(input: {
     product: keyof typeof FIXED_MEDIA_COSTS_CNY;
     units: number;

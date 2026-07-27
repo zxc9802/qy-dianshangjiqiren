@@ -14,10 +14,12 @@ import {
 import {
   DEFAULT_RESPONSE_MODEL,
   DEFAULT_WEB_SEARCH_MODE,
-  RESPONSE_MODEL_OPTIONS,
+  EXTERNAL_DEFAULT_RESPONSE_MODEL,
   RESPONSE_MODEL_STORAGE_PREFIX,
   WEB_SEARCH_MODE_OPTIONS,
   WEB_SEARCH_MODE_STORAGE_PREFIX,
+  getResponseModelOptionsForAudience,
+  isResponseModelAvailableForAudience,
   isSelectableResponseModel,
   isWebSearchMode,
   type ResponseModel,
@@ -226,6 +228,10 @@ export default function Home2Page() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [responseModel, setResponseModel] = useState<ResponseModel>(DEFAULT_RESPONSE_MODEL);
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(DEFAULT_WEB_SEARCH_MODE);
+  const responseModelOptions = useMemo(
+    () => getResponseModelOptionsForAudience(user?.billingAudience),
+    [user?.billingAudience],
+  );
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -274,6 +280,11 @@ export default function Home2Page() {
     window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`, responseModel);
     window.localStorage.setItem(`${WEB_SEARCH_MODE_STORAGE_PREFIX}${GENERIC_CHAT_BOT_ID}`, webSearchMode);
   }, [responseModel, webSearchMode]);
+  useEffect(() => {
+    if (!isResponseModelAvailableForAudience(responseModel, user?.billingAudience)) {
+      setResponseModel(EXTERNAL_DEFAULT_RESPONSE_MODEL);
+    }
+  }, [responseModel, user?.billingAudience]);
   useEffect(() => () => {
     const recorder = recorderRef.current;
     recorderRef.current = null;
@@ -506,7 +517,7 @@ export default function Home2Page() {
               <div className={styles.composerFooter}>
                 <button className={styles.attachButton} onClick={() => fileInputRef.current?.click()} disabled={isRecording || isTranscribing}><Paperclip size={15} />{attachments.length ? `已选 ${attachments.length} 个附件` : '添加素材'}</button>
                 <div className={styles.composerControls}>
-                  <label className={styles.selectWrap}><select value={responseModel} onChange={(event) => { if (isSelectableResponseModel(event.target.value)) setResponseModel(event.target.value); }} disabled={isRecording || isTranscribing} aria-label="回答模型">{RESPONSE_MODEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></label>
+                  <label className={styles.selectWrap}><select value={responseModel} onChange={(event) => { if (isSelectableResponseModel(event.target.value)) setResponseModel(event.target.value); }} disabled={isRecording || isTranscribing} aria-label="回答模型">{responseModelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></label>
                   <label className={styles.selectWrap}><select value={webSearchMode} onChange={(event) => { if (isWebSearchMode(event.target.value)) setWebSearchMode(event.target.value); }} disabled={isRecording || isTranscribing} aria-label="联网模式">{WEB_SEARCH_MODE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={14} /></label>
                   <button className={`${styles.roundButton} ${isRecording ? styles.recording : ''}`} onClick={() => void toggleVoice()} disabled={isTranscribing} aria-label={isRecording ? '停止录音' : '语音输入'}>{isTranscribing ? <Loader2 size={17} className={styles.spin} /> : <Mic size={17} />}</button>
                   <button className={styles.sendButton} onClick={() => void submitPrompt()} disabled={isRecording || isTranscribing || (!prompt.trim() && attachments.length === 0)} aria-label="发送"><Send size={17} /></button>

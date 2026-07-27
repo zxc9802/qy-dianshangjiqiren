@@ -6,6 +6,7 @@ import {
     type AiTokenUsage,
     type BillingAudience,
 } from './ai-usage';
+import { AppError, ensureAccessControlBootstrap } from './auth';
 import { prisma } from './prisma';
 
 const USAGE_TRANSACTION_OPTIONS = {
@@ -41,12 +42,181 @@ export type RecordAiUsageEventInput = {
     billableUnits?: number;
 };
 
+type AiUsageCreditKey = {
+    userId: string;
+    channel: string;
+    requestId: string;
+};
+
+function reservationReference(channel: string, requestId: string): string {
+    return `usage-reserve:${channel}:${requestId}`;
+}
+
+function settlementReference(channel: string, requestId: string): string {
+    return `usage-settle:${channel}:${requestId}`;
+}
+
 function toBigInt(value: number | undefined | null): bigint | null {
     if (!Number.isFinite(value) || Number(value) < 0) return null;
     return BigInt(Math.trunc(Number(value)));
 }
 
+export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
+    amount: number;
+    description: string;
+}): Promise<number> {
+    await ensureAccessControlBootstrap();
+
+    const amount = Math.max(0, Math.trunc(input.amount));
+    const referenceKey = reservationReference(input.channel, input.requestId);
+
+    for (let attempt = 0; attempt < USAGE_TRANSACTION_ATTEMPTS; attempt += 1) {
+        try {
+            return await prisma.$transaction(async (tx) => {
+                const user = await tx.user.findUnique({
+                    where: { id: input.userId },
+                    select: {
+                        billingAudience: true,
+                        accountStatus: true,
+                    },
+                });
+                if (!user) {
+                    throw new AppError('Account not found.', 404, 'ACCOUNT_NOT_FOUND');
+                }
+                if (user.accountStatus !== 'active') {
+                    throw new AppError('This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
+                }
+                if (user.billingAudience !== 'external') {
+                    return 0;
+                }
+                if (amount <= 0) {
+                    throw new AppError(
+                        'This model is not available for external credit billing.',
+                        403,
+                        'MODEL_NOT_AVAILABLE_FOR_EXTERNAL_BILLING',
+                    );
+                }
+
+                const existing = await tx.pointsTransaction.findUnique({
+                    where: { referenceKey },
+                    select: { amount: true },
+                });
+                if (existing) {
+                    return Math.max(0, -existing.amount);
+                }
+
+                const claimed = await tx.user.updateMany({
+                    where: {
+                        id: input.userId,
+                        accountStatus: 'active',
+                        billingAudience: 'external',
+                        pointsBalance: { gte: amount },
+                    },
+                    data: {
+                        pointsBalance: { decrement: amount },
+                    },
+                });
+                if (claimed.count !== 1) {
+                    throw new AppError(
+                        `Insufficient credits. This request requires up to ${amount} credits.`,
+                        402,
+                        'INSUFFICIENT_CREDITS',
+                    );
+                }
+
+                const updatedUser = await tx.user.findUniqueOrThrow({
+                    where: { id: input.userId },
+                    select: { pointsBalance: true },
+                });
+                await tx.pointsTransaction.create({
+                    data: {
+                        userId: input.userId,
+                        type: 'reserve',
+                        amount: -amount,
+                        balanceAfter: updatedUser.pointsBalance,
+                        description: input.description,
+                        referenceKey,
+                    },
+                });
+
+                return amount;
+            }, USAGE_TRANSACTION_OPTIONS);
+        } catch (error) {
+            const canRetry = (
+                error instanceof Prisma.PrismaClientKnownRequestError
+                && (error.code === 'P2002' || error.code === 'P2034')
+                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
+            );
+            if (!canRetry) {
+                throw error;
+            }
+        }
+    }
+
+    throw new AppError('Unable to reserve credits.', 503, 'CREDIT_RESERVATION_UNAVAILABLE');
+}
+
+export async function releaseAiUsageCredits(input: AiUsageCreditKey): Promise<void> {
+    await ensureAccessControlBootstrap();
+
+    const reserveReferenceKey = reservationReference(input.channel, input.requestId);
+    const settleReferenceKey = settlementReference(input.channel, input.requestId);
+
+    for (let attempt = 0; attempt < USAGE_TRANSACTION_ATTEMPTS; attempt += 1) {
+        try {
+            await prisma.$transaction(async (tx) => {
+                const [reservation, settlement] = await Promise.all([
+                    tx.pointsTransaction.findUnique({
+                        where: { referenceKey: reserveReferenceKey },
+                        select: { amount: true },
+                    }),
+                    tx.pointsTransaction.findUnique({
+                        where: { referenceKey: settleReferenceKey },
+                        select: { id: true },
+                    }),
+                ]);
+                if (!reservation || settlement) {
+                    return;
+                }
+
+                const reservedAmount = Math.max(0, -reservation.amount);
+                const updatedUser = await tx.user.update({
+                    where: { id: input.userId },
+                    data: {
+                        pointsBalance: { increment: reservedAmount },
+                    },
+                    select: { pointsBalance: true },
+                });
+                await tx.pointsTransaction.create({
+                    data: {
+                        userId: input.userId,
+                        type: 'refund',
+                        amount: reservedAmount,
+                        balanceAfter: updatedUser.pointsBalance,
+                        description: 'AI 请求未计费，已退回预留积分',
+                        referenceKey: settleReferenceKey,
+                    },
+                });
+            }, USAGE_TRANSACTION_OPTIONS);
+            return;
+        } catch (error) {
+            const canRetry = (
+                error instanceof Prisma.PrismaClientKnownRequestError
+                && (error.code === 'P2002' || error.code === 'P2034')
+                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
+            );
+            if (!canRetry) {
+                throw error;
+            }
+        }
+    }
+
+    throw new AppError('Unable to release reserved credits.', 503, 'CREDIT_RELEASE_UNAVAILABLE');
+}
+
 export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
+    await ensureAccessControlBootstrap();
+
     const userId = input.userId.trim();
     const appId = input.appId.trim();
     const channel = input.channel.trim();
@@ -56,7 +226,14 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
         throw new Error('userId, appId, channel, model and requestId are required');
     }
 
-    const billingAudience = normalizeBillingAudience(input.billingAudience);
+    const billingOwner = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { billingAudience: true },
+    });
+    if (!billingOwner) {
+        throw new AppError('Account not found.', 404, 'ACCOUNT_NOT_FOUND');
+    }
+    const billingAudience = normalizeBillingAudience(billingOwner.billingAudience);
     const billing = input.mediaProduct
         ? calculateFixedMediaBilling({
             product: input.mediaProduct,
@@ -150,32 +327,103 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                 const previousCharge = serializeAiUsageNumber(existing?.chargedCredits);
                 const nextCharge = serializeAiUsageNumber(saved.chargedCredits);
                 const chargedDelta = nextCharge - previousCharge;
-                if (chargedDelta !== 0) {
-                    const owner = await tx.user.findUnique({
-                        where: { id: userId },
+                const reserveReferenceKey = reservationReference(channel, requestId);
+                const settleReferenceKey = settlementReference(channel, requestId);
+                const [reservation, settlement] = await Promise.all([
+                    tx.pointsTransaction.findUnique({
+                        where: { referenceKey: reserveReferenceKey },
+                        select: { amount: true },
+                    }),
+                    tx.pointsTransaction.findUnique({
+                        where: { referenceKey: settleReferenceKey },
                         select: { id: true },
-                    });
-                    if (owner) {
-                        const updatedUser = await tx.user.update({
+                    }),
+                ]);
+
+                if (reservation && !settlement) {
+                    const reservedAmount = Math.max(0, -reservation.amount);
+                    const adjustment = reservedAmount - nextCharge;
+                    if (adjustment < 0) {
+                        const extraCharge = -adjustment;
+                        const charged = await tx.user.updateMany({
+                            where: {
+                                id: userId,
+                                pointsBalance: { gte: extraCharge },
+                            },
+                            data: {
+                                pointsBalance: { decrement: extraCharge },
+                            },
+                        });
+                        if (charged.count !== 1) {
+                            throw new AppError(
+                                'Insufficient credits to settle this request.',
+                                402,
+                                'INSUFFICIENT_CREDITS',
+                            );
+                        }
+                    } else if (adjustment > 0) {
+                        await tx.user.update({
                             where: { id: userId },
                             data: {
-                                pointsBalance: {
-                                    increment: -chargedDelta,
-                                },
-                            },
-                            select: { pointsBalance: true },
-                        });
-
-                        await tx.pointsTransaction.create({
-                            data: {
-                                userId,
-                                type: 'consume',
-                                amount: -chargedDelta,
-                                balanceAfter: updatedUser.pointsBalance,
-                                description: `AI 用量扣费 · ${appId} / ${model}`,
+                                pointsBalance: { increment: adjustment },
                             },
                         });
                     }
+
+                    const updatedUser = await tx.user.findUniqueOrThrow({
+                        where: { id: userId },
+                        select: { pointsBalance: true },
+                    });
+                    await tx.pointsTransaction.create({
+                        data: {
+                            userId,
+                            type: 'settle',
+                            amount: adjustment,
+                            balanceAfter: updatedUser.pointsBalance,
+                            description: `AI 用量结算 · ${appId} / ${model} · 实扣 ${nextCharge} 积分`,
+                            referenceKey: settleReferenceKey,
+                        },
+                    });
+                } else if (!reservation && chargedDelta !== 0) {
+                    if (chargedDelta > 0) {
+                        const charged = await tx.user.updateMany({
+                            where: {
+                                id: userId,
+                                pointsBalance: { gte: chargedDelta },
+                            },
+                            data: {
+                                pointsBalance: { decrement: chargedDelta },
+                            },
+                        });
+                        if (charged.count !== 1) {
+                            throw new AppError(
+                                'Insufficient credits.',
+                                402,
+                                'INSUFFICIENT_CREDITS',
+                            );
+                        }
+                    } else {
+                        await tx.user.update({
+                            where: { id: userId },
+                            data: {
+                                pointsBalance: { increment: -chargedDelta },
+                            },
+                        });
+                    }
+
+                    const updatedUser = await tx.user.findUniqueOrThrow({
+                        where: { id: userId },
+                        select: { pointsBalance: true },
+                    });
+                    await tx.pointsTransaction.create({
+                        data: {
+                            userId,
+                            type: chargedDelta > 0 ? 'consume' : 'refund',
+                            amount: -chargedDelta,
+                            balanceAfter: updatedUser.pointsBalance,
+                            description: `AI 用量扣费 · ${appId} / ${model}`,
+                        },
+                    });
                 }
 
                 return saved;
@@ -183,7 +431,7 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
         } catch (error) {
             const canRetry = (
                 error instanceof Prisma.PrismaClientKnownRequestError
-                && error.code === 'P2034'
+                && (error.code === 'P2002' || error.code === 'P2034')
                 && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
             );
             if (!canRetry) {

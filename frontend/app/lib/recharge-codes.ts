@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_GROUP_COUNT = 4;
@@ -6,6 +6,20 @@ const CODE_GROUP_LENGTH = 4;
 
 export function normalizeRechargeCode(value: string): string {
     return value.trim().toUpperCase();
+}
+
+export function hashRechargeCode(value: string, pepper: string): string {
+    return createHmac('sha256', pepper)
+        .update(normalizeRechargeCode(value))
+        .digest('hex');
+}
+
+export function getRechargeCodeLast4(value: string): string {
+    return normalizeRechargeCode(value).replaceAll('-', '').slice(-4);
+}
+
+export function maskRechargeCode(last4: string): string {
+    return last4 ? `JF-****-****-****-${last4}` : 'JF-****-****-****-****';
 }
 
 export function generateRechargeCode(): string {

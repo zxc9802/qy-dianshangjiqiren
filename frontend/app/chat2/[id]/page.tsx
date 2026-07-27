@@ -19,10 +19,12 @@ import {
 import {
     DEFAULT_RESPONSE_MODEL,
     DEFAULT_WEB_SEARCH_MODE,
-    RESPONSE_MODEL_OPTIONS,
+    EXTERNAL_DEFAULT_RESPONSE_MODEL,
     RESPONSE_MODEL_STORAGE_PREFIX,
     WEB_SEARCH_MODE_OPTIONS,
     WEB_SEARCH_MODE_STORAGE_PREFIX,
+    getResponseModelOptionsForAudience,
+    isResponseModelAvailableForAudience,
     isSelectableResponseModel,
     isWebSearchMode,
     type ResponseModel,
@@ -1144,6 +1146,10 @@ export default function ChatPage() {
     const [adminPanelOpen, setAdminPanelOpen] = useState(false);
     const { user } = useAuthStore();
     const isAdmin = user?.role === 'admin';
+    const responseModelOptions = useMemo(
+        () => getResponseModelOptionsForAudience(user?.billingAudience),
+        [user?.billingAudience],
+    );
     const adminBotKind: 'builtin' | 'custom' = botId.startsWith('custom-') ? 'custom' : 'builtin';
     const canUseVideoBreakdownAttachments = isVideoBreakdownBot && !imageModeEnabled;
     const starterPrompts = useMemo(() => getStarterPrompts(botId, botName), [botId, botName]);
@@ -1260,6 +1266,12 @@ export default function ChatPage() {
         if (typeof window === 'undefined') return;
         window.localStorage.setItem(`${RESPONSE_MODEL_STORAGE_PREFIX}${botId}`, responseModel);
     }, [botId, responseModel]);
+
+    useEffect(() => {
+        if (!isResponseModelAvailableForAudience(responseModel, user?.billingAudience)) {
+            setResponseModel(EXTERNAL_DEFAULT_RESPONSE_MODEL);
+        }
+    }, [responseModel, user?.billingAudience]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -2846,7 +2858,7 @@ export default function ChatPage() {
                             }}
                             disabled={isStreaming || isUploading || isTranscribing || imageModeEnabled}
                         >
-                            {RESPONSE_MODEL_OPTIONS.map((option) => (
+                            {responseModelOptions.map((option) => (
                                 <option key={option.value} value={option.value}>
                                     {option.label}
                                 </option>

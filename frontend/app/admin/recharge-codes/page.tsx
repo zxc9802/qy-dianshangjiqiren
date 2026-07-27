@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Coins, Copy, RefreshCw, TicketCheck } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Coins, Copy, RefreshCw, TicketCheck } from 'lucide-react';
 import { api, RechargeCodeInfo } from '../../lib/api';
 import { useAuthStore } from '../../stores/auth';
 import styles from './recharge-codes.module.css';
@@ -15,10 +15,13 @@ export default function RechargeCodesPage() {
     const router = useRouter();
     const { user, isAuthenticated, isLoading, loadUser } = useAuthStore();
     const [points, setPoints] = useState('1000');
+    const [expiresInDays, setExpiresInDays] = useState('30');
+    const [remark, setRemark] = useState('');
     const [codes, setCodes] = useState<RechargeCodeInfo[]>([]);
     const [latestCode, setLatestCode] = useState<RechargeCodeInfo | null>(null);
     const [loading, setLoading] = useState(false);
     const [generating, setGenerating] = useState(false);
+    const [revokingId, setRevokingId] = useState('');
     const [error, setError] = useState('');
     const [message, setMessage] = useState('');
 
@@ -57,7 +60,11 @@ export default function RechargeCodesPage() {
 
     const summary = useMemo(() => ({
         total: codes.length,
-        unused: codes.filter((item) => !item.isUsed).length,
+        unused: codes.filter((item) => (
+            !item.isUsed
+            && !item.revokedAt
+            && (!item.expiresAt || new Date(item.expiresAt).getTime() > Date.now())
+        )).length,
         used: codes.filter((item) => item.isUsed).length,
     }), [codes]);
 
@@ -73,8 +80,13 @@ export default function RechargeCodesPage() {
     async function handleGenerate(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         const amount = Number(points);
-        if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 2_147_483_647) {
+        const expiryDays = Number(expiresInDays);
+        if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100_000_000) {
             setError('请输入大于 0 的整数积分。');
+            return;
+        }
+        if (!Number.isSafeInteger(expiryDays) || expiryDays < 1 || expiryDays > 3650) {
+            setError('有效期必须是 1 到 3650 天。');
             return;
         }
 
@@ -82,7 +94,10 @@ export default function RechargeCodesPage() {
         setError('');
         setMessage('');
         try {
-            const response = await api.adminCreateRechargeCode(amount);
+            const response = await api.adminCreateRechargeCode(amount, {
+                expiresInDays: expiryDays,
+                remark: remark.trim(),
+            });
             setLatestCode(response.data);
             setCodes((current) => [response.data, ...current.filter((item) => item.id !== response.data.id)]);
             setMessage(`已生成 ${formatPoints(amount)} 积分充值码。`);
@@ -90,6 +105,27 @@ export default function RechargeCodesPage() {
             setError(generateError instanceof Error ? generateError.message : '充值码生成失败。');
         } finally {
             setGenerating(false);
+        }
+    }
+
+    async function handleRevoke(id: string) {
+        if (!window.confirm('确定作废这条未使用的充值码吗？')) return;
+        setRevokingId(id);
+        setError('');
+        setMessage('');
+        try {
+            const response = await api.adminRevokeRechargeCode(id);
+            setCodes((current) => current.map((item) => (
+                item.id === id
+                    ? { ...item, revokedAt: response.data.revokedAt }
+                    : item
+            )));
+            setLatestCode((current) => current?.id === id ? null : current);
+            setMessage('充值码已作废。');
+        } catch (revokeError) {
+            setError(revokeError instanceof Error ? revokeError.message : '充值码作废失败。');
+        } finally {
+            setRevokingId('');
         }
     }
 
@@ -136,7 +172,7 @@ export default function RechargeCodesPage() {
                             <input
                                 type="number"
                                 min="1"
-                                max="2147483647"
+                                max="100000000"
                                 step="1"
                                 inputMode="numeric"
                                 value={points}
@@ -145,6 +181,32 @@ export default function RechargeCodesPage() {
                             />
                             <strong>积分</strong>
                         </div>
+                    </label>
+                    <label className={styles.pointsField}>
+                        <span>有效期</span>
+                        <div>
+                            <input
+                                type="number"
+                                min="1"
+                                max="3650"
+                                step="1"
+                                inputMode="numeric"
+                                value={expiresInDays}
+                                onChange={(event) => setExpiresInDays(event.target.value)}
+                                aria-label="有效期天数"
+                            />
+                            <strong>天</strong>
+                        </div>
+                    </label>
+                    <label className={styles.remarkField}>
+                        <span>备注（可选）</span>
+                        <input
+                            type="text"
+                            maxLength={200}
+                            value={remark}
+                            onChange={(event) => setRemark(event.target.value)}
+                            placeholder="例如：客户名称或沟通渠道"
+                        />
                     </label>
                     <div className={styles.quickAmounts}>
                         {[100, 500, 1000, 5000].map((amount) => (
@@ -164,7 +226,7 @@ export default function RechargeCodesPage() {
                         <span className={styles.stepNumber}>02</span>
                         <div>
                             <h2>交付给用户</h2>
-                            <p>充值码成功兑换一次后立即失效。</p>
+                            <p>充值码只在生成后完整显示一次，成功兑换后立即失效。</p>
                         </div>
                     </div>
                     {latestCode ? (
@@ -216,17 +278,34 @@ export default function RechargeCodesPage() {
                         <div className={styles.tableRow} key={item.id}>
                             <span className={styles.codeCell}>
                                 <strong>{item.code}</strong>
-                                {!item.isUsed && (
+                                {item.codeVisibleOnce && !item.isUsed && !item.revokedAt && (
                                     <button type="button" onClick={() => void copyCode(item.code)} aria-label={`复制 ${item.code}`}>
                                         <Copy size={14} />
                                     </button>
                                 )}
                             </span>
                             <span>{formatPoints(item.points)}</span>
-                            <span>
-                                <em className={item.isUsed ? styles.usedBadge : styles.unusedBadge}>
-                                    {item.isUsed ? '已兑换' : '未使用'}
+                            <span className={styles.statusCell}>
+                                <em className={item.isUsed || item.revokedAt ? styles.usedBadge : styles.unusedBadge}>
+                                    {item.isUsed
+                                        ? '已兑换'
+                                        : item.revokedAt
+                                            ? '已作废'
+                                            : item.expiresAt && new Date(item.expiresAt).getTime() <= Date.now()
+                                                ? '已过期'
+                                                : '未使用'}
                                 </em>
+                                {!item.isUsed && !item.revokedAt && (!item.expiresAt || new Date(item.expiresAt).getTime() > Date.now()) && (
+                                    <button
+                                        type="button"
+                                        className={styles.revokeBtn}
+                                        onClick={() => void handleRevoke(item.id)}
+                                        disabled={revokingId === item.id}
+                                    >
+                                        <Ban size={13} />
+                                        {revokingId === item.id ? '作废中' : '作废'}
+                                    </button>
+                                )}
                             </span>
                             <span>{item.usedBy ? item.usedBy.nickname || item.usedBy.account || item.usedBy.id : '—'}</span>
                             <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>

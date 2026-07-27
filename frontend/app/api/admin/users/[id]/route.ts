@@ -59,36 +59,50 @@ export async function PATCH(
             );
         }
 
-        const updated = await prisma.user.update({
-            where: { id: target.id },
-            data: {
-                ...(input.billingAudience ? { billingAudience: input.billingAudience } : {}),
-                ...(input.accountStatus ? { accountStatus: input.accountStatus } : {}),
-                ...(input.nickname ? { nickname: input.nickname } : {}),
-                ...(input.groupName ? { groupName: input.groupName } : {}),
-            },
-            select: {
-                id: true,
-                email: true,
-                nickname: true,
-                groupName: true,
-                role: true,
-                billingAudience: true,
-                accountStatus: true,
-                pointsBalance: true,
-                accessGrantedAt: true,
-                lastLoginAt: true,
-                createdAt: true,
-            },
-        });
-
-        console.info('[admin-account-change]', {
-            adminUserId: admin.id,
-            targetUserId: target.id,
-            previousBillingAudience: target.billingAudience,
-            nextBillingAudience: updated.billingAudience,
-            previousAccountStatus: target.accountStatus,
-            nextAccountStatus: updated.accountStatus,
+        const shouldRevokeSessions = Boolean(
+            (input.billingAudience && input.billingAudience !== target.billingAudience)
+            || (input.accountStatus && input.accountStatus !== target.accountStatus)
+        );
+        const updated = await prisma.$transaction(async (tx) => {
+            const saved = await tx.user.update({
+                where: { id: target.id },
+                data: {
+                    ...(input.billingAudience ? { billingAudience: input.billingAudience } : {}),
+                    ...(input.accountStatus ? { accountStatus: input.accountStatus } : {}),
+                    ...(input.nickname ? { nickname: input.nickname } : {}),
+                    ...(input.groupName ? { groupName: input.groupName } : {}),
+                    ...(shouldRevokeSessions ? { authTokenVersion: { increment: 1 } } : {}),
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    nickname: true,
+                    groupName: true,
+                    role: true,
+                    billingAudience: true,
+                    accountStatus: true,
+                    pointsBalance: true,
+                    accessGrantedAt: true,
+                    lastLoginAt: true,
+                    createdAt: true,
+                },
+            });
+            await tx.adminAuditLog.create({
+                data: {
+                    adminUserId: admin.id,
+                    action: 'user.update',
+                    targetType: 'user',
+                    targetId: target.id,
+                    metadata: {
+                        previousBillingAudience: target.billingAudience,
+                        nextBillingAudience: saved.billingAudience,
+                        previousAccountStatus: target.accountStatus,
+                        nextAccountStatus: saved.accountStatus,
+                        sessionsRevoked: shouldRevokeSessions,
+                    },
+                },
+            });
+            return saved;
         });
 
         return Response.json({

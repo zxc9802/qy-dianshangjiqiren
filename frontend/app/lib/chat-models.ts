@@ -9,6 +9,7 @@ export const RESPONSE_MODEL_OPTIONS = [
 ] as const satisfies ReadonlyArray<{ value: ResponseModel; label: string }>;
 
 export const DEFAULT_RESPONSE_MODEL: ResponseModel = 'gemini';
+export const EXTERNAL_DEFAULT_RESPONSE_MODEL: ResponseModel = 'gpt-5.4';
 
 export const RESPONSE_MODEL_STORAGE_PREFIX = 'chat-response-model:';
 
@@ -32,6 +33,19 @@ export function isResponseModel(value: unknown): value is ResponseModel {
 
 export function isSelectableResponseModel(value: unknown): value is ResponseModel {
     return typeof value === 'string' && RESPONSE_MODEL_OPTIONS.some((option) => option.value === value);
+}
+
+export function isResponseModelAvailableForAudience(
+    model: ResponseModel,
+    billingAudience: string | null | undefined,
+): boolean {
+    return billingAudience !== 'external' || model === EXTERNAL_DEFAULT_RESPONSE_MODEL;
+}
+
+export function getResponseModelOptionsForAudience(billingAudience: string | null | undefined) {
+    return RESPONSE_MODEL_OPTIONS.filter((option) => (
+        isResponseModelAvailableForAudience(option.value, billingAudience)
+    ));
 }
 
 export function isWebSearchMode(value: unknown): value is WebSearchMode {

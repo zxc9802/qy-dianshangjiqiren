@@ -122,6 +122,10 @@ test('report endpoint asks the OpenAI chat helper to analyze with GPT-5.4', asyn
         },
       },
       '../../lib/auth': {
+        errorResponse: () => ({
+          status: 500,
+          json: async () => ({ error: 'Internal server error.' }),
+        }),
         getAuthUser: async () => ({
           id: 'user-1',
           email: 'user@example.test',
@@ -132,6 +136,14 @@ test('report endpoint asks the OpenAI chat helper to analyze with GPT-5.4', asyn
       },
       '../../lib/ai-usage-store': {
         recordAiUsageEvent: async () => ({}),
+        reserveAiUsageCredits: async () => 0,
+        releaseAiUsageCredits: async () => {},
+      },
+      '../../lib/ai-usage': {
+        estimateTextUsageReservationCredits: () => 0,
+      },
+      '../../lib/security-rate-limit': {
+        enforceRateLimit: async () => {},
       },
       '../../lib/yunwu-openai-chat': {
         GPT_5_4_MODEL: 'gpt-5.4',

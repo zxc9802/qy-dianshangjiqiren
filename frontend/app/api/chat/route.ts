@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { AppError, getAuthUser } from '../../lib/auth';
-import { recordAiUsageEvent } from '../../lib/ai-usage-store';
+import { AppError, errorResponse, getAuthUser, getPublicErrorMessage } from '../../lib/auth';
+import {
+    recordAiUsageEvent,
+    releaseAiUsageCredits,
+    reserveAiUsageCredits,
+} from '../../lib/ai-usage-store';
+import { estimateTextUsageReservationCredits } from '../../lib/ai-usage';
 import { BUILTIN_BOT_MAP } from '../../lib/builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
 import {
@@ -15,6 +20,7 @@ import {
 import { streamGeminiDeepThinkingChat } from '../../lib/gemini-deep-chat';
 import { getSystemPromptByBotId } from '../../lib/server-bot-prompts';
 import { readBackendUrl } from '../../lib/server-env';
+import { enforceRateLimit, getClientAddress } from '../../lib/security-rate-limit';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
 import { streamYunwuClaudeChat } from '../../lib/yunwu-claude-chat';
 import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
@@ -46,13 +52,8 @@ type UsageUser = {
     billingAudience: string;
 };
 
-async function tryGetUsageUser(req: NextRequest): Promise<UsageUser | null> {
-    try {
-        return await getAuthUser(req);
-    } catch {
-        return null;
-    }
-}
+const MAIN_CHAT_USAGE_CHANNEL = 'main-chat';
+const MAX_CHAT_OUTPUT_TOKENS = 8192;
 
 function normalizeMessages(
     messages: unknown,
@@ -149,7 +150,7 @@ async function streamByResponseModel(
                         userGroup: usageContext.user.groupName,
                         billingAudience: usageContext.user.billingAudience === 'internal' ? 'internal' : 'external',
                         appId: 'main',
-                        channel: 'main-chat',
+                        channel: MAIN_CHAT_USAGE_CHANNEL,
                         providerId: 'yunwu-openai',
                         model: 'gpt-5.4',
                         requestId: usageContext.requestId,
@@ -157,8 +158,6 @@ async function streamByResponseModel(
                         usageSource: 'response',
                         groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
                         usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
-                    }).catch((error) => {
-                        console.error('[usage-monitor] Main chat usage write failed:', error);
                     });
                 }
                 : undefined,
@@ -205,7 +204,21 @@ async function streamByResponseModel(
 
 export async function POST(req: NextRequest) {
     try {
-        const usageUser = await tryGetUsageUser(req);
+        const usageUser = await getAuthUser(req);
+        await Promise.all([
+            enforceRateLimit({
+                scope: 'chat:user',
+                identifier: usageUser.id,
+                limit: 30,
+                windowMs: 60_000,
+            }),
+            enforceRateLimit({
+                scope: 'chat:ip',
+                identifier: getClientAddress(req),
+                limit: 60,
+                windowMs: 60_000,
+            }),
+        ]);
         const usageRequestId = randomUUID();
         const body = await req.json() as {
             botId?: unknown;
@@ -220,6 +233,13 @@ export async function POST(req: NextRequest) {
 
         const botIdString = String(body.botId ?? '').trim();
         const responseModel = isResponseModel(body.responseModel) ? body.responseModel : DEFAULT_RESPONSE_MODEL;
+        if (usageUser.billingAudience === 'external' && responseModel !== 'gpt-5.4') {
+            throw new AppError(
+                'External accounts can currently use GPT-5.4 for metered chat.',
+                403,
+                'MODEL_NOT_AVAILABLE_FOR_EXTERNAL_BILLING',
+            );
+        }
         const webSearchMode = isWebSearchMode(body.webSearchMode) ? body.webSearchMode : DEFAULT_WEB_SEARCH_MODE;
         const normalizedMessages = normalizeMessages(body.messages, body.conversationHistory, body.message);
         const builtinFallbackPrompt = BUILTIN_BOT_MAP[botIdString]?.systemPromptFallback;
@@ -251,6 +271,27 @@ export async function POST(req: NextRequest) {
             });
         }
 
+        if (usageUser.billingAudience === 'external') {
+            const reservationAmount = estimateTextUsageReservationCredits({
+                model: 'gpt-5.4',
+                promptText: [
+                    fullSystemPrompt,
+                    ...filteredMessages.map((message) => `${message.role}:${message.content}`),
+                ].join('\n'),
+                maxOutputTokens: MAX_CHAT_OUTPUT_TOKENS,
+                billingAudience: 'external',
+                groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+            });
+            await reserveAiUsageCredits({
+                userId: usageUser.id,
+                channel: MAIN_CHAT_USAGE_CHANNEL,
+                requestId: usageRequestId,
+                amount: reservationAmount,
+                description: `AI 请求预留 · main / gpt-5.4 · 最多 ${reservationAmount} 积分`,
+            });
+        }
+
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
             async start(controller) {
@@ -263,14 +304,24 @@ export async function POST(req: NextRequest) {
                         (text) => {
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
                         },
-                        usageUser ? { user: usageUser, requestId: usageRequestId } : undefined,
+                        { user: usageUser, requestId: usageRequestId },
                     );
 
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {
-                    const messageText = error instanceof Error ? error.message : 'Stream error';
+                    console.error('[Chat] Stream failed:', error);
+                    const messageText = getPublicErrorMessage(error, 'AI service temporarily unavailable.');
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: messageText })}\n\n`));
                 } finally {
+                    if (usageUser.billingAudience === 'external') {
+                        await releaseAiUsageCredits({
+                            userId: usageUser.id,
+                            channel: MAIN_CHAT_USAGE_CHANNEL,
+                            requestId: usageRequestId,
+                        }).catch((error) => {
+                            console.error('[credit-reservation] Failed to release main chat reservation:', error);
+                        });
+                    }
                     controller.close();
                 }
             },
@@ -286,10 +337,6 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (error) {
-        const message = error instanceof AppError || error instanceof Error ? error.message : 'Unknown error';
-        return new Response(JSON.stringify({ error: message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return errorResponse(error);
     }
 }

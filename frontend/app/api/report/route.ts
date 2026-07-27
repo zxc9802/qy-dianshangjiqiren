@@ -1,8 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthUser } from '../../lib/auth';
-import { recordAiUsageEvent } from '../../lib/ai-usage-store';
+import { errorResponse, getAuthUser } from '../../lib/auth';
+import {
+    recordAiUsageEvent,
+    releaseAiUsageCredits,
+    reserveAiUsageCredits,
+} from '../../lib/ai-usage-store';
+import { estimateTextUsageReservationCredits } from '../../lib/ai-usage';
+import { enforceRateLimit } from '../../lib/security-rate-limit';
 import { GPT_5_4_MODEL, requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+
+const REPORT_USAGE_CHANNEL = 'main-report';
+const MAX_REPORT_OUTPUT_TOKENS = 8192;
 
 const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基于以下对话记录，生成一份结构化的分析报告。
 
@@ -31,6 +40,12 @@ const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基
 export async function POST(req: NextRequest) {
     try {
         const authUser = await getAuthUser(req);
+        await enforceRateLimit({
+            scope: 'report:user',
+            identifier: authUser.id,
+            limit: 10,
+            windowMs: 60_000,
+        });
         const { botId, botName, messages } = await req.json();
 
         if (!Array.isArray(messages) || messages.length < 2) {
@@ -48,32 +63,65 @@ export async function POST(req: NextRequest) {
             content: `智能体名称：${botName || 'AI助手'}（编号：${botId}）\n\n以下是对话记录：\n\n${conversationText}`,
         }];
 
-        const text = await requestYunwuOpenAIChat({
-            systemPrompt: REPORT_PROMPT,
-            messages: reportMessages,
-            temperature: 0.7,
-            model: GPT_5_4_MODEL,
-            onUsage: async (usage) => {
-                await recordAiUsageEvent({
+        const usageRequestId = randomUUID();
+        let creditsReserved = false;
+        if (authUser.billingAudience === 'external') {
+            const reservationAmount = estimateTextUsageReservationCredits({
+                model: GPT_5_4_MODEL,
+                promptText: `${REPORT_PROMPT}\n${reportMessages.map((message) => message.content).join('\n')}`,
+                maxOutputTokens: MAX_REPORT_OUTPUT_TOKENS,
+                billingAudience: 'external',
+                groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+            });
+            await reserveAiUsageCredits({
+                userId: authUser.id,
+                channel: REPORT_USAGE_CHANNEL,
+                requestId: usageRequestId,
+                amount: reservationAmount,
+                description: `AI 请求预留 · main report / ${GPT_5_4_MODEL} · 最多 ${reservationAmount} 积分`,
+            });
+            creditsReserved = true;
+        }
+
+        let text = '';
+        try {
+            text = await requestYunwuOpenAIChat({
+                systemPrompt: REPORT_PROMPT,
+                messages: reportMessages,
+                temperature: 0.7,
+                model: GPT_5_4_MODEL,
+                maxTokens: MAX_REPORT_OUTPUT_TOKENS,
+                onUsage: async (usage) => {
+                    await recordAiUsageEvent({
+                        userId: authUser.id,
+                        userEmail: authUser.email,
+                        userNickname: authUser.nickname,
+                        userGroup: authUser.groupName,
+                        billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                        appId: 'main',
+                        channel: REPORT_USAGE_CHANNEL,
+                        providerId: 'yunwu-openai',
+                        model: GPT_5_4_MODEL,
+                        requestId: usageRequestId,
+                        usage,
+                        usageSource: 'response',
+                        groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                        usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                    });
+                },
+            });
+        } finally {
+            if (creditsReserved) {
+                await releaseAiUsageCredits({
                     userId: authUser.id,
-                    userEmail: authUser.email,
-                    userNickname: authUser.nickname,
-                    userGroup: authUser.groupName,
-                    billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
-                    appId: 'main',
-                    channel: 'main-report',
-                    providerId: 'yunwu-openai',
-                    model: GPT_5_4_MODEL,
-                    requestId: randomUUID(),
-                    usage,
-                    usageSource: 'response',
-                    groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
-                    usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                    channel: REPORT_USAGE_CHANNEL,
+                    requestId: usageRequestId,
                 }).catch((error) => {
-                    console.error('[usage-monitor] Report usage write failed:', error);
+                    console.error('[credit-reservation] Failed to release report reservation:', error);
                 });
-            },
-        });
+            }
+        }
         if (!text) {
             return NextResponse.json({ error: 'AI 返回为空' }, { status: 500 });
         }
@@ -100,8 +148,7 @@ export async function POST(req: NextRequest) {
             messageCount: messages.length,
         });
     } catch (err) {
-        const msg = err instanceof Error ? err.message : '未知错误';
-        console.error('[Report] Error:', msg);
-        return NextResponse.json({ error: msg }, { status: 500 });
+        console.error('[Report] Error:', err);
+        return errorResponse(err);
     }
 }

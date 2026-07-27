@@ -175,10 +175,16 @@ export const api = {
     adminGetRechargeCodes: () =>
         request<{ success: boolean; data: RechargeCodeInfo[] }>('/admin/recharge-codes'),
 
-    adminCreateRechargeCode: (points: number) =>
+    adminCreateRechargeCode: (points: number, options?: { expiresInDays?: number; remark?: string }) =>
         request<{ success: boolean; data: RechargeCodeInfo }>('/admin/recharge-codes', {
             method: 'POST',
-            body: JSON.stringify({ points }),
+            body: JSON.stringify({ points, ...options }),
+        }),
+
+    adminRevokeRechargeCode: (id: string) =>
+        request<{ success: boolean; data: { id: string; revokedAt: string | null } }>('/admin/recharge-codes', {
+            method: 'PATCH',
+            body: JSON.stringify({ id }),
         }),
 
     // Usage monitoring
@@ -449,7 +455,7 @@ export type UserRole = 'admin' | 'member';
 
 export interface PointsTransactionInfo {
     id: string;
-    type: 'recharge' | 'consume' | 'reward' | 'redeem';
+    type: 'recharge' | 'consume' | 'reward' | 'redeem' | 'reserve' | 'refund' | 'settle';
     amount: number;
     balanceAfter: number;
     description: string;
@@ -464,9 +470,13 @@ export interface PointsInfo {
 export interface RechargeCodeInfo {
     id: string;
     code: string;
+    codeVisibleOnce: boolean;
     points: number;
     isUsed: boolean;
     usedAt: string | null;
+    expiresAt: string | null;
+    revokedAt: string | null;
+    remark: string;
     createdAt: string;
     usedBy: {
         id: string;
