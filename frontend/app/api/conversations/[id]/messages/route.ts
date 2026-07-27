@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
-import { getUserId, AppError, errorResponse } from '../../../../lib/auth';
+import { getAuthUser, AppError, errorResponse } from '../../../../lib/auth';
+import { recordAiUsageEvent } from '../../../../lib/ai-usage-store';
 import {
     buildAttachmentContextBlock,
     buildMessageDisplayContent,
@@ -535,7 +537,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let tempVideoTokensToCleanup: string[] = [];
 
     try {
-        const userId = await getUserId(req);
+        const authUser = await getAuthUser(req);
+        const userId = authUser.id;
+        const usageRequestId = randomUUID();
         const { id: conversationId } = await params;
         const {
             content,
@@ -1005,6 +1009,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             messages: textModelMessages,
                             temperature: 0.8,
                             maxTokens: 8192,
+                            onUsage: async (usage) => {
+                                await recordAiUsageEvent({
+                                    userId,
+                                    userEmail: authUser.email,
+                                    userNickname: authUser.nickname,
+                                    userGroup: authUser.groupName,
+                                    billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                                    appId: 'main',
+                                    channel: 'main-conversation',
+                                    providerId: 'yunwu-openai',
+                                    model: GPT_5_4_MODEL,
+                                    requestId: usageRequestId,
+                                    usage,
+                                    usageSource: 'response',
+                                    groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                                    usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                                }).catch((error) => {
+                                    console.error('[usage-monitor] Conversation usage write failed:', error);
+                                });
+                            },
                             onText: (textChunk) => {
                                 if (!textChunk) {
                                     return;

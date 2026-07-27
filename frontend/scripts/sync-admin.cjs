@@ -90,6 +90,8 @@ async function main() {
         data: {
           passwordHash,
           role: 'admin',
+          billingAudience: 'internal',
+          accountStatus: 'active',
           isVerified: true,
           nickname: adminNickname,
         },
@@ -107,6 +109,8 @@ async function main() {
           email: adminAccount,
           passwordHash,
           role: 'admin',
+          billingAudience: 'internal',
+          accountStatus: 'active',
           isVerified: true,
           nickname: adminNickname,
         },

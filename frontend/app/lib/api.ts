@@ -114,8 +114,17 @@ async function request<T>(
 
 export const api = {
     // Auth
-    register: (body: { account: string; password: string; nickname: string; groupName: string; inviteCode: string }) =>
-        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=register', { method: 'POST', body: JSON.stringify(body) }),
+    registerInternal: (body: { account: string; password: string; nickname: string; groupName: string; inviteCode: string }) =>
+        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=register-internal', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
+
+    registerExternal: (body: { account: string; password: string; nickname: string }) =>
+        request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=register-external', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }),
 
     login: (body: { account: string; password: string }) =>
         request<{ success: boolean; data: { token: string; user: UserInfo } }>('/auth?action=login', { method: 'POST', body: JSON.stringify(body) }),
@@ -152,6 +161,49 @@ export const api = {
 
     revokeInviteCodeUsage: (inviteCodeId: string) =>
         request<{ success: boolean }>(`/admin/invite-codes/${inviteCodeId}/revoke`, { method: 'POST' }),
+
+    // Usage monitoring
+    getUsageSummary: () =>
+        request<{ success: boolean; data: UsageSummaryInfo }>('/usage/summary'),
+
+    adminGetUsage: (params?: { userId?: string; appId?: string; model?: string; limit?: number }) => {
+        const query = new URLSearchParams();
+        if (params?.userId) query.set('userId', params.userId);
+        if (params?.appId) query.set('appId', params.appId);
+        if (params?.model) query.set('model', params.model);
+        if (typeof params?.limit === 'number') query.set('limit', String(params.limit));
+        const qs = query.toString();
+        return request<{ success: boolean; data: AdminUsageInfo }>(`/admin/usage${qs ? `?${qs}` : ''}`);
+    },
+
+    adminGetUsers: (params?: {
+        q?: string;
+        billingAudience?: 'internal' | 'external';
+        accountStatus?: 'active' | 'suspended';
+        limit?: number;
+    }) => {
+        const query = new URLSearchParams();
+        if (params?.q) query.set('q', params.q);
+        if (params?.billingAudience) query.set('billingAudience', params.billingAudience);
+        if (params?.accountStatus) query.set('accountStatus', params.accountStatus);
+        if (typeof params?.limit === 'number') query.set('limit', String(params.limit));
+        const qs = query.toString();
+        return request<{ success: boolean; data: AdminUsersInfo }>(`/admin/users${qs ? `?${qs}` : ''}`);
+    },
+
+    adminUpdateUser: (
+        id: string,
+        body: {
+            billingAudience?: 'internal' | 'external';
+            accountStatus?: 'active' | 'suspended';
+            nickname?: string;
+            groupName?: string;
+        },
+    ) =>
+        request<{ success: boolean; data: AdminUserInfo }>(`/admin/users/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        }),
 
     // Admin bot management
     adminGetBot: (id: string, kind: 'builtin' | 'custom') =>
@@ -367,10 +419,85 @@ export interface UserInfo {
     groupName: string;
     avatar: string;
     role: UserRole;
+    billingAudience?: 'internal' | 'external';
+    accountStatus?: 'active' | 'suspended';
+    lastLoginAt?: string | null;
     createdAt?: string;
 }
 
 export type UserRole = 'admin' | 'member';
+
+export interface UsageTotalsInfo {
+    requests: number;
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    outputTokens?: number;
+    reasoningTokens?: number;
+    totalTokens: number;
+    upstreamCostCny: number;
+    costCredits: number;
+    chargedCredits: number;
+}
+
+export interface UsageRecordInfo {
+    id: string;
+    userId?: string;
+    userEmail?: string | null;
+    userNickname?: string | null;
+    userGroup?: string | null;
+    appId?: string | null;
+    channel: string;
+    providerId?: string | null;
+    model?: string | null;
+    status: string;
+    billingAudience?: 'internal' | 'external';
+    inputTokens?: number | null;
+    cachedInputTokens?: number | null;
+    outputTokens?: number | null;
+    reasoningTokens?: number | null;
+    totalTokens: number;
+    upstreamCostCny: number;
+    costCredits?: number;
+    chargedCredits: number;
+    billingUnit?: string | null;
+    billableUnits?: number;
+    priceVersion?: string | null;
+    createdAt: string;
+}
+
+export interface UsageSummaryInfo {
+    totals: UsageTotalsInfo;
+    recent: UsageRecordInfo[];
+}
+
+export interface AdminUsageInfo {
+    totals: UsageTotalsInfo;
+    rows: UsageRecordInfo[];
+}
+
+export interface AdminUserInfo {
+    id: string;
+    account: string;
+    nickname: string;
+    groupName: string;
+    role: UserRole;
+    billingAudience: 'internal' | 'external';
+    accountStatus: 'active' | 'suspended';
+    pointsBalance: number;
+    accessGrantedAt: string | null;
+    lastLoginAt: string | null;
+    createdAt: string;
+}
+
+export interface AdminUsersInfo {
+    totals: {
+        total: number;
+        internal: number;
+        external: number;
+        suspended: number;
+    };
+    rows: AdminUserInfo[];
+}
 
 export interface BotInfo {
     id: string;

@@ -9,7 +9,8 @@ interface AuthState {
     isAuthenticated: boolean;
 
     login: (account: string, password: string) => Promise<void>;
-    register: (account: string, password: string, inviteCode: string, nickname: string, groupName: string) => Promise<void>;
+    registerInternal: (account: string, password: string, inviteCode: string, nickname: string, groupName: string) => Promise<void>;
+    registerExternal: (account: string, password: string, nickname: string) => Promise<void>;
     logout: () => Promise<void>;
     loadUser: () => Promise<void>;
 }
@@ -56,15 +57,28 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ user, token, isAuthenticated: true });
     },
 
-    register: async (account, password, inviteCode, nickname, groupName) => {
-        const res = await api.register({ account, password, inviteCode, nickname, groupName });
+    registerInternal: async (account, password, inviteCode, nickname, groupName) => {
+        const res = await api.registerInternal({ account, password, inviteCode, nickname, groupName });
         const { token, user } = res.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
         try {
             await runLocalDataMigration(user.id);
         } catch (error) {
-            console.error('[Migration] Failed after register', error);
+            console.error('[Migration] Failed after internal registration', error);
+        }
+        set({ user, token, isAuthenticated: true });
+    },
+
+    registerExternal: async (account, password, nickname) => {
+        const res = await api.registerExternal({ account, password, nickname });
+        const { token, user } = res.data;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        try {
+            await runLocalDataMigration(user.id);
+        } catch (error) {
+            console.error('[Migration] Failed after external registration', error);
         }
         set({ user, token, isAuthenticated: true });
     },

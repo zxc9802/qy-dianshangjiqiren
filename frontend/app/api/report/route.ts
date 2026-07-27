@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { getAuthUser } from '../../lib/auth';
+import { recordAiUsageEvent } from '../../lib/ai-usage-store';
 import { GPT_5_4_MODEL, requestYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
 
 const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基于以下对话记录，生成一份结构化的分析报告。
@@ -27,6 +30,7 @@ const REPORT_PROMPT = `你是一位专业的商业分析报告撰写专家。基
 
 export async function POST(req: NextRequest) {
     try {
+        const authUser = await getAuthUser(req);
         const { botId, botName, messages } = await req.json();
 
         if (!Array.isArray(messages) || messages.length < 2) {
@@ -49,6 +53,26 @@ export async function POST(req: NextRequest) {
             messages: reportMessages,
             temperature: 0.7,
             model: GPT_5_4_MODEL,
+            onUsage: async (usage) => {
+                await recordAiUsageEvent({
+                    userId: authUser.id,
+                    userEmail: authUser.email,
+                    userNickname: authUser.nickname,
+                    userGroup: authUser.groupName,
+                    billingAudience: authUser.billingAudience === 'internal' ? 'internal' : 'external',
+                    appId: 'main',
+                    channel: 'main-report',
+                    providerId: 'yunwu-openai',
+                    model: GPT_5_4_MODEL,
+                    requestId: randomUUID(),
+                    usage,
+                    usageSource: 'response',
+                    groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                    usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                }).catch((error) => {
+                    console.error('[usage-monitor] Report usage write failed:', error);
+                });
+            },
         });
         if (!text) {
             return NextResponse.json({ error: 'AI 返回为空' }, { status: 500 });

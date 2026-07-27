@@ -11,6 +11,7 @@ function serializeSsoUser(user: {
     email: string;
     nickname: string;
     groupName: string;
+    billingAudience: string;
     avatar: string;
     role: string;
     createdAt: Date;
@@ -20,6 +21,7 @@ function serializeSsoUser(user: {
         account: user.email,
         nickname: user.nickname,
         groupName: user.groupName,
+        billingAudience: user.billingAudience,
         avatar: user.avatar,
         role: user.role,
         createdAt: user.createdAt,

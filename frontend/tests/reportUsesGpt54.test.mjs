@@ -66,6 +66,9 @@ test('OpenAI chat helper lets report force GPT-5.4 over env model', async () => 
   const { requestYunwuOpenAIChat } = await loadTsModule(['lib', 'yunwu-openai-chat.ts'], {
     stubs: {
       './auth': appErrorStub(),
+      './ai-usage': {
+        parseOpenAICompatibleUsage: () => null,
+      },
       './server-env': {
         readServerEnv: (key) => ({
           YUNWU_OPENAI_CHAT_API_KEY: 'test-key',
@@ -118,8 +121,17 @@ test('report endpoint asks the OpenAI chat helper to analyze with GPT-5.4', asyn
           }),
         },
       },
-      '../../lib/server-env': {
-        readServerEnv: (key) => (key === 'YUNWU_CHAT_API_KEY' ? 'test-key' : undefined),
+      '../../lib/auth': {
+        getAuthUser: async () => ({
+          id: 'user-1',
+          email: 'user@example.test',
+          nickname: '测试用户',
+          groupName: '测试组',
+          billingAudience: 'internal',
+        }),
+      },
+      '../../lib/ai-usage-store': {
+        recordAiUsageEvent: async () => ({}),
       },
       '../../lib/yunwu-openai-chat': {
         GPT_5_4_MODEL: 'gpt-5.4',

@@ -5,7 +5,7 @@ import { AppError, getAuthUser, errorResponse } from '../../../lib/auth';
 import { isAllowedMemberName } from '../../../lib/member-directory';
 
 const updateProfileSchema = z.object({
-    nickname: z.string().trim().min(1, 'Nickname is required.').max(20, 'Nickname is too long.'),
+    nickname: z.string().trim().min(1, 'Nickname is required.').max(40, 'Nickname is too long.'),
 });
 
 function serializeUser(user: {
@@ -13,6 +13,9 @@ function serializeUser(user: {
     email: string;
     nickname: string;
     groupName: string;
+    billingAudience: string;
+    accountStatus: string;
+    lastLoginAt: Date | null;
     avatar: string;
     role: string;
     createdAt: Date;
@@ -22,6 +25,9 @@ function serializeUser(user: {
         account: user.email,
         nickname: user.nickname,
         groupName: user.groupName,
+        billingAudience: user.billingAudience,
+        accountStatus: user.accountStatus,
+        lastLoginAt: user.lastLoginAt,
         avatar: user.avatar,
         role: user.role,
         createdAt: user.createdAt,
@@ -46,7 +52,11 @@ export async function PATCH(req: NextRequest) {
         const data = updateProfileSchema.parse(await req.json());
         const nextNickname = data.nickname.trim();
 
-        if (user.role !== 'admin' && !isAllowedMemberName(nextNickname)) {
+        if (
+            user.role !== 'admin'
+            && user.billingAudience === 'internal'
+            && !isAllowedMemberName(nextNickname)
+        ) {
             throw new AppError('Please select a valid name from the list.', 400, 'PROFILE_NAME_INVALID');
         }
 
@@ -58,6 +68,9 @@ export async function PATCH(req: NextRequest) {
                 email: true,
                 nickname: true,
                 groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
                 avatar: true,
                 role: true,
                 createdAt: true,

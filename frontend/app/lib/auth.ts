@@ -121,6 +121,8 @@ async function syncAdminAccount(
             data: {
                 passwordHash,
                 role: 'admin',
+                billingAudience: 'internal',
+                accountStatus: 'active',
                 isVerified: true,
                 nickname: existingAccount.nickname || adminNickname || adminAccount,
             },
@@ -134,6 +136,8 @@ async function syncAdminAccount(
             passwordHash,
             isVerified: true,
             role: 'admin',
+            billingAudience: 'internal',
+            accountStatus: 'active',
             nickname: adminNickname || adminAccount,
         },
     });
@@ -156,6 +160,9 @@ async function loadUserById(userId: string) {
             email: true,
             nickname: true,
             groupName: true,
+            billingAudience: true,
+            accountStatus: true,
+            lastLoginAt: true,
             avatar: true,
             createdAt: true,
             role: true,
@@ -188,6 +195,10 @@ export async function getAuthUser(req: NextRequest, options: AuthOptions = {}): 
 
     if (options.requireAdmin && user.role !== 'admin') {
         throw new AuthError('Admin access required.', 403, 'FORBIDDEN_ADMIN_ONLY');
+    }
+
+    if (user.accountStatus !== 'active') {
+        throw new AuthError('This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
     }
 
     const hasAccess = user.role === 'admin' || Boolean(user.accessGrantedAt);

@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { AppError } from '../../lib/auth';
+import { AppError, getAuthUser } from '../../lib/auth';
+import { recordAiUsageEvent } from '../../lib/ai-usage-store';
 import { BUILTIN_BOT_MAP } from '../../lib/builtin-bots';
 import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
 import {
@@ -35,6 +37,22 @@ type ChatRequestMessage = {
     role: string;
     content: string;
 };
+
+type UsageUser = {
+    id: string;
+    email: string;
+    nickname: string;
+    groupName: string;
+    billingAudience: string;
+};
+
+async function tryGetUsageUser(req: NextRequest): Promise<UsageUser | null> {
+    try {
+        return await getAuthUser(req);
+    } catch {
+        return null;
+    }
+}
 
 function normalizeMessages(
     messages: unknown,
@@ -100,6 +118,10 @@ async function streamByResponseModel(
     systemPrompt: string,
     messages: ChatRequestMessage[],
     onText: (text: string) => void,
+    usageContext?: {
+        user: UsageUser;
+        requestId: string;
+    },
 ): Promise<void> {
     const openAIMessages: OpenAIChatMessage[] = messages.map((item) => ({
         role: item.role === 'assistant' ? 'assistant' : 'user',
@@ -118,6 +140,28 @@ async function streamByResponseModel(
             messages: openAIMessages,
             temperature: 1,
             onText,
+            onUsage: usageContext
+                ? async (usage) => {
+                    await recordAiUsageEvent({
+                        userId: usageContext.user.id,
+                        userEmail: usageContext.user.email,
+                        userNickname: usageContext.user.nickname,
+                        userGroup: usageContext.user.groupName,
+                        billingAudience: usageContext.user.billingAudience === 'internal' ? 'internal' : 'external',
+                        appId: 'main',
+                        channel: 'main-chat',
+                        providerId: 'yunwu-openai',
+                        model: 'gpt-5.4',
+                        requestId: usageContext.requestId,
+                        usage,
+                        usageSource: 'response',
+                        groupMultiplier: Number(process.env.YUNWU_OPENAI_CHAT_GROUP_MULTIPLIER) || 1,
+                        usdCnyRate: Number(process.env.USAGE_MONITOR_USD_CNY_RATE) || 7.3,
+                    }).catch((error) => {
+                        console.error('[usage-monitor] Main chat usage write failed:', error);
+                    });
+                }
+                : undefined,
         });
         return;
     }
@@ -161,6 +205,8 @@ async function streamByResponseModel(
 
 export async function POST(req: NextRequest) {
     try {
+        const usageUser = await tryGetUsageUser(req);
+        const usageRequestId = randomUUID();
         const body = await req.json() as {
             botId?: unknown;
             systemPrompt?: unknown;
@@ -209,9 +255,16 @@ export async function POST(req: NextRequest) {
         const stream = new ReadableStream({
             async start(controller) {
                 try {
-                    await streamByResponseModel(responseModel, webSearchMode, fullSystemPrompt, filteredMessages, (text) => {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
-                    });
+                    await streamByResponseModel(
+                        responseModel,
+                        webSearchMode,
+                        fullSystemPrompt,
+                        filteredMessages,
+                        (text) => {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
+                        },
+                        usageUser ? { user: usageUser, requestId: usageRequestId } : undefined,
+                    );
 
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
                 } catch (error) {

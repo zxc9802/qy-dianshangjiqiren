@@ -5,6 +5,12 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
 import { isAllowedGroupName, isAllowedMemberName } from '../../lib/member-directory';
 import {
+    isExternalRegistrationEnabled,
+    RegistrationProfileError,
+    resolveRegistrationProfile,
+} from '../../lib/account-registration';
+import { readServerEnv } from '../../lib/server-env';
+import {
     signToken,
     AppError,
     errorResponse,
@@ -13,14 +19,17 @@ import {
 } from '../../lib/auth';
 
 const accountSchema = z.string().trim().min(3, 'Account must be at least 3 characters.').max(64, 'Account is too long.');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters.');
+const externalAccountSchema = z.string().trim().email('Please enter a valid email address.').max(191, 'Email is too long.');
+const passwordSchema = z.string().min(6, 'Password must be at least 6 characters.').max(128, 'Password is too long.');
+const externalPasswordSchema = z.string().min(8, 'Password must be at least 8 characters.').max(128, 'Password is too long.');
 const inviteCodeSchema = z.string().trim().min(6, 'Invite code is required.').max(32, 'Invite code is invalid.');
 const nicknameSchema = z.string().trim().min(1, 'Name is required.').max(20, 'Name is too long.');
+const externalNicknameSchema = z.string().trim().min(1, 'Nickname is required.').max(40, 'Nickname is too long.');
 const optionalNicknameSchema = z.string().trim().max(20, 'Name is too long.').optional();
 const groupNameSchema = z.string().trim().min(1, 'Group is required.').max(50, 'Group is too long.');
 const optionalGroupNameSchema = z.string().trim().max(50, 'Group is too long.').optional();
 
-const registerSchema = z.object({
+const internalRegisterSchema = z.object({
     account: accountSchema,
     password: passwordSchema,
     nickname: nicknameSchema,
@@ -28,9 +37,15 @@ const registerSchema = z.object({
     inviteCode: inviteCodeSchema,
 });
 
+const externalRegisterSchema = z.object({
+    account: externalAccountSchema,
+    password: externalPasswordSchema,
+    nickname: externalNicknameSchema,
+});
+
 const loginSchema = z.object({
-    account: accountSchema,
-    password: z.string(),
+    account: z.string().trim().min(3, 'Account must be at least 3 characters.').max(191, 'Account is too long.'),
+    password: z.string().max(128, 'Password is too long.'),
 });
 
 const activateSchema = z.object({
@@ -56,7 +71,10 @@ export async function POST(req: NextRequest) {
 
         switch (action) {
             case 'register':
-                return await handleRegister(body);
+            case 'register-internal':
+                return await handleInternalRegister(body);
+            case 'register-external':
+                return await handleExternalRegister(body);
             case 'login':
                 return await handleLogin(body);
             case 'activate':
@@ -75,6 +93,10 @@ function normalizeAccount(account: string): string {
     return account.trim();
 }
 
+function normalizeExternalAccount(account: string): string {
+    return account.trim().toLowerCase();
+}
+
 function normalizeInviteCode(code: string): string {
     return code.trim().toUpperCase();
 }
@@ -83,15 +105,25 @@ function normalizeProfileValue(value: string | undefined): string {
     return value?.trim() || '';
 }
 
-function assertAllowedNickname(nickname: string) {
-    if (!isAllowedMemberName(nickname)) {
-        throw new AppError('Please select a valid name from the list.', 400, 'PROFILE_NAME_INVALID');
-    }
-}
-
-function assertAllowedGroupName(groupName: string) {
-    if (!isAllowedGroupName(groupName)) {
-        throw new AppError('Please select a valid group from the list.', 400, 'PROFILE_GROUP_INVALID');
+function getRegistrationProfile(
+    kind: 'internal' | 'external',
+    nickname: string,
+    groupName?: string,
+) {
+    try {
+        return resolveRegistrationProfile({
+            kind,
+            nickname,
+            groupName,
+        }, {
+            includesMember: isAllowedMemberName,
+            includesGroup: isAllowedGroupName,
+        });
+    } catch (error) {
+        if (error instanceof RegistrationProfileError) {
+            throw new AppError(error.message, 400, error.code);
+        }
+        throw error;
     }
 }
 
@@ -109,6 +141,9 @@ function toUserPayload(user: {
     email: string;
     nickname: string;
     groupName: string;
+    billingAudience: string;
+    accountStatus: string;
+    lastLoginAt?: Date | null;
     avatar: string;
     role: string;
     createdAt?: Date;
@@ -118,6 +153,9 @@ function toUserPayload(user: {
         account: user.email,
         nickname: user.nickname,
         groupName: user.groupName,
+        billingAudience: user.billingAudience,
+        accountStatus: user.accountStatus,
+        lastLoginAt: user.lastLoginAt || null,
         avatar: user.avatar,
         role: user.role,
         ...(user.createdAt ? { createdAt: user.createdAt } : {}),
@@ -129,6 +167,9 @@ function issueAuthResponse(user: {
     email: string;
     nickname: string;
     groupName: string;
+    billingAudience: string;
+    accountStatus: string;
+    lastLoginAt?: Date | null;
     avatar: string;
     role: string;
     authTokenVersion: number;
@@ -166,15 +207,11 @@ async function consumeInviteCode(tx: Prisma.TransactionClient, inviteCode: strin
     }
 }
 
-async function handleRegister(body: unknown) {
-    const data = parseRequestBody(registerSchema, body);
+async function handleInternalRegister(body: unknown) {
+    const data = parseRequestBody(internalRegisterSchema, body);
     const account = normalizeAccount(data.account);
     const inviteCode = normalizeInviteCode(data.inviteCode);
-    const nextNickname = normalizeProfileValue(data.nickname);
-    const nextGroupName = normalizeProfileValue(data.groupName);
-
-    assertAllowedNickname(nextNickname);
-    assertAllowedGroupName(nextGroupName);
+    const profile = getRegistrationProfile('internal', data.nickname, data.groupName);
 
     const user = await prisma.$transaction(async (tx) => {
         const existing = await tx.user.findUnique({
@@ -185,6 +222,9 @@ async function handleRegister(body: unknown) {
                 passwordHash: true,
                 nickname: true,
                 groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
                 avatar: true,
                 role: true,
                 accessGrantedAt: true,
@@ -207,14 +247,20 @@ async function handleRegister(body: unknown) {
                     data: {
                         accessGrantedAt: new Date(),
                         isVerified: true,
-                        nickname: nextNickname,
-                        groupName: nextGroupName,
+                        nickname: profile.nickname,
+                        groupName: profile.groupName,
+                        billingAudience: profile.billingAudience,
+                        accountStatus: 'active',
+                        lastLoginAt: new Date(),
                     },
                     select: {
                         id: true,
                         email: true,
                         nickname: true,
                         groupName: true,
+                        billingAudience: true,
+                        accountStatus: true,
+                        lastLoginAt: true,
                         avatar: true,
                         role: true,
                         authTokenVersion: true,
@@ -233,14 +279,20 @@ async function handleRegister(body: unknown) {
                 isVerified: true,
                 role: 'member',
                 accessGrantedAt: new Date(),
-                nickname: nextNickname,
-                groupName: nextGroupName,
+                nickname: profile.nickname,
+                groupName: profile.groupName,
+                billingAudience: profile.billingAudience,
+                accountStatus: 'active',
+                lastLoginAt: new Date(),
             },
             select: {
                 id: true,
                 email: true,
                 nickname: true,
                 groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
                 avatar: true,
                 role: true,
                 authTokenVersion: true,
@@ -256,11 +308,77 @@ async function handleRegister(body: unknown) {
     return issueAuthResponse(user, 201);
 }
 
+async function handleExternalRegister(body: unknown) {
+    if (!isExternalRegistrationEnabled(readServerEnv('EXTERNAL_REGISTRATION_ENABLED'))) {
+        throw new AppError(
+            'External registration is temporarily disabled.',
+            403,
+            'EXTERNAL_REGISTRATION_DISABLED',
+        );
+    }
+
+    const data = parseRequestBody(externalRegisterSchema, body);
+    const account = normalizeExternalAccount(data.account);
+    const profile = getRegistrationProfile('external', data.nickname);
+
+    const existing = await prisma.user.findFirst({
+        where: {
+            email: {
+                equals: account,
+                mode: 'insensitive',
+            },
+        },
+        select: { id: true },
+    });
+    if (existing) {
+        throw new AppError('Account already exists.', 409, 'ACCOUNT_ALREADY_EXISTS');
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 10);
+    let user;
+    try {
+        user = await prisma.user.create({
+            data: {
+                email: account,
+                passwordHash,
+                isVerified: true,
+                role: 'member',
+                accessGrantedAt: new Date(),
+                nickname: profile.nickname,
+                groupName: profile.groupName,
+                billingAudience: profile.billingAudience,
+                accountStatus: 'active',
+                lastLoginAt: new Date(),
+            },
+            select: {
+                id: true,
+                email: true,
+                nickname: true,
+                groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
+                avatar: true,
+                role: true,
+                authTokenVersion: true,
+                createdAt: true,
+            },
+        });
+    } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            throw new AppError('Account already exists.', 409, 'ACCOUNT_ALREADY_EXISTS');
+        }
+        throw error;
+    }
+
+    return issueAuthResponse(user, 201);
+}
+
 async function handleLogin(body: unknown) {
     const data = parseRequestBody(loginSchema, body);
     const account = normalizeAccount(data.account);
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
         where: { email: account },
         select: {
             id: true,
@@ -268,6 +386,9 @@ async function handleLogin(body: unknown) {
             passwordHash: true,
             nickname: true,
             groupName: true,
+            billingAudience: true,
+            accountStatus: true,
+            lastLoginAt: true,
             avatar: true,
             role: true,
             accessGrantedAt: true,
@@ -275,6 +396,26 @@ async function handleLogin(body: unknown) {
             createdAt: true,
         },
     });
+    if (!user && account.includes('@') && account.toLowerCase() !== account) {
+        user = await prisma.user.findUnique({
+            where: { email: account.toLowerCase() },
+            select: {
+                id: true,
+                email: true,
+                passwordHash: true,
+                nickname: true,
+                groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
+                avatar: true,
+                role: true,
+                accessGrantedAt: true,
+                authTokenVersion: true,
+                createdAt: true,
+            },
+        });
+    }
 
     if (!user) {
         throw new AppError('Account not found.', 404);
@@ -285,11 +426,33 @@ async function handleLogin(body: unknown) {
         throw new AppError('Incorrect password.', 400);
     }
 
+    if (user.accountStatus !== 'active') {
+        throw new AppError('This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
+    }
+
     if (user.role !== 'admin' && !user.accessGrantedAt) {
         throw new AppError('Invite code required.', 403, 'INVITE_REQUIRED');
     }
 
-    return issueAuthResponse(user);
+    const authenticatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+        select: {
+            id: true,
+            email: true,
+            nickname: true,
+            groupName: true,
+            billingAudience: true,
+            accountStatus: true,
+            lastLoginAt: true,
+            avatar: true,
+            role: true,
+            authTokenVersion: true,
+            createdAt: true,
+        },
+    });
+
+    return issueAuthResponse(authenticatedUser);
 }
 
 async function handleActivate(body: unknown) {
@@ -306,6 +469,9 @@ async function handleActivate(body: unknown) {
                 passwordHash: true,
                 nickname: true,
                 groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
                 avatar: true,
                 role: true,
                 accessGrantedAt: true,
@@ -323,27 +489,35 @@ async function handleActivate(body: unknown) {
             throw new AppError('Incorrect password.', 400);
         }
 
-        if (existing.role === 'admin') {
-            return existing;
+        if (existing.accountStatus !== 'active') {
+            throw new AppError('This account has been suspended.', 403, 'ACCOUNT_SUSPENDED');
         }
 
-        if (existing.accessGrantedAt) {
-            return existing;
+        if (existing.role === 'admin' || existing.accessGrantedAt) {
+            return tx.user.update({
+                where: { id: existing.id },
+                data: { lastLoginAt: new Date() },
+                select: {
+                    id: true,
+                    email: true,
+                    nickname: true,
+                    groupName: true,
+                    billingAudience: true,
+                    accountStatus: true,
+                    lastLoginAt: true,
+                    avatar: true,
+                    role: true,
+                    authTokenVersion: true,
+                    createdAt: true,
+                },
+            });
         }
 
-        const nextNickname = normalizeProfileValue(data.nickname) || existing.nickname.trim();
-        const nextGroupName = normalizeProfileValue(data.groupName) || existing.groupName.trim();
-
-        if (!nextNickname) {
-            throw new AppError('Name is required for activation.', 400, 'PROFILE_NAME_REQUIRED');
-        }
-
-        if (!nextGroupName) {
-            throw new AppError('Group is required for activation.', 400, 'PROFILE_GROUP_REQUIRED');
-        }
-
-        assertAllowedNickname(nextNickname);
-        assertAllowedGroupName(nextGroupName);
+        const profile = getRegistrationProfile(
+            'internal',
+            normalizeProfileValue(data.nickname) || existing.nickname,
+            normalizeProfileValue(data.groupName) || existing.groupName,
+        );
 
         await consumeInviteCode(tx, inviteCode, existing.id);
 
@@ -352,14 +526,20 @@ async function handleActivate(body: unknown) {
             data: {
                 accessGrantedAt: new Date(),
                 isVerified: true,
-                nickname: nextNickname,
-                groupName: nextGroupName,
+                nickname: profile.nickname,
+                groupName: profile.groupName,
+                billingAudience: profile.billingAudience,
+                accountStatus: 'active',
+                lastLoginAt: new Date(),
             },
             select: {
                 id: true,
                 email: true,
                 nickname: true,
                 groupName: true,
+                billingAudience: true,
+                accountStatus: true,
+                lastLoginAt: true,
                 avatar: true,
                 role: true,
                 authTokenVersion: true,

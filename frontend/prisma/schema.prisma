@@ -15,6 +15,9 @@ model User {
   accessGrantedAt DateTime? @map("access_granted_at")
   nickname        String    @default("")
   groupName       String    @default("") @map("group_name")
+  billingAudience String    @default("external") @map("billing_audience")
+  accountStatus   String    @default("active") @map("account_status")
+  lastLoginAt     DateTime? @map("last_login_at")
   avatar          String    @default("")
   pointsBalance    Int      @default(0) @map("points_balance")
   authTokenVersion Int      @default(0) @map("auth_token_version")
@@ -155,37 +158,56 @@ model VideoGeneration {
 }
 
 model VideoUsageLog {
-  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId               String    @map("user_id")
-  userEmail            String?   @map("user_email")
-  userNickname         String?   @map("user_nickname")
-  userGroup            String?   @map("user_group")
-  channel              String
-  providerId           String?   @map("provider_id")
-  model                String?
-  generationMode       String?   @map("generation_mode")
-  prompt               String?
-  aspectRatio          String?   @map("aspect_ratio")
-  resolution           String?
-  duration             Int?
-  sampleCount          Int?      @default(1) @map("sample_count")
-  requestParams        Json?     @map("request_params")
-  engineTaskId         String?   @map("engine_task_id")
-  upstreamRequestId    String?   @map("upstream_request_id")
-  upstreamTraceId      String?   @map("upstream_trace_id")
-  upstreamUrl          String?   @map("upstream_url")
-  status               String    @default("submitted")
-  errorMessage         String?   @map("error_message")
-  videoUrl             String?   @map("video_url")
-  unitPrice            Decimal?  @map("unit_price") @db.Decimal(10, 4)
-  estimatedCost        Decimal?  @map("estimated_cost") @db.Decimal(10, 4)
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  completedAt          DateTime? @map("completed_at") @db.Timestamptz(6)
-  larkBackupRecordId   String?   @map("lark_backup_record_id")
-  larkBackupSyncedAt   DateTime? @map("lark_backup_synced_at") @db.Timestamptz(6)
-  larkBackupError      String?   @map("lark_backup_error")
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String    @map("user_id")
+  userEmail          String?   @map("user_email")
+  userNickname       String?   @map("user_nickname")
+  userGroup          String?   @map("user_group")
+  channel            String
+  appId              String?   @map("app_id")
+  providerId         String?   @map("provider_id")
+  model              String?
+  generationMode     String?   @map("generation_mode")
+  prompt             String?
+  aspectRatio        String?   @map("aspect_ratio")
+  resolution         String?
+  duration           Int?
+  sampleCount        Int?      @default(1) @map("sample_count")
+  requestParams      Json?     @map("request_params")
+  engineTaskId       String?   @map("engine_task_id")
+  upstreamRequestId  String?   @map("upstream_request_id")
+  upstreamTraceId    String?   @map("upstream_trace_id")
+  upstreamUrl        String?   @map("upstream_url")
+  requestId          String?   @map("request_id")
+  status             String    @default("submitted")
+  errorMessage       String?   @map("error_message")
+  videoUrl           String?   @map("video_url")
+  unitPrice          Decimal?  @map("unit_price") @db.Decimal(10, 4)
+  estimatedCost      Decimal?  @map("estimated_cost") @db.Decimal(10, 4)
+  inputTokens        BigInt?   @map("input_tokens")
+  cachedInputTokens  BigInt?   @map("cached_input_tokens")
+  outputTokens       BigInt?   @map("output_tokens")
+  reasoningTokens    BigInt?   @map("reasoning_tokens")
+  totalTokens        BigInt?   @map("total_tokens")
+  usageSource        String?   @map("usage_source")
+  billingAudience    String    @default("external") @map("billing_audience")
+  upstreamCostUsd    Decimal?  @map("upstream_cost_usd") @db.Decimal(18, 8)
+  upstreamCostCny    Decimal?  @map("upstream_cost_cny") @db.Decimal(18, 8)
+  groupMultiplier    Decimal?  @map("group_multiplier") @db.Decimal(10, 4)
+  saleMultiplier     Decimal?  @map("sale_multiplier") @db.Decimal(10, 4)
+  costCredits        BigInt?   @map("cost_credits")
+  chargedCredits     BigInt?   @map("charged_credits")
+  billingUnit        String?   @map("billing_unit")
+  billableUnits      Decimal?  @map("billable_units") @db.Decimal(18, 4)
+  priceVersion       String?   @map("price_version")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)
+  larkBackupRecordId String?   @map("lark_backup_record_id")
+  larkBackupSyncedAt DateTime? @map("lark_backup_synced_at") @db.Timestamptz(6)
+  larkBackupError    String?   @map("lark_backup_error")
 
+  @@unique([channel, requestId], map: "idx_usage_logs_channel_request_id")
   @@index([userId], map: "idx_usage_logs_user_id")
   @@index([channel], map: "idx_usage_logs_channel")
   @@index([model], map: "idx_usage_logs_model")
@@ -193,6 +215,7 @@ model VideoUsageLog {
   @@index([createdAt], map: "idx_usage_logs_created_at")
   @@index([engineTaskId], map: "idx_usage_logs_engine_task_id")
   @@index([larkBackupRecordId], map: "idx_usage_logs_lark_backup_record_id")
+  @@index([appId, createdAt], map: "idx_usage_logs_app_created_at")
   @@map("video_usage_logs")
 }
 

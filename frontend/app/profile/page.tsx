@@ -2,20 +2,52 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Settings, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, BarChart3, Settings, ShieldCheck, Users } from 'lucide-react';
 import SearchableSelect from '../components/SearchableSelect';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, UsageSummaryInfo } from '../lib/api';
 import { FIXED_MEMBER_NAMES } from '../lib/member-directory';
 import { useAuthStore } from '../stores/auth';
 import styles from './profile.module.css';
 
+const EMPTY_USAGE: UsageSummaryInfo = {
+    totals: {
+        requests: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        totalTokens: 0,
+        upstreamCostCny: 0,
+        costCredits: 0,
+        chargedCredits: 0,
+    },
+    recent: [],
+};
+
+function formatNumber(value: number | null | undefined): string {
+    return new Intl.NumberFormat('zh-CN').format(value || 0);
+}
+
+function formatUsageUnit(record: UsageSummaryInfo['recent'][number]): string {
+    if (record.billingUnit === 'second') return `${record.billableUnits || 0} 秒`;
+    if (record.billingUnit === 'image') return `${record.billableUnits || 0} 张`;
+    return `${formatNumber(record.totalTokens)} tokens`;
+}
+
 export default function ProfilePage() {
     const router = useRouter();
-    const { user, logout } = useAuthStore();
+    const { user, logout, loadUser } = useAuthStore();
     const [isEditing, setIsEditing] = useState(false);
     const [nickname, setNickname] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+    const [usage, setUsage] = useState<UsageSummaryInfo>(EMPTY_USAGE);
+    const [usageLoading, setUsageLoading] = useState(true);
+    const [usageError, setUsageError] = useState('');
+
+    useEffect(() => {
+        void loadUser();
+    }, [loadUser]);
 
     useEffect(() => {
         if (!user && typeof window !== 'undefined') {
@@ -25,6 +57,30 @@ export default function ProfilePage() {
             }
         }
     }, [router, user]);
+
+    useEffect(() => {
+        if (!user) return;
+
+        let cancelled = false;
+        setUsageLoading(true);
+        setUsageError('');
+        void api.getUsageSummary()
+            .then((response) => {
+                if (!cancelled) setUsage(response.data);
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setUsageError(error instanceof Error ? error.message : '用量数据加载失败。');
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setUsageLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [user]);
 
     const handleSaveNickname = async () => {
         const nextNickname = nickname.trim();
@@ -78,10 +134,20 @@ export default function ProfilePage() {
                         账号设置
                     </button>
                     {user.role === 'admin' && (
-                        <button className={styles.navItem} type="button" onClick={() => router.push('/admin/invite-codes')}>
-                            <ShieldCheck size={16} />
-                            邀请码管理
-                        </button>
+                        <>
+                            <button className={styles.navItem} type="button" onClick={() => router.push('/admin/invite-codes')}>
+                                <ShieldCheck size={16} />
+                                邀请码管理
+                            </button>
+                            <button className={styles.navItem} type="button" onClick={() => router.push('/admin/usage')}>
+                                <BarChart3 size={16} />
+                                用量监控
+                            </button>
+                            <button className={styles.navItem} type="button" onClick={() => router.push('/admin/users')}>
+                                <Users size={16} />
+                                账号管理
+                            </button>
+                        </>
                     )}
                 </nav>
 
@@ -105,21 +171,35 @@ export default function ProfilePage() {
                         <span className={styles.settingLabel}>姓名</span>
                         {isEditing ? (
                             <div className={styles.editRow}>
-                                <div className={styles.editSelect}>
-                                    <SearchableSelect
-                                        label="姓名"
-                                        options={FIXED_MEMBER_NAMES}
+                                {user.billingAudience === 'internal' ? (
+                                    <div className={styles.editSelect}>
+                                        <SearchableSelect
+                                            label="姓名"
+                                            options={FIXED_MEMBER_NAMES}
+                                            value={nickname}
+                                            onChange={(nextValue) => {
+                                                setNickname(nextValue);
+                                                setFeedback(null);
+                                            }}
+                                            placeholder="输入姓名关键词后选择"
+                                            helperText="姓名只能从固定 30 人名单中搜索选择。"
+                                            noResultsText="未搜索到名单内姓名，不能自定义输入。"
+                                            disabled={isSaving}
+                                        />
+                                    </div>
+                                ) : (
+                                    <input
+                                        className={styles.editInput}
                                         value={nickname}
-                                        onChange={(nextValue) => {
-                                            setNickname(nextValue);
+                                        onChange={(event) => {
+                                            setNickname(event.target.value);
                                             setFeedback(null);
                                         }}
-                                        placeholder="输入姓名关键词后选择"
-                                        helperText="姓名只能从固定 30 人名单中搜索选择。"
-                                        noResultsText="未搜索到名单内姓名，不能自定义输入。"
+                                        maxLength={40}
+                                        placeholder="输入显示昵称"
                                         disabled={isSaving}
                                     />
-                                </div>
+                                )}
                                 <button className={styles.saveBtn} onClick={() => void handleSaveNickname()} disabled={isSaving || !nickname.trim()}>
                                     {isSaving ? '保存中...' : '保存'}
                                 </button>
@@ -166,7 +246,80 @@ export default function ProfilePage() {
                         <span className={styles.settingLabel}>角色</span>
                         <span className={styles.settingValue}>{user.role === 'admin' ? '管理员' : '成员'}</span>
                     </div>
+
+                    <div className={styles.settingRow}>
+                        <span className={styles.settingLabel}>账号类型</span>
+                        <span className={styles.settingValue}>
+                            {user.billingAudience === 'internal' ? '内部账号' : '外部账号'}
+                        </span>
+                    </div>
                 </div>
+
+                <section className={styles.usageSection}>
+                    <div className={styles.usageHeading}>
+                        <div>
+                            <h2 className={styles.pageTitle}>
+                                <Activity size={20} />
+                                用量监控
+                            </h2>
+                            <p>
+                                {user.billingAudience === 'internal'
+                                    ? '内部账号只记录实际成本，不扣计费积分。'
+                                    : '外部账号按实际成本的 1.8 倍计算计费积分。'}
+                            </p>
+                        </div>
+                        <span className={styles.audienceBadge}>
+                            {user.billingAudience === 'internal' ? '内部账号' : '外部账号'}
+                        </span>
+                    </div>
+
+                    {usageError ? (
+                        <div className={styles.errorText}>{usageError}</div>
+                    ) : (
+                        <>
+                            <div className={styles.usageStats} aria-busy={usageLoading}>
+                                <div className={styles.usageStat}>
+                                    <span>成功请求</span>
+                                    <strong>{usageLoading ? '—' : formatNumber(usage.totals.requests)}</strong>
+                                </div>
+                                <div className={styles.usageStat}>
+                                    <span>总 Token</span>
+                                    <strong>{usageLoading ? '—' : formatNumber(usage.totals.totalTokens)}</strong>
+                                </div>
+                                <div className={styles.usageStat}>
+                                    <span>实际成本</span>
+                                    <strong>{usageLoading ? '—' : `¥${usage.totals.upstreamCostCny.toFixed(4)}`}</strong>
+                                </div>
+                                <div className={styles.usageStat}>
+                                    <span>计费积分</span>
+                                    <strong>{usageLoading ? '—' : formatNumber(usage.totals.chargedCredits)}</strong>
+                                </div>
+                            </div>
+
+                            <div className={styles.usageList}>
+                                <div className={styles.usageListHeader}>
+                                    <span>应用 / 模型</span>
+                                    <span>用量</span>
+                                    <span>计费积分</span>
+                                    <span>时间</span>
+                                </div>
+                                {!usageLoading && usage.recent.length === 0 ? (
+                                    <div className={styles.emptyUsage}>还没有可显示的用量记录。</div>
+                                ) : usage.recent.slice(0, 10).map((record) => (
+                                    <div className={styles.usageListRow} key={record.id}>
+                                        <span>
+                                            <strong>{record.appId || record.channel}</strong>
+                                            <small>{record.model || '-'}</small>
+                                        </span>
+                                        <span>{formatUsageUnit(record)}</span>
+                                        <span>{formatNumber(record.chargedCredits)}</span>
+                                        <span>{new Date(record.createdAt).toLocaleString('zh-CN')}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </section>
             </main>
         </div>
     );

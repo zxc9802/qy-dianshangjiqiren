@@ -134,6 +134,7 @@
     padding: 40px;
     background: var(--color-card);
     border-left: 1px solid var(--color-border);
+    overflow-y: auto;
 }
 
 .formContainer {
@@ -150,8 +151,12 @@
 
 .tab {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     padding: 12px 0;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--color-muted-foreground);
     text-align: center;
@@ -167,6 +172,28 @@
 .tabActive {
     color: var(--color-primary);
     border-bottom-color: var(--color-primary);
+}
+
+.modeIntro {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px;
+    margin: -12px 0 22px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-background);
+}
+
+.modeIntro strong {
+    color: var(--color-foreground);
+    font-size: 15px;
+}
+
+.modeIntro span {
+    color: var(--color-muted-foreground);
+    font-size: 12px;
+    line-height: 1.6;
 }
 
 .form {
@@ -293,6 +320,15 @@
 
 .switchBtn:hover {
     text-decoration: underline;
+}
+
+.switchActions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    font-size: 13px;
 }
 
 /* Mobile */

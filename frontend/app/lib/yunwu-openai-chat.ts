@@ -1,4 +1,5 @@
 import { AppError } from './auth';
+import { parseOpenAICompatibleUsage, type AiTokenUsage } from './ai-usage';
 import { readServerEnv } from './server-env';
 import {
     looksLikeHtmlPayload,
@@ -31,6 +32,7 @@ type OpenAIChatOptions = {
     temperature?: number;
     maxTokens?: number;
     model?: string;
+    onUsage?: (usage: AiTokenUsage) => void | Promise<void>;
 };
 
 type StreamOptions = OpenAIChatOptions & {
@@ -42,6 +44,7 @@ type OpenAIResponsePayload = {
         delta?: { content?: unknown };
         message?: { content?: unknown };
     }>;
+    usage?: unknown;
 };
 
 function logUnexpectedUpstreamResponse(context: string, status: number, contentType: string, body: string) {
@@ -140,10 +143,21 @@ function buildRequestBody(
     return {
         model,
         stream,
+        ...(stream ? { stream_options: { include_usage: true } } : {}),
         temperature,
         max_tokens: maxTokens,
         messages: normalizeMessages(systemPrompt, messages),
     };
+}
+
+function extractOpenAIStreamUsage(payload: string): AiTokenUsage | null {
+    if (!payload || payload === '[DONE]') return null;
+
+    try {
+        return parseOpenAICompatibleUsage(JSON.parse(payload));
+    } catch {
+        return null;
+    }
 }
 
 function extractTextsFromContent(content: unknown): string[] {
@@ -211,6 +225,7 @@ export async function requestYunwuOpenAIChat({
     temperature = 0.8,
     maxTokens = 8192,
     model: modelOverride,
+    onUsage,
 }: OpenAIChatOptions): Promise<string> {
     const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
     const requestModel = modelOverride?.trim() || model;
@@ -263,6 +278,11 @@ export async function requestYunwuOpenAIChat({
         throw new AppError('Upstream chat response missing choices', 502);
     }
 
+    const usage = parseOpenAICompatibleUsage(data);
+    if (usage) {
+        await onUsage?.(usage);
+    }
+
     const content = data.choices[0]?.message?.content;
     if (typeof content === 'undefined' || content === null) {
         throw new AppError('Upstream chat response missing message content', 502);
@@ -278,6 +298,7 @@ export async function streamYunwuOpenAIChat({
     temperature = 0.8,
     maxTokens = 8192,
     model: modelOverride,
+    onUsage,
 }: StreamOptions): Promise<void> {
     const { apiKey, apiUrl, model } = getYunwuOpenAIChatConfig();
     const requestModel = modelOverride?.trim() || model;
@@ -318,6 +339,7 @@ export async function streamYunwuOpenAIChat({
     const decoder = new TextDecoder();
     let pending = '';
     let inspectedFirstChunk = false;
+    let usageReported = false;
 
     while (true) {
         const { done, value } = await reader.read();
@@ -349,6 +371,13 @@ export async function streamYunwuOpenAIChat({
             for (const text of extractOpenAIStreamTexts(payload)) {
                 onText(text);
             }
+            if (!usageReported) {
+                const usage = extractOpenAIStreamUsage(payload);
+                if (usage) {
+                    usageReported = true;
+                    await onUsage?.(usage);
+                }
+            }
         }
 
         if (done) {
@@ -361,6 +390,12 @@ export async function streamYunwuOpenAIChat({
         const payload = trailing.slice(6).trim();
         for (const text of extractOpenAIStreamTexts(payload)) {
             onText(text);
+        }
+        if (!usageReported) {
+            const usage = extractOpenAIStreamUsage(payload);
+            if (usage) {
+                await onUsage?.(usage);
+            }
         }
     }
 }
