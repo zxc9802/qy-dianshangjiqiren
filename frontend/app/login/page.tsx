@@ -77,8 +77,8 @@ function LoginPageContent() {
         }
 
         if (isExternalRegister) {
-            if (!account.includes('@')) {
-                setError('外部账号请使用有效邮箱注册。');
+            if (account.trim().length < 3) {
+                setError('账号至少需要 3 个字符。');
                 return;
             }
             if (password.length < 8) {
@@ -112,7 +112,7 @@ function LoginPageContent() {
                     setMode('internal-register');
                     setError('该账号已存在但尚未开通权限，请使用原账号和密码填写邀请码后继续注册。');
                 } else if (err.code === 'ACCOUNT_ALREADY_EXISTS') {
-                    setError('该邮箱已经注册，请直接登录。');
+                    setError('该账号已经注册，请直接登录。');
                 } else if (err.code === 'EXTERNAL_REGISTRATION_DISABLED') {
                     setError('外部用户注册暂未开放，请联系管理员。');
                 } else if (err.code === 'ACCOUNT_SUSPENDED') {
@@ -198,14 +198,15 @@ function LoginPageContent() {
                         <div className={styles.field}>
                             <label className={styles.label}>账号</label>
                             <input
-                                type={isExternalRegister ? 'email' : 'text'}
+                                type="text"
                                 value={account}
                                 onChange={(event) => {
                                     setAccount(event.target.value);
                                     if (error) setError('');
                                 }}
-                                placeholder={isExternalRegister ? 'name@example.com' : '请输入账号或邮箱'}
+                                placeholder={isExternalRegister ? '请输入账号' : '请输入账号或邮箱'}
                                 required
+                                maxLength={isExternalRegister ? 64 : 191}
                                 autoComplete="username"
                                 className={styles.input}
                             />

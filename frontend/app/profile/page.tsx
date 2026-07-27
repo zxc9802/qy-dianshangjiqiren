@@ -62,7 +62,7 @@ export default function ProfilePage() {
     }, [router, user]);
 
     useEffect(() => {
-        if (!user) return;
+        if (!user || user.billingAudience !== 'internal') return;
 
         let cancelled = false;
         setUsageLoading(true);
@@ -341,6 +341,7 @@ export default function ProfilePage() {
                     </div>
                 </div>
 
+                {user.billingAudience === 'internal' && (
                 <section className={styles.usageSection}>
                     <div className={styles.usageHeading}>
                         <div>
@@ -408,6 +409,7 @@ export default function ProfilePage() {
                         </>
                     )}
                 </section>
+                )}
             </main>
         </div>
     );

@@ -71,9 +71,9 @@ test('credit reservations cannot be reused across accounts', async () => {
     assert.match(source, /CREDIT_RESERVATION_OWNER_MISMATCH/);
 });
 
-test('external account usage details do not display model names', async () => {
+test('external accounts do not load or display usage monitoring', async () => {
     const source = await readFile(path.join(appRoot, 'profile', 'page.tsx'), 'utf8');
 
-    assert.match(source, /user\.billingAudience === 'internal' \? '应用 \/ 模型' : '应用'/);
-    assert.match(source, /user\.billingAudience === 'internal' \? \(\s*<small>\{record\.model \|\| '-'\}<\/small>/s);
+    assert.match(source, /if \(!user \|\| user\.billingAudience !== 'internal'\) return;/);
+    assert.match(source, /user\.billingAudience === 'internal' && \(\s*<section className=\{styles\.usageSection\}>/s);
 });

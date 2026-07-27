@@ -20,7 +20,7 @@ import {
 } from '../../lib/auth';
 
 const accountSchema = z.string().trim().min(3, 'Account must be at least 3 characters.').max(64, 'Account is too long.');
-const externalAccountSchema = z.string().trim().email('Please enter a valid email address.').max(191, 'Email is too long.');
+const externalAccountSchema = accountSchema;
 const passwordSchema = z.string().min(8, 'Password must be at least 8 characters.').max(128, 'Password is too long.');
 const credentialPasswordSchema = z.string().min(1, 'Password is required.').max(128, 'Password is too long.');
 const externalPasswordSchema = z.string().min(8, 'Password must be at least 8 characters.').max(128, 'Password is too long.');
@@ -88,25 +88,22 @@ async function enforceAuthActionRateLimit(
         ? body.account.trim().toLowerCase()
         : '';
 
-    const checks = [
-        enforceRateLimit({
-            scope: `auth:${action}:ip`,
-            identifier: getClientAddress(req),
-            limit,
-            windowMs,
-            blockMs,
-        }),
-    ];
+    await enforceRateLimit({
+        scope: `auth:${action}:ip`,
+        identifier: getClientAddress(req),
+        limit,
+        windowMs,
+        blockMs,
+    });
     if (account) {
-        checks.push(enforceRateLimit({
+        await enforceRateLimit({
             scope: `auth:${action}:account`,
             identifier: account,
             limit: isRegistration ? 3 : limit,
             windowMs,
             blockMs,
-        }));
+        });
     }
-    await Promise.all(checks);
 }
 
 export async function POST(req: NextRequest) {
@@ -454,7 +451,7 @@ async function handleLogin(body: unknown) {
             createdAt: true,
         },
     });
-    if (!user && account.includes('@') && account.toLowerCase() !== account) {
+    if (!user && account.toLowerCase() !== account) {
         user = await prisma.user.findUnique({
             where: { email: account.toLowerCase() },
             select: {

@@ -55,6 +55,16 @@ test('rate limiting blocks the first request above the configured limit', () => 
     assert.ok(fourth.retryAfterSeconds > 0);
 });
 
+test('authentication checks IP and account rate limits sequentially', async () => {
+    const source = await readFile(path.join(frontendRoot, 'app', 'api', 'auth', 'route.ts'), 'utf8');
+
+    assert.match(
+        source,
+        /await enforceRateLimit\(\{\s*scope: `auth:\$\{action\}:ip`[\s\S]*if \(account\) \{\s*await enforceRateLimit\(\{\s*scope: `auth:\$\{action\}:account`/,
+    );
+    assert.doesNotMatch(source, /Promise\.all\(checks\)/);
+});
+
 test('new recharge codes can be looked up without storing their plaintext value', () => {
     const normalized = normalizeRechargeCode(' jf-abcd-2345-efgh-6789 ');
     const first = hashRechargeCode(normalized, 'test-pepper');

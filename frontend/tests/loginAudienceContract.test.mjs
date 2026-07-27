@@ -31,7 +31,10 @@ test('suspended accounts are blocked from password login and authenticated APIs'
 });
 
 test('login page clearly separates shared login, external registration, and internal activation', async () => {
-    const source = await readFile(loginPagePath, 'utf8');
+    const [source, authSource] = await Promise.all([
+        readFile(loginPagePath, 'utf8'),
+        readFile(authRoutePath, 'utf8'),
+    ]);
 
     assert.match(source, /'external-register'/);
     assert.match(source, /'internal-register'/);
@@ -42,6 +45,12 @@ test('login page clearly separates shared login, external registration, and inte
     assert.doesNotMatch(source, /开通内部成员账号/);
     assert.doesNotMatch(source, /使用邮箱注册，使用量按成本的 1\.8 倍计算积分/);
     assert.doesNotMatch(source, /需要管理员发放的一次性邀请码，并从员工名单中选择身份/);
+    assert.match(source, /type="text"[\s\S]*placeholder=\{isExternalRegister \? '请输入账号' : '请输入账号或邮箱'\}/);
+    assert.doesNotMatch(source, /type=\{isExternalRegister \? 'email'/);
+    assert.doesNotMatch(source, /外部账号请使用有效邮箱注册/);
+    assert.match(source, /该账号已经注册，请直接登录/);
+    assert.match(authSource, /const externalAccountSchema = accountSchema;/);
+    assert.doesNotMatch(authSource, /externalAccountSchema = z\.string\(\)\.trim\(\)\.email/);
 });
 
 test('admin cannot suspend or reclassify an administrator as external', async () => {
