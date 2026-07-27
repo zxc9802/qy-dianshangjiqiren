@@ -12,6 +12,10 @@ const EMPTY_DATA: AdminUsersInfo = {
     rows: [],
 };
 
+function formatPoints(value: number): string {
+    return new Intl.NumberFormat('zh-CN').format(value);
+}
+
 type Filters = {
     q: string;
     billingAudience: '' | 'internal' | 'external';
@@ -221,6 +225,7 @@ export default function AdminUsersPage() {
                     <span>身份</span>
                     <span>账号类型</span>
                     <span>状态</span>
+                    <span>积分余额</span>
                     <span>最后登录</span>
                     <span>注册时间</span>
                 </div>
@@ -260,6 +265,7 @@ export default function AdminUsersPage() {
                                 <option value="active">正常</option>
                                 <option value="suspended">已暂停</option>
                             </select>
+                            <span>{item.billingAudience === 'external' ? formatPoints(item.pointsBalance) : '—'}</span>
                             <span>{item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString('zh-CN') : '尚未登录'}</span>
                             <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
                         </div>

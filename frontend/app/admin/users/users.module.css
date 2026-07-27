@@ -185,11 +185,12 @@
         minmax(190px, 1.2fr)
         minmax(130px, 0.7fr)
         minmax(120px, 0.6fr)
+        minmax(100px, 0.55fr)
         minmax(170px, 0.9fr)
         minmax(170px, 0.9fr);
     gap: 14px;
     align-items: center;
-    min-width: 1030px;
+    min-width: 1140px;
     padding: 13px 18px;
 }
 
@@ -231,7 +232,7 @@
 }
 
 .empty {
-    min-width: 1030px;
+    min-width: 1140px;
     padding: 48px 18px;
     color: var(--color-muted-foreground);
     text-align: center;

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
     calculateFixedMediaBilling,
     calculateTextUsageBilling,
@@ -6,6 +7,13 @@ import {
     type BillingAudience,
 } from './ai-usage';
 import { prisma } from './prisma';
+
+const USAGE_TRANSACTION_OPTIONS = {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 10_000,
+    timeout: 20_000,
+} as const;
+const USAGE_TRANSACTION_ATTEMPTS = 3;
 
 export type FixedMediaProduct = 'seedance2' | 'seedance2-fast' | 'nanobanana2';
 
@@ -100,25 +108,91 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
         completedAt: (input.status || 'succeeded') === 'succeeded' ? new Date() : null,
     };
 
-    return prisma.videoUsageLog.upsert({
-        where: {
-            channel_requestId: {
-                channel,
-                requestId,
-            },
-        },
-        create: data,
-        update: data,
-        select: {
-            id: true,
-            requestId: true,
-            totalTokens: true,
-            upstreamCostCny: true,
-            chargedCredits: true,
-            billingAudience: true,
-            priceVersion: true,
-        },
-    });
+    for (let attempt = 0; attempt < USAGE_TRANSACTION_ATTEMPTS; attempt += 1) {
+        try {
+            return await prisma.$transaction(async (tx) => {
+                const existing = await tx.videoUsageLog.findUnique({
+                    where: {
+                        channel_requestId: {
+                            channel,
+                            requestId,
+                        },
+                    },
+                    select: {
+                        userId: true,
+                        chargedCredits: true,
+                    },
+                });
+                if (existing && existing.userId !== userId) {
+                    throw new Error('A usage request cannot be reassigned to another user.');
+                }
+
+                const saved = await tx.videoUsageLog.upsert({
+                    where: {
+                        channel_requestId: {
+                            channel,
+                            requestId,
+                        },
+                    },
+                    create: data,
+                    update: data,
+                    select: {
+                        id: true,
+                        requestId: true,
+                        totalTokens: true,
+                        upstreamCostCny: true,
+                        chargedCredits: true,
+                        billingAudience: true,
+                        priceVersion: true,
+                    },
+                });
+
+                const previousCharge = serializeAiUsageNumber(existing?.chargedCredits);
+                const nextCharge = serializeAiUsageNumber(saved.chargedCredits);
+                const chargedDelta = nextCharge - previousCharge;
+                if (chargedDelta !== 0) {
+                    const owner = await tx.user.findUnique({
+                        where: { id: userId },
+                        select: { id: true },
+                    });
+                    if (owner) {
+                        const updatedUser = await tx.user.update({
+                            where: { id: userId },
+                            data: {
+                                pointsBalance: {
+                                    increment: -chargedDelta,
+                                },
+                            },
+                            select: { pointsBalance: true },
+                        });
+
+                        await tx.pointsTransaction.create({
+                            data: {
+                                userId,
+                                type: 'consume',
+                                amount: -chargedDelta,
+                                balanceAfter: updatedUser.pointsBalance,
+                                description: `AI 用量扣费 · ${appId} / ${model}`,
+                            },
+                        });
+                    }
+                }
+
+                return saved;
+            }, USAGE_TRANSACTION_OPTIONS);
+        } catch (error) {
+            const canRetry = (
+                error instanceof Prisma.PrismaClientKnownRequestError
+                && error.code === 'P2034'
+                && attempt < USAGE_TRANSACTION_ATTEMPTS - 1
+            );
+            if (!canRetry) {
+                throw error;
+            }
+        }
+    }
+
+    throw new Error('Unable to record AI usage after transaction retries.');
 }
 
 export function serializeAiUsageNumber(value: unknown): number {

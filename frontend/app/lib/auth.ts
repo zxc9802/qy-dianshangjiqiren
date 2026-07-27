@@ -168,6 +168,7 @@ async function loadUserById(userId: string) {
             role: true,
             accessGrantedAt: true,
             authTokenVersion: true,
+            pointsBalance: true,
         },
     });
 }

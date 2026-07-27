@@ -215,7 +215,7 @@
   gap: 4px;
 }
 
-.headerNav > button:not(.themeButton):not(.avatar) {
+.headerNav > button:not(.themeButton):not(.avatar):not(.creditBalance) {
   min-height: 36px;
   padding: 0 11px;
   border-radius: 10px;
@@ -223,6 +223,21 @@
   font-size: 12px;
   font-weight: 600;
   transition: background 180ms ease, color 180ms ease;
+}
+
+.creditBalance {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--mint-line-strong);
+  border-radius: 11px;
+  color: var(--mint-primary);
+  background: var(--mint-primary-soft);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .headerNav > button:hover {
@@ -903,7 +918,7 @@
     grid-template-columns: minmax(230px, 1fr) minmax(260px, 420px) auto;
   }
 
-  .headerNav > button:not(.themeButton):not(.avatar) {
+  .headerNav > button:not(.themeButton):not(.avatar):not(.creditBalance) {
     display: none;
   }
 
@@ -935,7 +950,7 @@
     display: flex;
   }
 
-  .headerNav > button:not(.avatar) {
+  .headerNav > button:not(.avatar):not(.creditBalance) {
     display: none;
   }
 

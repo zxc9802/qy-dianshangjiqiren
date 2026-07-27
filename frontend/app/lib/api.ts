@@ -162,6 +162,25 @@ export const api = {
     revokeInviteCodeUsage: (inviteCodeId: string) =>
         request<{ success: boolean }>(`/admin/invite-codes/${inviteCodeId}/revoke`, { method: 'POST' }),
 
+    // Credits and recharge codes
+    getPoints: () =>
+        request<{ success: boolean; data: PointsInfo }>('/points'),
+
+    redeemRechargeCode: (code: string) =>
+        request<{ success: boolean; data: { pointsAdded: number; newBalance: number } }>('/points', {
+            method: 'POST',
+            body: JSON.stringify({ code }),
+        }),
+
+    adminGetRechargeCodes: () =>
+        request<{ success: boolean; data: RechargeCodeInfo[] }>('/admin/recharge-codes'),
+
+    adminCreateRechargeCode: (points: number) =>
+        request<{ success: boolean; data: RechargeCodeInfo }>('/admin/recharge-codes', {
+            method: 'POST',
+            body: JSON.stringify({ points }),
+        }),
+
     // Usage monitoring
     getUsageSummary: () =>
         request<{ success: boolean; data: UsageSummaryInfo }>('/usage/summary'),
@@ -422,10 +441,39 @@ export interface UserInfo {
     billingAudience?: 'internal' | 'external';
     accountStatus?: 'active' | 'suspended';
     lastLoginAt?: string | null;
+    pointsBalance?: number;
     createdAt?: string;
 }
 
 export type UserRole = 'admin' | 'member';
+
+export interface PointsTransactionInfo {
+    id: string;
+    type: 'recharge' | 'consume' | 'reward' | 'redeem';
+    amount: number;
+    balanceAfter: number;
+    description: string;
+    createdAt: string;
+}
+
+export interface PointsInfo {
+    balance: number;
+    transactions: PointsTransactionInfo[];
+}
+
+export interface RechargeCodeInfo {
+    id: string;
+    code: string;
+    points: number;
+    isUsed: boolean;
+    usedAt: string | null;
+    createdAt: string;
+    usedBy: {
+        id: string;
+        account: string;
+        nickname: string;
+    } | null;
+}
 
 export interface UsageTotalsInfo {
     requests: number;

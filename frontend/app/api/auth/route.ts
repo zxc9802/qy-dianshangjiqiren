@@ -146,6 +146,7 @@ function toUserPayload(user: {
     lastLoginAt?: Date | null;
     avatar: string;
     role: string;
+    pointsBalance: number;
     createdAt?: Date;
 }) {
     return {
@@ -158,6 +159,7 @@ function toUserPayload(user: {
         lastLoginAt: user.lastLoginAt || null,
         avatar: user.avatar,
         role: user.role,
+        pointsBalance: user.pointsBalance,
         ...(user.createdAt ? { createdAt: user.createdAt } : {}),
     };
 }
@@ -173,6 +175,7 @@ function issueAuthResponse(user: {
     avatar: string;
     role: string;
     authTokenVersion: number;
+    pointsBalance: number;
     createdAt?: Date;
 }, status = 200) {
     return Response.json({
@@ -229,6 +232,7 @@ async function handleInternalRegister(body: unknown) {
                 role: true,
                 accessGrantedAt: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });
@@ -264,6 +268,7 @@ async function handleInternalRegister(body: unknown) {
                         avatar: true,
                         role: true,
                         authTokenVersion: true,
+                        pointsBalance: true,
                         createdAt: true,
                     },
                 });
@@ -296,6 +301,7 @@ async function handleInternalRegister(body: unknown) {
                 avatar: true,
                 role: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });
@@ -361,6 +367,7 @@ async function handleExternalRegister(body: unknown) {
                 avatar: true,
                 role: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });
@@ -393,6 +400,7 @@ async function handleLogin(body: unknown) {
             role: true,
             accessGrantedAt: true,
             authTokenVersion: true,
+            pointsBalance: true,
             createdAt: true,
         },
     });
@@ -412,6 +420,7 @@ async function handleLogin(body: unknown) {
                 role: true,
                 accessGrantedAt: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });
@@ -448,6 +457,7 @@ async function handleLogin(body: unknown) {
             avatar: true,
             role: true,
             authTokenVersion: true,
+            pointsBalance: true,
             createdAt: true,
         },
     });
@@ -476,6 +486,7 @@ async function handleActivate(body: unknown) {
                 role: true,
                 accessGrantedAt: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });
@@ -508,6 +519,7 @@ async function handleActivate(body: unknown) {
                     avatar: true,
                     role: true,
                     authTokenVersion: true,
+                    pointsBalance: true,
                     createdAt: true,
                 },
             });
@@ -543,6 +555,7 @@ async function handleActivate(body: unknown) {
                 avatar: true,
                 role: true,
                 authTokenVersion: true,
+                pointsBalance: true,
                 createdAt: true,
             },
         });

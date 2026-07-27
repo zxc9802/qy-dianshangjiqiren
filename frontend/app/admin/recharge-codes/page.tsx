@@ -1,0 +1,239 @@
+'use client';
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, Check, Coins, Copy, RefreshCw, TicketCheck } from 'lucide-react';
+import { api, RechargeCodeInfo } from '../../lib/api';
+import { useAuthStore } from '../../stores/auth';
+import styles from './recharge-codes.module.css';
+
+function formatPoints(value: number): string {
+    return new Intl.NumberFormat('zh-CN').format(value);
+}
+
+export default function RechargeCodesPage() {
+    const router = useRouter();
+    const { user, isAuthenticated, isLoading, loadUser } = useAuthStore();
+    const [points, setPoints] = useState('1000');
+    const [codes, setCodes] = useState<RechargeCodeInfo[]>([]);
+    const [latestCode, setLatestCode] = useState<RechargeCodeInfo | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [generating, setGenerating] = useState(false);
+    const [error, setError] = useState('');
+    const [message, setMessage] = useState('');
+
+    useEffect(() => {
+        void loadUser();
+    }, [loadUser]);
+
+    useEffect(() => {
+        if (isLoading) return;
+        if (!isAuthenticated) {
+            router.replace('/login');
+            return;
+        }
+        if (user && user.role !== 'admin') {
+            router.replace('/');
+        }
+    }, [isAuthenticated, isLoading, router, user]);
+
+    const loadCodes = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const response = await api.adminGetRechargeCodes();
+            setCodes(response.data);
+        } catch (loadError) {
+            setError(loadError instanceof Error ? loadError.message : '充值码加载失败。');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isAuthenticated || user?.role !== 'admin') return;
+        void loadCodes();
+    }, [isAuthenticated, loadCodes, user?.role]);
+
+    const summary = useMemo(() => ({
+        total: codes.length,
+        unused: codes.filter((item) => !item.isUsed).length,
+        used: codes.filter((item) => item.isUsed).length,
+    }), [codes]);
+
+    async function copyCode(code: string) {
+        try {
+            await navigator.clipboard.writeText(code);
+            setMessage(`充值码 ${code} 已复制。`);
+        } catch {
+            setError('复制失败，请检查浏览器剪贴板权限。');
+        }
+    }
+
+    async function handleGenerate(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        const amount = Number(points);
+        if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 2_147_483_647) {
+            setError('请输入大于 0 的整数积分。');
+            return;
+        }
+
+        setGenerating(true);
+        setError('');
+        setMessage('');
+        try {
+            const response = await api.adminCreateRechargeCode(amount);
+            setLatestCode(response.data);
+            setCodes((current) => [response.data, ...current.filter((item) => item.id !== response.data.id)]);
+            setMessage(`已生成 ${formatPoints(amount)} 积分充值码。`);
+        } catch (generateError) {
+            setError(generateError instanceof Error ? generateError.message : '充值码生成失败。');
+        } finally {
+            setGenerating(false);
+        }
+    }
+
+    if (isLoading || !user || user.role !== 'admin') {
+        return <div className={styles.loading}>正在验证管理员权限...</div>;
+    }
+
+    return (
+        <main className={styles.page}>
+            <header className={styles.header}>
+                <div>
+                    <button className={styles.backLink} type="button" onClick={() => router.push('/profile')}>
+                        <ArrowLeft size={16} />
+                        返回账号设置
+                    </button>
+                    <p className={styles.eyebrow}>CREDIT DESK</p>
+                    <h1>
+                        <Coins size={30} />
+                        积分充值
+                    </h1>
+                    <p className={styles.subtitle}>生成指定面额的一次性充值码，再复制给联系你的外部用户。</p>
+                </div>
+                <button className={styles.refreshBtn} type="button" onClick={() => void loadCodes()} disabled={loading}>
+                    <RefreshCw className={loading ? styles.spinning : undefined} size={16} />
+                    刷新记录
+                </button>
+            </header>
+
+            {error && <div className={styles.error}>{error}</div>}
+            {message && <div className={styles.success}>{message}</div>}
+
+            <section className={styles.workbench}>
+                <form className={styles.generatorCard} onSubmit={handleGenerate}>
+                    <div className={styles.cardHeading}>
+                        <span className={styles.stepNumber}>01</span>
+                        <div>
+                            <h2>设定充值积分</h2>
+                            <p>每次只生成一条充值码，积分面额可自由填写。</p>
+                        </div>
+                    </div>
+                    <label className={styles.pointsField}>
+                        <span>充值积分</span>
+                        <div>
+                            <input
+                                type="number"
+                                min="1"
+                                max="2147483647"
+                                step="1"
+                                inputMode="numeric"
+                                value={points}
+                                onChange={(event) => setPoints(event.target.value)}
+                                aria-label="充值积分"
+                            />
+                            <strong>积分</strong>
+                        </div>
+                    </label>
+                    <div className={styles.quickAmounts}>
+                        {[100, 500, 1000, 5000].map((amount) => (
+                            <button key={amount} type="button" onClick={() => setPoints(String(amount))}>
+                                {formatPoints(amount)}
+                            </button>
+                        ))}
+                    </div>
+                    <button className={styles.generateBtn} type="submit" disabled={generating}>
+                        <TicketCheck size={18} />
+                        {generating ? '正在生成...' : '生成一条充值码'}
+                    </button>
+                </form>
+
+                <section className={styles.resultCard}>
+                    <div className={styles.cardHeading}>
+                        <span className={styles.stepNumber}>02</span>
+                        <div>
+                            <h2>交付给用户</h2>
+                            <p>充值码成功兑换一次后立即失效。</p>
+                        </div>
+                    </div>
+                    {latestCode ? (
+                        <div className={styles.ticket}>
+                            <span className={styles.ticketLabel}>本次生成</span>
+                            <strong>{latestCode.code}</strong>
+                            <div className={styles.ticketMeta}>
+                                <span><Coins size={16} />{formatPoints(latestCode.points)} 积分</span>
+                                <span><Check size={16} />仅限一次</span>
+                            </div>
+                            <button type="button" onClick={() => void copyCode(latestCode.code)}>
+                                <Copy size={17} />
+                                复制充值码
+                            </button>
+                        </div>
+                    ) : (
+                        <div className={styles.emptyTicket}>
+                            <TicketCheck size={34} />
+                            <p>填写积分并生成后，充值码会显示在这里。</p>
+                        </div>
+                    )}
+                </section>
+            </section>
+
+            <section className={styles.historyCard}>
+                <div className={styles.historyHeading}>
+                    <div>
+                        <p className={styles.eyebrow}>LAST 100 CODES</p>
+                        <h2>充值码记录</h2>
+                    </div>
+                    <div className={styles.summary}>
+                        <span>共 {summary.total}</span>
+                        <span>未使用 {summary.unused}</span>
+                        <span>已兑换 {summary.used}</span>
+                    </div>
+                </div>
+
+                <div className={styles.table}>
+                    <div className={styles.tableHeader}>
+                        <span>充值码</span>
+                        <span>积分</span>
+                        <span>状态</span>
+                        <span>兑换用户</span>
+                        <span>生成时间</span>
+                    </div>
+                    {!loading && codes.length === 0 ? (
+                        <div className={styles.emptyRow}>还没有生成充值码。</div>
+                    ) : codes.map((item) => (
+                        <div className={styles.tableRow} key={item.id}>
+                            <span className={styles.codeCell}>
+                                <strong>{item.code}</strong>
+                                {!item.isUsed && (
+                                    <button type="button" onClick={() => void copyCode(item.code)} aria-label={`复制 ${item.code}`}>
+                                        <Copy size={14} />
+                                    </button>
+                                )}
+                            </span>
+                            <span>{formatPoints(item.points)}</span>
+                            <span>
+                                <em className={item.isUsed ? styles.usedBadge : styles.unusedBadge}>
+                                    {item.isUsed ? '已兑换' : '未使用'}
+                                </em>
+                            </span>
+                            <span>{item.usedBy ? item.usedBy.nickname || item.usedBy.account || item.usedBy.id : '—'}</span>
+                            <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
+                        </div>
+                    ))}
+                </div>
+            </section>
+        </main>
+    );
+}

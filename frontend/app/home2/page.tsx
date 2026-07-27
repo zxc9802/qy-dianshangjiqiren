@@ -32,6 +32,7 @@ import {
   BookOpen,
   Bot,
   ChevronDown,
+  Coins,
   FileText,
   ImageIcon,
   Loader2,
@@ -430,8 +431,15 @@ export default function Home2Page() {
         <nav className={styles.headerNav} aria-label="主导航">
           <button onClick={() => requireAuth('/my-bots')}>我的智能体</button>
           {user?.role === 'admin' && <button onClick={() => requireAuth('/admin/invite-codes')}>邀请码管理</button>}
+          {user?.role === 'admin' && <button onClick={() => requireAuth('/admin/recharge-codes')}>积分充值</button>}
           <button onClick={() => requireAuth('/insights')}>网页洞察</button>
           {mounted && <button className={styles.themeButton} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="切换主题">{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button>}
+          {isAuthenticated && user?.billingAudience === 'external' && (
+            <button className={styles.creditBalance} onClick={() => router.push('/profile')} aria-label={`当前积分余额 ${user.pointsBalance || 0}`}>
+              <Coins size={14} />
+              {new Intl.NumberFormat('zh-CN').format(user.pointsBalance || 0)}
+            </button>
+          )}
           {isAuthenticated ? <button className={styles.avatar} onClick={() => router.push('/profile')}>{user?.nickname?.slice(0, 1) || '我'}</button> : <button onClick={() => router.push('/login')}>登录</button>}
         </nav>
       </header>

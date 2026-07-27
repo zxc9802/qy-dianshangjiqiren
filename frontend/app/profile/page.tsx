@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Activity, ArrowLeft, BarChart3, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Activity, ArrowLeft, BarChart3, Coins, KeyRound, Settings, ShieldCheck, Users } from 'lucide-react';
 import SearchableSelect from '../components/SearchableSelect';
 import { api, ApiError, UsageSummaryInfo } from '../lib/api';
 import { FIXED_MEMBER_NAMES } from '../lib/member-directory';
@@ -44,6 +44,8 @@ export default function ProfilePage() {
     const [usage, setUsage] = useState<UsageSummaryInfo>(EMPTY_USAGE);
     const [usageLoading, setUsageLoading] = useState(true);
     const [usageError, setUsageError] = useState('');
+    const [rechargeCode, setRechargeCode] = useState('');
+    const [redeeming, setRedeeming] = useState(false);
 
     useEffect(() => {
         void loadUser();
@@ -108,6 +110,35 @@ export default function ProfilePage() {
         }
     };
 
+    const handleRedeem = async () => {
+        const code = rechargeCode.trim();
+        if (!code || !user || redeeming) return;
+
+        setRedeeming(true);
+        setFeedback(null);
+        try {
+            const response = await api.redeemRechargeCode(code);
+            const nextUser = {
+                ...user,
+                pointsBalance: response.data.newBalance,
+            };
+            localStorage.setItem('user', JSON.stringify(nextUser));
+            useAuthStore.setState({ user: nextUser });
+            setRechargeCode('');
+            setFeedback({
+                type: 'success',
+                message: `充值成功，已到账 ${formatNumber(response.data.pointsAdded)} 积分。`,
+            });
+        } catch (error) {
+            setFeedback({
+                type: 'error',
+                message: error instanceof Error ? error.message : '充值码兑换失败。',
+            });
+        } finally {
+            setRedeeming(false);
+        }
+    };
+
     if (!user) {
         return null;
     }
@@ -147,6 +178,10 @@ export default function ProfilePage() {
                                 <Users size={16} />
                                 账号管理
                             </button>
+                            <button className={styles.navItem} type="button" onClick={() => router.push('/admin/recharge-codes')}>
+                                <Coins size={16} />
+                                积分充值
+                            </button>
                         </>
                     )}
                 </nav>
@@ -164,6 +199,48 @@ export default function ProfilePage() {
                     <div className={feedback.type === 'success' ? styles.successText : styles.errorText}>
                         {feedback.message}
                     </div>
+                )}
+
+                {user.billingAudience === 'external' && (
+                    <section className={styles.creditSection}>
+                        <div className={styles.pointsCard}>
+                            <div className={styles.pointsInfo}>
+                                <span className={styles.pointsEyebrow}>AVAILABLE CREDIT</span>
+                                <span className={styles.pointsValue}>{formatNumber(user.pointsBalance)}</span>
+                                <span className={styles.pointsLabel}>当前积分余额</span>
+                            </div>
+                            <Coins size={54} strokeWidth={1.3} aria-hidden="true" />
+                        </div>
+                        <div className={styles.redeemPanel}>
+                            <div>
+                                <KeyRound size={20} />
+                                <span>
+                                    <strong>使用管理员提供的充值码</strong>
+                                    <small>充值码仅可兑换一次，到账后余额会立即更新。</small>
+                                </span>
+                            </div>
+                            <form onSubmit={(event) => {
+                                event.preventDefault();
+                                void handleRedeem();
+                            }}>
+                                <input
+                                    value={rechargeCode}
+                                    onChange={(event) => {
+                                        setRechargeCode(event.target.value.toUpperCase());
+                                        setFeedback(null);
+                                    }}
+                                    maxLength={64}
+                                    autoComplete="off"
+                                    placeholder="JF-XXXX-XXXX-XXXX-XXXX"
+                                    aria-label="积分充值码"
+                                    disabled={redeeming}
+                                />
+                                <button type="submit" disabled={redeeming || !rechargeCode.trim()}>
+                                    {redeeming ? '兑换中...' : '立即兑换'}
+                                </button>
+                            </form>
+                        </div>
+                    </section>
                 )}
 
                 <div className={styles.settingsCard}>

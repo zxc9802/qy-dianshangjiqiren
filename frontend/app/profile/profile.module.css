@@ -150,10 +150,98 @@
     position: relative;
 }
 
+.pointsEyebrow {
+    margin-bottom: 12px;
+    font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    opacity: 0.72;
+}
+
 .pointsValue {
     font-size: 40px;
     font-weight: 800;
     line-height: 1;
+}
+
+.creditSection {
+    margin-bottom: 26px;
+}
+
+.redeemPanel {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+    gap: 18px;
+    align-items: center;
+    padding: 18px 20px;
+    margin-top: -8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-card);
+}
+
+.redeemPanel > div {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: var(--color-primary);
+}
+
+.redeemPanel > div span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.redeemPanel > div strong {
+    color: var(--color-foreground);
+    font-size: 14px;
+}
+
+.redeemPanel > div small {
+    color: var(--color-muted-foreground);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.redeemPanel form {
+    display: flex;
+    gap: 8px;
+}
+
+.redeemPanel input {
+    min-width: 0;
+    flex: 1;
+    padding: 11px 13px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    outline: none;
+    color: var(--color-foreground);
+    background: var(--color-background);
+    font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+}
+
+.redeemPanel input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.redeemPanel form button {
+    flex: none;
+    padding: 11px 16px;
+    border-radius: var(--radius-md);
+    color: var(--color-primary-foreground);
+    background: var(--color-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.redeemPanel form button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 
 .pointsLabel {
@@ -540,6 +628,10 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .redeemPanel {
+        grid-template-columns: 1fr;
+    }
+
     .usageList {
         overflow-x: auto;
     }
@@ -561,5 +653,11 @@
     .tableHeader span:last-child,
     .tableRow span:last-child {
         display: none;
+    }
+}
+
+@media (max-width: 520px) {
+    .redeemPanel form {
+        flex-direction: column;
     }
 }

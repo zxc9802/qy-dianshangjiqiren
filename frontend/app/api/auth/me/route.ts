@@ -16,6 +16,7 @@ function serializeUser(user: {
     billingAudience: string;
     accountStatus: string;
     lastLoginAt: Date | null;
+    pointsBalance: number;
     avatar: string;
     role: string;
     createdAt: Date;
@@ -28,6 +29,7 @@ function serializeUser(user: {
         billingAudience: user.billingAudience,
         accountStatus: user.accountStatus,
         lastLoginAt: user.lastLoginAt,
+        pointsBalance: user.pointsBalance,
         avatar: user.avatar,
         role: user.role,
         createdAt: user.createdAt,
@@ -71,6 +73,7 @@ export async function PATCH(req: NextRequest) {
                 billingAudience: true,
                 accountStatus: true,
                 lastLoginAt: true,
+                pointsBalance: true,
                 avatar: true,
                 role: true,
                 createdAt: true,
