@@ -48,3 +48,25 @@ test('usage charging reserves credits and never debits an insufficient balance',
     assert.match(source, /'INSUFFICIENT_CREDITS'/);
     assert.match(source, /type:\s*chargedDelta > 0 \? 'consume' : 'refund'/);
 });
+
+test('SSO billing requires a valid child secret and binds charges to a main account', async () => {
+    const source = await readFile(path.join(appRoot, 'api', 'sso', 'billing', 'route.ts'), 'utf8');
+
+    assert.match(source, /isValidExternalSsoClientSecret\(product,\s*clientSecret\)/);
+    assert.match(source, /getBillingUser\(req,\s*input\.userId\)/);
+    assert.match(source, /authenticated\.id !== userId/);
+    assert.match(source, /reserveAiUsageCredits\(/);
+    assert.match(source, /recordAiUsageEvent\(/);
+    assert.match(source, /releaseAiUsageCredits\(/);
+    assert.match(source, /cachedInputTokens > usage\.inputTokens/);
+    assert.match(source, /reasoningTokens > usage\.outputTokens/);
+});
+
+test('credit reservations cannot be reused across accounts', async () => {
+    const source = await readFile(path.join(appRoot, 'lib', 'ai-usage-store.ts'), 'utf8');
+
+    assert.match(source, /existing\.userId !== input\.userId/);
+    assert.match(source, /reservation\.userId !== input\.userId/);
+    assert.match(source, /reservation\.userId !== userId/);
+    assert.match(source, /CREDIT_RESERVATION_OWNER_MISMATCH/);
+});

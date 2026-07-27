@@ -34,6 +34,26 @@ type TextModelPrice = {
 };
 
 const TEXT_MODEL_PRICES: Record<string, TextModelPrice> = {
+    'deepseek-chat': {
+        inputUsdPerMillion: 0.28,
+        cachedInputUsdPerMillion: 0.028,
+        outputUsdPerMillion: 0.42,
+    },
+    'deepseek-v4-flash': {
+        inputUsdPerMillion: 0.28,
+        cachedInputUsdPerMillion: 0.028,
+        outputUsdPerMillion: 0.42,
+    },
+    'gpt-4.1': {
+        inputUsdPerMillion: 2,
+        cachedInputUsdPerMillion: 0.5,
+        outputUsdPerMillion: 8,
+    },
+    'gpt-4.1-mini': {
+        inputUsdPerMillion: 0.4,
+        cachedInputUsdPerMillion: 0.1,
+        outputUsdPerMillion: 1.6,
+    },
     'gpt-5.4': {
         inputUsdPerMillion: 2.5,
         cachedInputUsdPerMillion: 0.25,
@@ -48,6 +68,16 @@ const TEXT_MODEL_PRICES: Record<string, TextModelPrice> = {
         inputUsdPerMillion: 2,
         cachedInputUsdPerMillion: 0.2,
         outputUsdPerMillion: 12,
+    },
+    'gemini-3.1-flash-lite': {
+        inputUsdPerMillion: 0.1,
+        cachedInputUsdPerMillion: 0.01,
+        outputUsdPerMillion: 0.4,
+    },
+    'gemini-3.5-flash-lite': {
+        inputUsdPerMillion: 0.1,
+        cachedInputUsdPerMillion: 0.01,
+        outputUsdPerMillion: 0.4,
     },
     'claude-opus-4-6': {
         inputUsdPerMillion: 5,

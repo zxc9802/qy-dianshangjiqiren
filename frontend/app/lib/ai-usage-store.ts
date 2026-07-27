@@ -99,9 +99,19 @@ export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
 
                 const existing = await tx.pointsTransaction.findUnique({
                     where: { referenceKey },
-                    select: { amount: true },
+                    select: {
+                        amount: true,
+                        userId: true,
+                    },
                 });
                 if (existing) {
+                    if (existing.userId !== input.userId) {
+                        throw new AppError(
+                            'A credit reservation cannot be reassigned to another account.',
+                            409,
+                            'CREDIT_RESERVATION_OWNER_MISMATCH',
+                        );
+                    }
                     return Math.max(0, -existing.amount);
                 }
 
@@ -168,15 +178,42 @@ export async function releaseAiUsageCredits(input: AiUsageCreditKey): Promise<vo
                 const [reservation, settlement] = await Promise.all([
                     tx.pointsTransaction.findUnique({
                         where: { referenceKey: reserveReferenceKey },
-                        select: { amount: true },
+                        select: {
+                            amount: true,
+                            userId: true,
+                        },
                     }),
                     tx.pointsTransaction.findUnique({
                         where: { referenceKey: settleReferenceKey },
-                        select: { id: true },
+                        select: {
+                            id: true,
+                            userId: true,
+                        },
                     }),
                 ]);
                 if (!reservation || settlement) {
+                    if (reservation && reservation.userId !== input.userId) {
+                        throw new AppError(
+                            'A credit reservation cannot be released by another account.',
+                            409,
+                            'CREDIT_RESERVATION_OWNER_MISMATCH',
+                        );
+                    }
+                    if (settlement && settlement.userId !== input.userId) {
+                        throw new AppError(
+                            'A credit settlement cannot be reassigned to another account.',
+                            409,
+                            'CREDIT_SETTLEMENT_OWNER_MISMATCH',
+                        );
+                    }
                     return;
+                }
+                if (reservation.userId !== input.userId) {
+                    throw new AppError(
+                        'A credit reservation cannot be released by another account.',
+                        409,
+                        'CREDIT_RESERVATION_OWNER_MISMATCH',
+                    );
                 }
 
                 const reservedAmount = Math.max(0, -reservation.amount);
@@ -332,13 +369,33 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                 const [reservation, settlement] = await Promise.all([
                     tx.pointsTransaction.findUnique({
                         where: { referenceKey: reserveReferenceKey },
-                        select: { amount: true },
+                        select: {
+                            amount: true,
+                            userId: true,
+                        },
                     }),
                     tx.pointsTransaction.findUnique({
                         where: { referenceKey: settleReferenceKey },
-                        select: { id: true },
+                        select: {
+                            id: true,
+                            userId: true,
+                        },
                     }),
                 ]);
+                if (reservation && reservation.userId !== userId) {
+                    throw new AppError(
+                        'A credit reservation cannot be settled by another account.',
+                        409,
+                        'CREDIT_RESERVATION_OWNER_MISMATCH',
+                    );
+                }
+                if (settlement && settlement.userId !== userId) {
+                    throw new AppError(
+                        'A credit settlement cannot be reassigned to another account.',
+                        409,
+                        'CREDIT_SETTLEMENT_OWNER_MISMATCH',
+                    );
+                }
 
                 if (reservation && !settlement) {
                     const reservedAmount = Math.max(0, -reservation.amount);

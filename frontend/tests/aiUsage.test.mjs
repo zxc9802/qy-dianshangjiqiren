@@ -78,6 +78,33 @@ test('internal usage records cost but does not charge external credits', () => {
     assert.equal(billing?.chargedCredits, 0);
 });
 
+test('SSO child-tool text models have server-side billing prices', () => {
+    const models = [
+        'deepseek-chat',
+        'deepseek-v4-flash',
+        'gpt-4.1',
+        'gpt-4.1-mini',
+        'gpt-5.6-luna',
+        'gemini-3.1-flash-lite',
+        'gemini-3.5-flash-lite',
+    ];
+    for (const model of models) {
+        const billing = calculateTextUsageBilling({
+            model,
+            usage: {
+                inputTokens: 1_000,
+                cachedInputTokens: 0,
+                outputTokens: 1_000,
+                reasoningTokens: 0,
+                totalTokens: 2_000,
+            },
+            billingAudience: 'external',
+        });
+        assert.ok(billing, `${model} should have a billing price`);
+        assert.ok(billing.chargedCredits > 0, `${model} should consume external credits`);
+    }
+});
+
 test('fixed media prices match the confirmed external 1.8 multiplier', () => {
     assert.equal(calculateFixedMediaBilling({
         product: 'seedance2',
