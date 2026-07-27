@@ -37,6 +37,7 @@ test('login page clearly separates shared login, external registration, and inte
     assert.match(source, /'internal-register'/);
     assert.match(source, /外部注册/);
     assert.match(source, /内部开通/);
+    assert.match(source, /<label className=\{styles\.label\}>账号<\/label>/);
     assert.doesNotMatch(source, /注册外部用户账号/);
     assert.doesNotMatch(source, /开通内部成员账号/);
     assert.doesNotMatch(source, /使用邮箱注册，使用量按成本的 1\.8 倍计算积分/);

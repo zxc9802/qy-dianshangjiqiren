@@ -196,7 +196,7 @@ function LoginPageContent() {
 
                     <form onSubmit={handleSubmit} className={styles.form}>
                         <div className={styles.field}>
-                            <label className={styles.label}>{isExternalRegister ? '邮箱' : '账号'}</label>
+                            <label className={styles.label}>账号</label>
                             <input
                                 type={isExternalRegister ? 'email' : 'text'}
                                 value={account}
