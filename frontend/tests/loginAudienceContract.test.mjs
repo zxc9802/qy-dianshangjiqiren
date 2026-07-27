@@ -37,6 +37,10 @@ test('login page clearly separates shared login, external registration, and inte
     assert.match(source, /'internal-register'/);
     assert.match(source, /外部注册/);
     assert.match(source, /内部开通/);
+    assert.doesNotMatch(source, /注册外部用户账号/);
+    assert.doesNotMatch(source, /开通内部成员账号/);
+    assert.doesNotMatch(source, /使用邮箱注册，使用量按成本的 1\.8 倍计算积分/);
+    assert.doesNotMatch(source, /需要管理员发放的一次性邀请码，并从员工名单中选择身份/);
 });
 
 test('admin cannot suspend or reclassify an administrator as external', async () => {

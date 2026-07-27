@@ -187,22 +187,12 @@ function LoginPageContent() {
                         </button>
                     </div>
 
-                    <div className={styles.modeIntro}>
-                        <strong>
-                            {mode === 'login'
-                                ? '登录已有账号'
-                                : isExternalRegister
-                                    ? '注册外部用户账号'
-                                    : '开通内部成员账号'}
-                        </strong>
-                        <span>
-                            {mode === 'login'
-                                ? '内部与外部用户共用同一个登录入口。'
-                                : isExternalRegister
-                                    ? '使用邮箱注册，使用量按成本的 1.8 倍计算积分。'
-                                    : '需要管理员发放的一次性邀请码，并从员工名单中选择身份。'}
-                        </span>
-                    </div>
+                    {mode === 'login' ? (
+                        <div className={styles.modeIntro}>
+                            <strong>登录已有账号</strong>
+                            <span>内部与外部用户共用同一个登录入口。</span>
+                        </div>
+                    ) : null}
 
                     <form onSubmit={handleSubmit} className={styles.form}>
                         <div className={styles.field}>
