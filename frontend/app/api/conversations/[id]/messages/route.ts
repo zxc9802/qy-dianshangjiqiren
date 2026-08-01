@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { NextRequest } from 'next/server';
+import { after, NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '../../../../lib/prisma';
 import { getAuthUser, AppError, errorResponse, getPublicErrorMessage } from '../../../../lib/auth';
@@ -1241,13 +1241,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                         });
                     });
 
-                    await rememberConversationTurn({
+                    after(() => rememberConversationTurn({
                         userId,
                         botRouteId: bot.routeId,
                         conversationId,
                         userMessage: currentPromptText,
                         assistantMessage: finalResponse,
-                    });
+                    }));
 
                     emitStreamEvent({ type: 'done' });
                 } catch (error) {

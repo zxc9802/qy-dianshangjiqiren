@@ -2114,6 +2114,7 @@ export default function ChatPage() {
             let imageJobId: string | null = null;
             pendingStreamingTextRef.current = '';
             let pending = '';
+            let streamCompleted = false;
 
             const appendAssistantImageMessage = (image: unknown) => {
                 if (typeof image !== 'object' || image === null) {
@@ -2143,14 +2144,18 @@ export default function ChatPage() {
                 setImageStatusText('');
             };
 
-            const applyChatStreamProjection = (projection: ChatStreamProjection | null) => {
+            const applyChatStreamProjection = (projection: ChatStreamProjection | null): boolean => {
                 if (!projection) {
-                    return;
+                    return false;
+                }
+
+                if (projection.channel === 'done') {
+                    return true;
                 }
 
                 if (projection.channel === 'messages') {
                     if (projection.kind !== 'delta' || !projection.content) {
-                        return;
+                        return false;
                     }
 
                     fullText += projection.content;
@@ -2160,12 +2165,12 @@ export default function ChatPage() {
                     } else {
                         scheduleStreamingTextFlush();
                     }
-                    return;
+                    return false;
                 }
 
                 if (projection.channel === 'status') {
                     setImageStatusText(projection.status);
-                    return;
+                    return false;
                 }
 
                 if (projection.channel === 'image_job') {
@@ -2173,17 +2178,19 @@ export default function ChatPage() {
                     if (projection.message) {
                         setImageStatusText(projection.message);
                     }
-                    return;
+                    return false;
                 }
 
                 if (projection.channel === 'image') {
                     appendAssistantImageMessage(projection.image);
-                    return;
+                    return false;
                 }
 
                 if (projection.channel === 'error') {
                     throw new Error(projection.error);
                 }
+
+                return false;
             };
 
             while (true) {
@@ -2196,14 +2203,14 @@ export default function ChatPage() {
                 for (const line of lines) {
                     try {
                         const parsedEvent = parseChatStreamSseLine(line);
-                        applyChatStreamProjection(normalizeChatStreamEvent(parsedEvent));
+                        streamCompleted = applyChatStreamProjection(normalizeChatStreamEvent(parsedEvent)) || streamCompleted;
                     } catch (error) {
                         if (error instanceof SyntaxError) continue;
                         throw error;
                     }
                 }
 
-                if (done) break;
+                if (streamCompleted || done) break;
             }
 
             try {
