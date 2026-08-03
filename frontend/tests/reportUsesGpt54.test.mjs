@@ -61,6 +61,25 @@ function upstreamErrorStub() {
   }
 }
 
+test('OpenAI chat helper defaults to OpenLux GPT-5.6 Luna', async () => {
+  const { getYunwuOpenAIChatConfig } = await loadTsModule(['lib', 'yunwu-openai-chat.ts'], {
+    stubs: {
+      './auth': appErrorStub(),
+      './ai-usage': {
+        parseOpenAICompatibleUsage: () => null,
+      },
+      './server-env': {
+        readServerEnv: (key) => (key === 'YUNWU_OPENAI_CHAT_API_KEY' ? 'test-key' : undefined),
+      },
+      './upstream-error': upstreamErrorStub(),
+    },
+  })
+
+  const config = getYunwuOpenAIChatConfig()
+  assert.equal(config.apiUrl, 'https://api.openlux.ai/chat/completions')
+  assert.equal(config.model, 'gpt-5.6-luna')
+})
+
 test('OpenAI chat helper lets report force GPT-5.4 over env model', async () => {
   let capturedBody
   const { requestYunwuOpenAIChat } = await loadTsModule(['lib', 'yunwu-openai-chat.ts'], {

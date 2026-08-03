@@ -26,7 +26,11 @@ import { readBackendUrl } from '../../lib/server-env';
 import { enforceRateLimit, getClientAddress } from '../../lib/security-rate-limit';
 import { streamYunwuGeminiChat } from '../../lib/yunwu-gemini-chat';
 import { streamYunwuClaudeChat } from '../../lib/yunwu-claude-chat';
-import { streamYunwuOpenAIChat, type OpenAIChatMessage } from '../../lib/yunwu-openai-chat';
+import {
+    getYunwuOpenAIChatConfig,
+    streamYunwuOpenAIChat,
+    type OpenAIChatMessage,
+} from '../../lib/yunwu-openai-chat';
 import { enrichSystemPromptWithWebSearch } from '../../lib/web-search';
 
 export const runtime = 'nodejs';
@@ -126,6 +130,7 @@ async function streamByResponseModel(
     usageContext?: {
         user: UsageUser;
         requestId: string;
+        model: string;
     },
 ): Promise<void> {
     const openAIMessages: OpenAIChatMessage[] = messages.map((item) => ({
@@ -144,9 +149,10 @@ async function streamByResponseModel(
             systemPrompt: systemPromptWithWebSearch,
             messages: openAIMessages,
             temperature: 1,
+            model: usageContext?.model,
             onText,
             onUsage: usageContext
-                ? async (usage) => {
+                ? async (usage, requestModel) => {
                     await recordAiUsageEvent({
                         userId: usageContext.user.id,
                         userEmail: usageContext.user.email,
@@ -156,7 +162,7 @@ async function streamByResponseModel(
                         appId: 'main',
                         channel: MAIN_CHAT_USAGE_CHANNEL,
                         providerId: 'yunwu-openai',
-                        model: 'gpt-5.4',
+                        model: requestModel,
                         requestId: usageContext.requestId,
                         usage,
                         usageSource: 'response',
@@ -276,9 +282,13 @@ export async function POST(req: NextRequest) {
             });
         }
 
+        const requestModel = responseModel === 'gpt-5.4'
+            ? getYunwuOpenAIChatConfig().model
+            : responseModel;
+
         if (isExternallyBilled) {
             const reservationAmount = estimateTextUsageReservationCredits({
-                model: 'gpt-5.4',
+                model: requestModel,
                 promptText: [
                     fullSystemPrompt,
                     ...filteredMessages.map((message) => `${message.role}:${message.content}`),
@@ -293,7 +303,7 @@ export async function POST(req: NextRequest) {
                 channel: MAIN_CHAT_USAGE_CHANNEL,
                 requestId: usageRequestId,
                 amount: reservationAmount,
-                description: `AI 请求预留 · main / gpt-5.4 · 最多 ${reservationAmount} 积分`,
+                description: `AI 请求预留 · main / ${requestModel} · 最多 ${reservationAmount} 积分`,
             });
         }
 
@@ -309,7 +319,7 @@ export async function POST(req: NextRequest) {
                         (text) => {
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`));
                         },
-                        { user: usageUser, requestId: usageRequestId },
+                        { user: usageUser, requestId: usageRequestId, model: requestModel },
                     );
 
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));

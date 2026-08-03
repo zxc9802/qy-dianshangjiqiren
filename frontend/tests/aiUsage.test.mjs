@@ -61,6 +61,24 @@ test('external GPT-5.4 usage is billed at 1.8 times cost', () => {
     assert.equal(billing?.saleMultiplier, 1.8);
 });
 
+test('external GPT-5.6 Luna usage keeps the same 1.8 billing method', () => {
+    const billing = calculateTextUsageBilling({
+        model: 'gpt-5.6-luna',
+        usage: {
+            inputTokens: 212,
+            cachedInputTokens: 0,
+            outputTokens: 1346,
+            reasoningTokens: 0,
+            totalTokens: 1558,
+        },
+        billingAudience: 'external',
+    });
+
+    assert.equal(billing?.costCredits, 7);
+    assert.equal(billing?.chargedCredits, 11);
+    assert.equal(billing?.saleMultiplier, 1.8);
+});
+
 test('internal usage records cost but does not charge external credits', () => {
     const billing = calculateTextUsageBilling({
         model: 'gpt-5.4',

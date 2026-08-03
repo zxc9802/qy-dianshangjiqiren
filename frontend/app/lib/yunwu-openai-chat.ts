@@ -8,9 +8,9 @@ import {
     truncateForLog,
 } from './upstream-error';
 
-const DEFAULT_OPENAI_CHAT_URL = 'https://yunwu.ai/v1/chat/completions';
+const DEFAULT_OPENAI_CHAT_URL = 'https://api.openlux.ai/chat/completions';
 export const GPT_5_4_MODEL = 'gpt-5.4';
-const DEFAULT_OPENAI_CHAT_MODEL = GPT_5_4_MODEL;
+const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-5.6-luna';
 
 export type OpenAIContentPart =
     | { type: 'text'; text: string }
@@ -32,7 +32,7 @@ type OpenAIChatOptions = {
     temperature?: number;
     maxTokens?: number;
     model?: string;
-    onUsage?: (usage: AiTokenUsage) => void | Promise<void>;
+    onUsage?: (usage: AiTokenUsage, model: string) => void | Promise<void>;
 };
 
 type StreamOptions = OpenAIChatOptions & {
@@ -280,7 +280,7 @@ export async function requestYunwuOpenAIChat({
 
     const usage = parseOpenAICompatibleUsage(data);
     if (usage) {
-        await onUsage?.(usage);
+        await onUsage?.(usage, requestModel);
     }
 
     const content = data.choices[0]?.message?.content;
@@ -375,7 +375,7 @@ export async function streamYunwuOpenAIChat({
                 const usage = extractOpenAIStreamUsage(payload);
                 if (usage) {
                     usageReported = true;
-                    await onUsage?.(usage);
+                    await onUsage?.(usage, requestModel);
                 }
             }
         }
@@ -394,7 +394,7 @@ export async function streamYunwuOpenAIChat({
         if (!usageReported) {
             const usage = extractOpenAIStreamUsage(payload);
             if (usage) {
-                await onUsage?.(usage);
+                await onUsage?.(usage, requestModel);
             }
         }
     }

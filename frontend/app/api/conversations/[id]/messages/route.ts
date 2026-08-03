@@ -44,6 +44,7 @@ import { deleteTempVideo, downloadRemoteVideo, loadTempVideo } from '../../../..
 import { buildLongTermMemoryPrompt, rememberConversationTurn } from '../../../../lib/server-memory';
 import {
     GPT_5_4_MODEL,
+    getYunwuOpenAIChatConfig,
     requestYunwuOpenAIChat,
     streamYunwuOpenAIChat,
     type OpenAIChatMessage,
@@ -812,6 +813,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         const shouldSetInitialTitle = !hasPreviousUserMessage;
         const shouldStreamOpenAI = inputType !== 'image' && responseModel === 'gpt-5.4';
+        const openAIRequestModel = shouldStreamOpenAI
+            ? getYunwuOpenAIChatConfig().model
+            : GPT_5_4_MODEL;
         const shouldStreamClaude = inputType !== 'image' && responseModel === 'claude-opus-4.6';
         const shouldStreamVideoBreakdownGpt = shouldStreamOpenAI
             && bot.kind === 'builtin'
@@ -1089,7 +1093,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                     const systemPromptWithWebSearch = enriched.systemPrompt;
                     if (isExternallyBilled) {
                         const reservationAmount = estimateTextUsageReservationCredits({
-                            model: GPT_5_4_MODEL,
+                            model: openAIRequestModel,
                             promptText: [
                                 systemPromptWithWebSearch,
                                 ...textModelMessages.map((message) => (
@@ -1108,7 +1112,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             channel: CONVERSATION_USAGE_CHANNEL,
                             requestId: usageRequestId,
                             amount: reservationAmount,
-                            description: `AI 请求预留 · main / ${GPT_5_4_MODEL} · 最多 ${reservationAmount} 积分`,
+                            description: `AI 请求预留 · main / ${openAIRequestModel} · 最多 ${reservationAmount} 积分`,
                         });
                         creditsReserved = true;
                     }
@@ -1127,7 +1131,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                             messages: textModelMessages,
                             temperature: 0.8,
                             maxTokens: 8192,
-                            onUsage: async (usage) => {
+                            model: openAIRequestModel,
+                            onUsage: async (usage, requestModel) => {
                                 await recordAiUsageEvent({
                                     userId,
                                     userEmail: authUser.email,
@@ -1137,7 +1142,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                                     appId: 'main',
                                     channel: CONVERSATION_USAGE_CHANNEL,
                                     providerId: 'yunwu-openai',
-                                    model: GPT_5_4_MODEL,
+                                    model: requestModel,
                                     requestId: usageRequestId,
                                     usage,
                                     usageSource: 'response',
