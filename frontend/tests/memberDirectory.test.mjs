@@ -21,16 +21,17 @@ test('fixed member directory includes Ran Jianglong', async () => {
   const source = await readFile(memberDirectoryPath, 'utf8')
   const names = extractFixedMemberNames(source)
 
-  assert.equal(names.length, 31)
+  assert.equal(names.length, 32)
   assert.ok(names.includes('冉江龙'))
   assert.ok(names.includes('罗嘉俊'))
   assert.ok(names.includes('席明越'))
+  assert.ok(names.includes('罗艳林'))
 })
 
 test('member count hints match the fixed directory size', async () => {
   const loginPage = await readFile(loginPagePath, 'utf8')
   const profilePage = await readFile(profilePagePath, 'utf8')
 
-  assert.match(loginPage, /姓名固定为 31 人名单/)
-  assert.match(profilePage, /姓名只能从固定 31 人名单中搜索选择/)
+  assert.match(loginPage, /姓名固定为 32 人名单/)
+  assert.match(profilePage, /姓名只能从固定 32 人名单中搜索选择/)
 })
