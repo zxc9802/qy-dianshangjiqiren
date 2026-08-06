@@ -214,7 +214,7 @@ test('safe response parsing converts an HTML timeout into a Chinese upload error
 })
 
 test('chat chunks only videos above 20MB and keeps ordinary uploads for smaller files', async () => {
-  const source = await readFile(path.join(frontendRoot, 'app', 'chat', '[id]', 'page.tsx'), 'utf8')
+  const source = await readFile(path.join(frontendRoot, 'app', 'chat2', '[id]', 'page.tsx'), 'utf8')
   assert.match(source, /uploadVideoInChunks/)
   assert.match(source, /VIDEO_CHUNK_UPLOAD_THRESHOLD_BYTES/)
   assert.match(source, /attachment\.isVideo/)
@@ -229,7 +229,7 @@ test('large video jobs preserve the current user analysis question', async () =>
     readFile(path.join(frontendRoot, 'prisma', 'schema.prisma'), 'utf8'),
     readFile(path.join(frontendRoot, 'app', 'lib', 'video-upload-types.ts'), 'utf8'),
     readFile(path.join(frontendRoot, 'app', 'lib', 'chunked-video-upload.ts'), 'utf8'),
-    readFile(path.join(frontendRoot, 'app', 'chat', '[id]', 'page.tsx'), 'utf8'),
+    readFile(path.join(frontendRoot, 'app', 'chat2', '[id]', 'page.tsx'), 'utf8'),
     readFile(path.join(frontendRoot, 'app', 'api', 'video-uploads', 'route.ts'), 'utf8'),
   ])
   assert.match(schema, /analysisPrompt\s+String\s+@default\(""\)/)
@@ -249,7 +249,7 @@ test('Gemini accepts a segmented video result with analysis text and no full-vid
 })
 
 test('Gemini does not resend the original file after segmented analysis returned text', async () => {
-  const chatSource = await readFile(path.join(frontendRoot, 'app', 'chat', '[id]', 'page.tsx'), 'utf8')
+  const chatSource = await readFile(path.join(frontendRoot, 'app', 'chat2', '[id]', 'page.tsx'), 'utf8')
   assert.match(
     chatSource,
     /requestAttachments\.some\(\(attachment\) => attachment\.kind === 'video' && !attachment\.tempVideoToken && !attachment\.remoteVideoUrl && !attachment\.extractedText\.trim\(\)\)/,
