@@ -23,6 +23,24 @@ assert.equal(
     'Prisma db push on startup must be gated by PRISMA_DB_PUSH_ON_START.',
 );
 
+assert.match(
+    source,
+    /require\('ffmpeg-static'\)/,
+    'Production startup must fall back to the bundled ffmpeg binary.',
+);
+
+assert.match(
+    source,
+    /require\('ffprobe-static'\)/,
+    'Production startup must fall back to the bundled ffprobe binary.',
+);
+
+assert.match(
+    source,
+    /fs\.existsSync\(configuredPath\)/,
+    'Production startup must reject configured media binary paths that do not exist.',
+);
+
 assert.equal(
     prismaSchema.includes('@@map("video_usage_logs")'),
     true,

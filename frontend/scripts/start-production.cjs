@@ -9,6 +9,8 @@ const ffprobeName = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
 const ffmpegPath = path.join(binDir, ffmpegName);
 const ffprobePath = path.join(binDir, ffprobeName);
 const nextBinPath = path.join(projectRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
+const bundledFfmpegPath = require('ffmpeg-static');
+const bundledFfprobePath = require('ffprobe-static').path;
 
 const env = { ...process.env };
 
@@ -16,17 +18,29 @@ function isEnabled(value) {
     return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+function resolveMediaBinary(configuredPath, copiedPath, bundledPath, fallbackCommand) {
+    const normalizedConfiguredPath = String(configuredPath || '').trim();
+    const configuredPathIsFile = normalizedConfiguredPath
+        && (path.isAbsolute(normalizedConfiguredPath) || normalizedConfiguredPath.includes('/') || normalizedConfiguredPath.includes('\\'));
+    if (normalizedConfiguredPath && (!configuredPathIsFile || fs.existsSync(configuredPath))) {
+        return normalizedConfiguredPath;
+    }
+
+    for (const candidatePath of [copiedPath, bundledPath]) {
+        if (candidatePath && fs.existsSync(candidatePath)) {
+            return candidatePath;
+        }
+    }
+
+    return fallbackCommand;
+}
+
 if (fs.existsSync(binDir)) {
     env.PATH = env.PATH ? `${binDir}${path.delimiter}${env.PATH}` : binDir;
 }
 
-if (!env.FFMPEG_PATH && fs.existsSync(ffmpegPath)) {
-    env.FFMPEG_PATH = ffmpegPath;
-}
-
-if (!env.FFPROBE_PATH && fs.existsSync(ffprobePath)) {
-    env.FFPROBE_PATH = ffprobePath;
-}
+env.FFMPEG_PATH = resolveMediaBinary(env.FFMPEG_PATH, ffmpegPath, bundledFfmpegPath, ffmpegName);
+env.FFPROBE_PATH = resolveMediaBinary(env.FFPROBE_PATH, ffprobePath, bundledFfprobePath, ffprobeName);
 
 if (isEnabled(env.PRISMA_DB_PUSH_ON_START)) {
     const prismaResult = spawnSync('npx', ['prisma', 'db', 'push'], {
