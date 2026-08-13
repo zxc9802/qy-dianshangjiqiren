@@ -62,7 +62,7 @@ async function loadServerChatVideoModule(env = {}, stubs = {}) {
     }
 
     if (specifier === 'ffprobe-static') {
-      return { path: 'ffprobe' }
+      return { path: stubs.ffprobePath || 'ffprobe' }
     }
 
     return localRequire(specifier)
@@ -82,6 +82,20 @@ async function loadServerChatVideoModule(env = {}, stubs = {}) {
   vm.runInContext(transpiled, context, { filename: sourcePath })
   return cjsModule.exports
 }
+
+test('media binary resolution falls back when a configured file path does not exist', async () => {
+  const fallbackPath = fileURLToPath(import.meta.url)
+  const { resolveMediaBinaryPath } = await loadServerChatVideoModule({
+    FFPROBE_PATH: '/app/bin/ffprobe',
+  }, {
+    ffprobePath: fallbackPath,
+  })
+
+  assert.equal(
+    resolveMediaBinaryPath('FFPROBE_PATH', [fallbackPath], 'ffprobe'),
+    fallbackPath,
+  )
+})
 
 async function loadUploadRouteModule(stubs = {}) {
   const sourcePath = path.join(appRoot, 'api', 'upload', 'route.ts')

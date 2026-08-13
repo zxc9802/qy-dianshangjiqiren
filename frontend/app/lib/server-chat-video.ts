@@ -187,9 +187,10 @@ function getProcessingErrorMessage(error: unknown): string {
     return 'Unknown error';
 }
 
-function resolveMediaBinaryPath(envKey: string, candidatePaths: Array<string | null | undefined>, fallbackCommand: string): string {
+export function resolveMediaBinaryPath(envKey: string, candidatePaths: Array<string | null | undefined>, fallbackCommand: string): string {
     const envValue = readServerEnv(envKey)?.trim();
-    if (envValue) {
+    const envValueIsPath = envValue && (path.isAbsolute(envValue) || envValue.includes('/') || envValue.includes('\\'));
+    if (envValue && (!envValueIsPath || existsSync(envValue))) {
         return envValue;
     }
 
