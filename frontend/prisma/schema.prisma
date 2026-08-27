@@ -482,7 +482,7 @@ model PageInsight {
 model PointsTransaction {
   id                    String   @id @default(uuid())
   userId                String   @map("user_id")
-  type                  String // "recharge" | "consume" | "reward" | "redeem"
+  type                  String // "recharge" | "consume" | "reward" | "redeem" | "reserve" | "released"
   amount                Int
   balanceAfter          Int      @map("balance_after")
   description           String   @default("")
