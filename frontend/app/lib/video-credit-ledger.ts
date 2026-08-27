@@ -2,6 +2,12 @@ import { Prisma } from '@prisma/client';
 import { AppError } from './auth';
 import { prisma } from './prisma';
 import type { VideoCreditLedger } from './video-credit-service';
+import {
+    legacyVideoCreditReservationReference,
+    planVideoCreditTransition,
+    readActiveVideoHeldPoints,
+    videoCreditReservationReference,
+} from './video-credit-reservation-state';
 
 const TRANSACTION_OPTIONS = {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -12,12 +18,35 @@ const TRANSACTION_ATTEMPTS = 3;
 
 let schemaPromise: Promise<void> | null = null;
 
-function reserveReference(requestId: string): string {
-    return `video-sso:reserve:${requestId}`;
-}
+type StoredVideoReservation = {
+    id: string;
+    userId: string;
+    type: string;
+    amount: number;
+};
 
 function refundReference(requestId: string): string {
     return `video-sso:refund:${requestId}`;
+}
+
+async function findVideoReservation(
+    tx: Prisma.TransactionClient,
+    requestId: string,
+): Promise<{ reservation: StoredVideoReservation; legacyPreDeducted: boolean } | null> {
+    const select = { id: true, userId: true, type: true, amount: true } as const;
+    const reservation = await tx.pointsTransaction.findUnique({
+        where: { referenceKey: videoCreditReservationReference(requestId) },
+        select,
+    });
+    if (reservation) return { reservation, legacyPreDeducted: false };
+
+    const legacyReservation = await tx.pointsTransaction.findUnique({
+        where: { referenceKey: legacyVideoCreditReservationReference(requestId) },
+        select,
+    });
+    return legacyReservation
+        ? { reservation: legacyReservation, legacyPreDeducted: true }
+        : null;
 }
 
 async function ensureVideoCreditLedgerSchema(): Promise<void> {
@@ -73,27 +102,29 @@ export const prismaVideoCreditLedger: VideoCreditLedger = {
     async reserve(input) {
         await ensureVideoCreditLedgerSchema();
         return withRetry(() => prisma.$transaction(async (tx) => {
-            const referenceKey = reserveReference(input.requestId);
-            const existing = await tx.pointsTransaction.findUnique({
-                where: { referenceKey },
-                select: { userId: true, amount: true },
-            });
+            const existing = await findVideoReservation(tx, input.requestId);
             if (existing) {
-                if (existing.userId !== input.userId) {
+                if (existing.reservation.userId !== input.userId) {
                     throw new AppError('Video credit reservation belongs to another account.', 409, 'VIDEO_CREDIT_OWNER_MISMATCH');
                 }
                 return { pointsBalance: await readBalance(tx, input.userId) };
             }
 
-            const claimed = await tx.user.updateMany({
-                where: {
-                    id: input.userId,
-                    groupName: '外部用户',
-                    pointsBalance: { gte: input.amount },
-                },
-                data: { pointsBalance: { decrement: input.amount } },
+            const account = await tx.user.findUnique({
+                where: { id: input.userId },
+                select: { groupName: true, pointsBalance: true },
             });
-            if (claimed.count !== 1) {
+            if (!account) {
+                throw new AppError('Account not found.', 404, 'ACCOUNT_NOT_FOUND');
+            }
+            const heldPoints = await readActiveVideoHeldPoints(tx, input.userId);
+            const transition = planVideoCreditTransition({
+                action: 'reserve',
+                pointsBalance: account.pointsBalance,
+                heldPoints,
+                amount: input.amount,
+            });
+            if (account.groupName !== '外部用户' || !transition.allowed) {
                 throw new AppError(
                     `积分不足，本次生成需要 ${input.amount} 积分。`,
                     402,
@@ -101,41 +132,71 @@ export const prismaVideoCreditLedger: VideoCreditLedger = {
                 );
             }
 
-            const pointsBalance = await readBalance(tx, input.userId);
             await tx.pointsTransaction.create({
                 data: {
                     userId: input.userId,
                     type: 'reserve',
                     amount: -input.amount,
-                    balanceAfter: pointsBalance,
+                    balanceAfter: transition.pointsBalance,
                     description: input.description,
-                    referenceKey,
+                    referenceKey: videoCreditReservationReference(input.requestId),
                 },
             });
-            return { pointsBalance };
+            return { pointsBalance: transition.pointsBalance };
         }, TRANSACTION_OPTIONS));
     },
 
     async settle(input) {
         await ensureVideoCreditLedgerSchema();
         return withRetry(() => prisma.$transaction(async (tx) => {
-            const referenceKey = reserveReference(input.requestId);
-            const reservation = await tx.pointsTransaction.findUnique({
-                where: { referenceKey },
-                select: { id: true, userId: true, type: true, amount: true },
-            });
-            if (!reservation) {
+            const stored = await findVideoReservation(tx, input.requestId);
+            if (!stored) {
                 throw new AppError('Video credit reservation was not found.', 409, 'VIDEO_CREDIT_RESERVATION_NOT_FOUND');
             }
+            const { reservation, legacyPreDeducted } = stored;
             if (reservation.userId !== input.userId) {
                 throw new AppError('Video credit reservation belongs to another account.', 409, 'VIDEO_CREDIT_OWNER_MISMATCH');
             }
             const chargedPoints = Math.max(0, -reservation.amount);
+            let pointsBalance = await readBalance(tx, input.userId);
             if (reservation.type === 'reserve') {
+                if (!legacyPreDeducted) {
+                    const heldPoints = await readActiveVideoHeldPoints(tx, input.userId);
+                    const transition = planVideoCreditTransition({
+                        action: 'settle',
+                        pointsBalance,
+                        heldPoints,
+                        amount: chargedPoints,
+                    });
+                    if (!transition.allowed) {
+                        throw new AppError(
+                            `积分不足，本次生成需要 ${chargedPoints} 积分。`,
+                            402,
+                            'INSUFFICIENT_CREDITS',
+                        );
+                    }
+                    const claimed = await tx.user.updateMany({
+                        where: {
+                            id: input.userId,
+                            groupName: '外部用户',
+                            pointsBalance: { gte: chargedPoints },
+                        },
+                        data: { pointsBalance: { decrement: chargedPoints } },
+                    });
+                    if (claimed.count !== 1) {
+                        throw new AppError(
+                            `积分不足，本次生成需要 ${chargedPoints} 积分。`,
+                            402,
+                            'INSUFFICIENT_CREDITS',
+                        );
+                    }
+                    pointsBalance = await readBalance(tx, input.userId);
+                }
                 await tx.pointsTransaction.update({
                     where: { id: reservation.id },
                     data: {
                         type: 'consume',
+                        balanceAfter: pointsBalance,
                         description: `Seedance 视频生成扣费 · 实扣 ${chargedPoints} 积分`,
                     },
                 });
@@ -143,7 +204,7 @@ export const prismaVideoCreditLedger: VideoCreditLedger = {
                 throw new AppError('Released video credits cannot be settled.', 409, 'VIDEO_CREDIT_ALREADY_RELEASED');
             }
             return {
-                pointsBalance: await readBalance(tx, input.userId),
+                pointsBalance,
                 chargedPoints,
             };
         }, TRANSACTION_OPTIONS));
@@ -152,17 +213,14 @@ export const prismaVideoCreditLedger: VideoCreditLedger = {
     async release(input) {
         await ensureVideoCreditLedgerSchema();
         return withRetry(() => prisma.$transaction(async (tx) => {
-            const reserveKey = reserveReference(input.requestId);
-            const reservation = await tx.pointsTransaction.findUnique({
-                where: { referenceKey: reserveKey },
-                select: { id: true, userId: true, type: true, amount: true },
-            });
-            if (!reservation) {
+            const stored = await findVideoReservation(tx, input.requestId);
+            if (!stored) {
                 return {
                     pointsBalance: await readBalance(tx, input.userId),
                     releasedPoints: 0,
                 };
             }
+            const { reservation, legacyPreDeducted } = stored;
             if (reservation.userId !== input.userId) {
                 throw new AppError('Video credit reservation belongs to another account.', 409, 'VIDEO_CREDIT_OWNER_MISMATCH');
             }
@@ -174,27 +232,59 @@ export const prismaVideoCreditLedger: VideoCreditLedger = {
                 };
             }
             if (reservation.type === 'reserve') {
-                const updatedUser = await tx.user.update({
-                    where: { id: input.userId },
-                    data: { pointsBalance: { increment: releasedPoints } },
-                    select: { pointsBalance: true },
+                if (legacyPreDeducted) {
+                    const updatedUser = await tx.user.update({
+                        where: { id: input.userId },
+                        data: { pointsBalance: { increment: releasedPoints } },
+                        select: { pointsBalance: true },
+                    });
+                    await tx.pointsTransaction.update({
+                        where: { id: reservation.id },
+                        data: {
+                            type: 'released',
+                            balanceAfter: updatedUser.pointsBalance,
+                        },
+                    });
+                    await tx.pointsTransaction.create({
+                        data: {
+                            userId: input.userId,
+                            type: 'refund',
+                            amount: releasedPoints,
+                            balanceAfter: updatedUser.pointsBalance,
+                            description: 'Seedance 视频生成未成功，已退回旧版预扣积分',
+                            referenceKey: refundReference(input.requestId),
+                        },
+                    });
+                    return {
+                        pointsBalance: updatedUser.pointsBalance,
+                        releasedPoints,
+                    };
+                }
+                const pointsBalance = await readBalance(tx, input.userId);
+                const heldPoints = await readActiveVideoHeldPoints(tx, input.userId);
+                const transition = planVideoCreditTransition({
+                    action: 'release',
+                    pointsBalance,
+                    heldPoints,
+                    amount: releasedPoints,
                 });
+                if (!transition.allowed) {
+                    throw new AppError(
+                        'Video credit reservation could not be released.',
+                        409,
+                        'VIDEO_CREDIT_RESERVATION_STATE_INVALID',
+                    );
+                }
                 await tx.pointsTransaction.update({
                     where: { id: reservation.id },
-                    data: { type: 'released' },
-                });
-                await tx.pointsTransaction.create({
                     data: {
-                        userId: input.userId,
-                        type: 'refund',
-                        amount: releasedPoints,
-                        balanceAfter: updatedUser.pointsBalance,
-                        description: 'Seedance 视频生成未成功，已退回预留积分',
-                        referenceKey: refundReference(input.requestId),
+                        type: 'released',
+                        balanceAfter: transition.pointsBalance,
+                        description: 'Seedance 视频生成未成功，已释放预留积分',
                     },
                 });
                 return {
-                    pointsBalance: updatedUser.pointsBalance,
+                    pointsBalance: transition.pointsBalance,
                     releasedPoints,
                 };
             }

@@ -13,6 +13,10 @@ import {
     isRetryableTransactionError,
     waitForTransactionRetry,
 } from './transaction-retry';
+import {
+    planVideoCreditTransition,
+    readActiveVideoHeldPoints,
+} from './video-credit-reservation-state';
 
 const USAGE_TRANSACTION_OPTIONS = {
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -64,6 +68,45 @@ function settlementReference(channel: string, requestId: string): string {
 function toBigInt(value: number | undefined | null): bigint | null {
     if (!Number.isFinite(value) || Number(value) < 0) return null;
     return BigInt(Math.trunc(Number(value)));
+}
+
+async function claimSpendableCredits(
+    tx: Prisma.TransactionClient,
+    input: {
+        userId: string;
+        amount: number;
+        requireActiveExternal?: boolean;
+    },
+): Promise<boolean> {
+    const account = await tx.user.findUnique({
+        where: { id: input.userId },
+        select: { pointsBalance: true },
+    });
+    if (!account) return false;
+
+    const heldPoints = await readActiveVideoHeldPoints(tx, input.userId);
+    const transition = planVideoCreditTransition({
+        action: 'reserve',
+        pointsBalance: account.pointsBalance,
+        heldPoints,
+        amount: input.amount,
+    });
+    if (!transition.allowed) return false;
+
+    const claimed = await tx.user.updateMany({
+        where: {
+            id: input.userId,
+            ...(input.requireActiveExternal ? {
+                accountStatus: 'active',
+                billingAudience: 'external',
+            } : {}),
+            pointsBalance: { gte: heldPoints + input.amount },
+        },
+        data: {
+            pointsBalance: { decrement: input.amount },
+        },
+    });
+    return claimed.count === 1;
 }
 
 export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
@@ -121,18 +164,12 @@ export async function reserveAiUsageCredits(input: AiUsageCreditKey & {
                     return Math.max(0, -existing.amount);
                 }
 
-                const claimed = await tx.user.updateMany({
-                    where: {
-                        id: input.userId,
-                        accountStatus: 'active',
-                        billingAudience: 'external',
-                        pointsBalance: { gte: amount },
-                    },
-                    data: {
-                        pointsBalance: { decrement: amount },
-                    },
+                const claimed = await claimSpendableCredits(tx, {
+                    userId: input.userId,
+                    amount,
+                    requireActiveExternal: true,
                 });
-                if (claimed.count !== 1) {
+                if (!claimed) {
                     throw new AppError(
                         `Insufficient credits. This request requires up to ${amount} credits.`,
                         402,
@@ -411,16 +448,11 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                     const adjustment = reservedAmount - nextCharge;
                     if (adjustment < 0) {
                         const extraCharge = -adjustment;
-                        const charged = await tx.user.updateMany({
-                            where: {
-                                id: userId,
-                                pointsBalance: { gte: extraCharge },
-                            },
-                            data: {
-                                pointsBalance: { decrement: extraCharge },
-                            },
+                        const charged = await claimSpendableCredits(tx, {
+                            userId,
+                            amount: extraCharge,
                         });
-                        if (charged.count !== 1) {
+                        if (!charged) {
                             throw new AppError(
                                 'Insufficient credits to settle this request.',
                                 402,
@@ -452,16 +484,11 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
                     });
                 } else if (!reservation && chargedDelta !== 0) {
                     if (chargedDelta > 0) {
-                        const charged = await tx.user.updateMany({
-                            where: {
-                                id: userId,
-                                pointsBalance: { gte: chargedDelta },
-                            },
-                            data: {
-                                pointsBalance: { decrement: chargedDelta },
-                            },
+                        const charged = await claimSpendableCredits(tx, {
+                            userId,
+                            amount: chargedDelta,
                         });
-                        if (charged.count !== 1) {
+                        if (!charged) {
                             throw new AppError(
                                 'Insufficient credits.',
                                 402,

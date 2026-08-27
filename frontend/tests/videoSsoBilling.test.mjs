@@ -52,7 +52,7 @@ test('external video billing reserves main-account points while internal users r
     const ledger = {
         async reserve(input) {
             reservations.push(input);
-            return { pointsBalance: 3200 };
+            return { pointsBalance: 8200 };
         },
         async settle() {
             throw new Error('not used');
@@ -78,7 +78,7 @@ test('external video billing reserves main-account points while internal users r
         action: 'reserve',
         requestId: '11111111-1111-4111-8111-111111111111',
         requiredPoints: 5000,
-        pointsBalance: 3200,
+        pointsBalance: 8200,
         chargeRequired: true,
     });
     assert.equal(reservations.length, 1);

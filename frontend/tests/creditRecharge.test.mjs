@@ -38,13 +38,16 @@ test('redemption atomically claims a code and increments the external user balan
     assert.match(source, /tx\.pointsTransaction\.create\(/);
 });
 
-test('usage charging reserves credits and never debits an insufficient balance', async () => {
+test('usage charging respects video holds and never debits an insufficient balance', async () => {
     const source = await readFile(path.join(appRoot, 'lib', 'ai-usage-store.ts'), 'utf8');
 
     assert.match(source, /isolationLevel:\s*Prisma\.TransactionIsolationLevel\.Serializable/);
     assert.match(source, /const chargedDelta = nextCharge - previousCharge/);
     assert.match(source, /type:\s*'reserve'/);
-    assert.match(source, /pointsBalance:\s*\{\s*gte:\s*chargedDelta\s*\}/s);
+    assert.match(source, /async function claimSpendableCredits/);
+    assert.match(source, /readActiveVideoHeldPoints\(tx,\s*input\.userId\)/);
+    assert.match(source, /pointsBalance:\s*\{\s*gte:\s*heldPoints \+ input\.amount\s*\}/s);
+    assert.match(source, /amount:\s*chargedDelta/);
     assert.match(source, /'INSUFFICIENT_CREDITS'/);
     assert.match(source, /type:\s*chargedDelta > 0 \? 'consume' : 'refund'/);
 });
