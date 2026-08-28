@@ -2,7 +2,7 @@ import type { ResponseModel, WebSearchMode } from './chat-models';
 
 const API_BASE = '/api';
 export type VideoSiteKey = 'seedance' | 'tiktok';
-export type ExternalSsoProduct = 'xhstw' | 'xiaoshou' | 'sabc' | 'baokuangaixie' | 'chanpinsheji';
+export type ExternalSsoProduct = 'xhstw' | 'xiaoshou' | 'sabc' | 'baokuangaixie' | 'chanpinsheji' | 'shuziren';
 
 export class ApiError extends Error {
     status: number;
