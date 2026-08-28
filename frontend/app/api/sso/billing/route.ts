@@ -7,6 +7,7 @@ import {
     reserveAiUsageCredits,
 } from '@/app/lib/ai-usage-store';
 import {
+    calculateDigitalHumanDurationBilling,
     calculateFixedMediaBilling,
     calculateTextUsageBilling,
     isExternallyBilledAccount,
@@ -67,6 +68,17 @@ const billingSchema = z.object({
     billableUnits: z.number().positive().max(1_000_000).optional(),
 }).superRefine((value, context) => {
     if (value.action === 'release') return;
+    if (value.product === 'shuziren') {
+        // 数字人智能体按成片秒数计费（billableUnits = 秒），费率由主站 SHUZIREN_POINTS_PER_SECOND 决定
+        if (!value.billableUnits) {
+            context.addIssue({
+                code: 'custom',
+                path: ['billableUnits'],
+                message: 'billableUnits (duration seconds) is required for digital human billing.',
+            });
+        }
+        return;
+    }
     if (value.mediaProduct) {
         if (!value.billableUnits) {
             context.addIssue({
@@ -183,7 +195,12 @@ export async function POST(req: NextRequest) {
         } else if (input.action === 'reserve') {
             let reservedCredits = 0;
             if (isExternallyBilled) {
-                const billing = input.mediaProduct
+                const billing = input.product === 'shuziren'
+                    ? calculateDigitalHumanDurationBilling({
+                        units: input.billableUnits || 0,
+                        billingAudience: 'external',
+                    })
+                    : input.mediaProduct
                     ? calculateFixedMediaBilling({
                         product: input.mediaProduct,
                         units: input.billableUnits || 0,
@@ -212,7 +229,7 @@ export async function POST(req: NextRequest) {
                     channel,
                     requestId: input.requestId,
                     amount: billing.chargedCredits,
-                    description: `SSO AI 请求预留 · ${product} / ${input.model || input.mediaProduct}`,
+                    description: `SSO AI 请求预留 · ${product} / ${input.model || input.mediaProduct || (input.product === 'shuziren' ? `${input.operation}` : 'unknown')}`,
                 });
             }
             const balance = await prisma.user.findUniqueOrThrow({
@@ -238,12 +255,18 @@ export async function POST(req: NextRequest) {
                 appId: `sso-${product}`,
                 channel,
                 providerId: input.providerId,
-                model: input.model || input.mediaProduct || 'unknown',
+                model: input.model || input.mediaProduct || (input.product === 'shuziren' ? 'shuziren-lipsync' : 'unknown'),
                 requestId: input.requestId,
                 usage: input.usage,
                 usageSource: 'response',
                 mediaProduct: input.mediaProduct,
                 billableUnits: input.billableUnits,
+                overrideBilling: input.product === 'shuziren'
+                    ? calculateDigitalHumanDurationBilling({
+                        units: input.billableUnits || 0,
+                        billingAudience: isExternallyBilled ? 'external' : 'internal',
+                    })
+                    : undefined,
             });
             const balance = await prisma.user.findUniqueOrThrow({
                 where: { id: user.id },

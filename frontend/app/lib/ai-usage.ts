@@ -277,3 +277,34 @@ export function calculateFixedMediaBilling(input: {
             : 0,
     };
 }
+
+// 数字人智能体（shuziren）按成片秒数计费：费率由主站统一定价，外部用户 20 积分/秒
+// （与主站积分口径一致：100 积分 = 1 元，即 0.20 元/秒）。
+// 该产品上游由子应用自行对接（HeyGen / fal / PixVerse），主站不掌握上游成本，因此不计 upstreamCost。
+export const SHUZIREN_POINTS_PER_SECOND = 20;
+const SHUZIREN_MAX_BILLABLE_SECONDS = 86_400;
+
+export function calculateDigitalHumanDurationBilling(input: {
+    units: number;
+    billingAudience?: BillingAudience;
+}): AiUsageBilling {
+    const units = Number.isFinite(input.units) && input.units > 0
+        ? Math.min(input.units, SHUZIREN_MAX_BILLABLE_SECONDS)
+        : 0;
+    const billingAudience = normalizeBillingAudience(input.billingAudience);
+
+    return {
+        priceVersion: AI_USAGE_PRICE_VERSION,
+        billingAudience,
+        billingUnit: 'second',
+        billableUnits: units,
+        groupMultiplier: 1,
+        saleMultiplier: 1,
+        upstreamCostUsd: null,
+        upstreamCostCny: 0,
+        costCredits: 0,
+        chargedCredits: billingAudience === 'external'
+            ? ceilCredits(units * SHUZIREN_POINTS_PER_SECOND)
+            : 0,
+    };
+}

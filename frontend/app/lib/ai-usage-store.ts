@@ -5,6 +5,7 @@ import {
     isExternallyBilledAccount,
     normalizeBillingAudience,
     type AiTokenUsage,
+    type AiUsageBilling,
     type BillingAudience,
 } from './ai-usage';
 import { AppError, ensureAccessControlBootstrap } from './auth';
@@ -49,6 +50,7 @@ export type RecordAiUsageEventInput = {
     usdCnyRate?: number;
     mediaProduct?: FixedMediaProduct;
     billableUnits?: number;
+    overrideBilling?: AiUsageBilling;
 };
 
 type AiUsageCreditKey = {
@@ -315,7 +317,9 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
     const billingAudience = isExternallyBilledAccount(billingOwner)
         ? normalizeBillingAudience(billingOwner.billingAudience)
         : 'internal';
-    const billing = input.mediaProduct
+    const billing = input.overrideBilling
+        ? input.overrideBilling
+        : input.mediaProduct
         ? calculateFixedMediaBilling({
             product: input.mediaProduct,
             units: input.billableUnits || 0,
@@ -340,7 +344,7 @@ export async function recordAiUsageEvent(input: RecordAiUsageEventInput) {
         channel,
         providerId: input.providerId || null,
         model,
-        generationMode: input.mediaProduct ? 'media' : 'text',
+        generationMode: input.mediaProduct || input.overrideBilling ? 'media' : 'text',
         requestId,
         upstreamRequestId: input.upstreamRequestId || null,
         upstreamTraceId: input.upstreamTraceId || null,

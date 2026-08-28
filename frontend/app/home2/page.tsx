@@ -168,16 +168,6 @@ const FEATURED_BOTS: DemoBot[] = [
     requiresAuth: true,
   },
   {
-    id: 'digital-human-lipsync',
-    name: '数字人口播视频',
-    category: '视频创作',
-    description: '上传真人视频与口播文案，一键生成口型精准对齐的数字人视频。',
-    icon: <Mic size={22} strokeWidth={1.8} />,
-    iconColor: '#2563eb',
-    ssoProduct: 'shuziren',
-    requiresAuth: true,
-  },
-  {
     id: 'buyer-show',
     name: '买家秀智能体',
     category: '绘图机器人',
@@ -207,6 +197,16 @@ const FEATURED_BOTS: DemoBot[] = [
     path: VIDEO_SITE_METADATA.seedance.entryPath,
     requiresAuth: true,
     videoSite: 'seedance',
+  },
+  {
+    id: 'digital-human-agent',
+    name: '数字人智能体',
+    category: '视频工作台',
+    description: '上传人物视频与口播文案，生成对口型数字人视频，按秒计费。',
+    icon: <Video size={22} strokeWidth={1.8} />,
+    iconColor: '#0f9d8f',
+    ssoProduct: 'shuziren',
+    requiresAuth: true,
   },
 ];
 
@@ -441,7 +441,7 @@ export default function Home2Page() {
           <div className={styles.brandMark}><Bot size={18} /></div>
           <div>
             <div className={styles.brandName}>电商 AI 智能平台</div>
-            <div className={styles.brandSubline}>精选工作台 · 12</div>
+            <div className={styles.brandSubline}>精选工作台 · 13</div>
           </div>
         </div>
         <div className={styles.headerSearch}>
@@ -539,7 +539,7 @@ export default function Home2Page() {
           </section>
 
           <section className={styles.toolsSection}>
-            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 12 个电商工作入口</p></div>
+            <div className={styles.sectionIntro}><div><span className={styles.eyebrow}>CURATED TOOLS</span><h2>精选入口</h2></div><p>当前只展示最常用的 13 个电商工作入口</p></div>
             {botGroups.map((group) => <div className={styles.category} key={group.category}><div className={styles.categoryHeading}><h3>{group.category}</h3><span>{String(group.bots.length).padStart(2, '0')}</span></div><div className={styles.botGrid}>{group.bots.map((bot, index) => <button key={bot.id} className={styles.botCard} style={{ '--card-index': index } as CSSProperties} onClick={() => void openBot(bot)}><span className={styles.botIcon} style={{ color: bot.iconColor, backgroundColor: `${bot.iconColor}15` }}>{bot.icon}</span><span className={styles.botInfo}><span className={styles.botTitleRow}><strong>{bot.name}</strong><em>正式版</em></span><small>{bot.description}</small></span><ArrowUpRight className={styles.botArrow} size={17} /></button>)}</div></div>)}
             {filteredBots.length === 0 && <div className={styles.emptyState}><Search size={18} /><p>没有找到匹配的精选入口</p><button onClick={() => setSearchQuery('')}>清除搜索</button></div>}
           </section>
