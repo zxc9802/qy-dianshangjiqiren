@@ -72,7 +72,7 @@ type DemoBot = {
 
 const MAX_ATTACHMENTS = 10;
 const ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v';
-const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie', 'chanpinsheji'];
+const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie', 'chanpinsheji', 'shuziren'];
 
 const builtin = (routeId: string) => BUILTIN_BOTS.find((bot) => bot.routeId === routeId);
 
@@ -165,6 +165,16 @@ const FEATURED_BOTS: DemoBot[] = [
     icon: <BookOpen size={22} strokeWidth={1.8} />,
     iconColor: '#e35b52',
     ssoProduct: 'xhstw',
+    requiresAuth: true,
+  },
+  {
+    id: 'digital-human-lipsync',
+    name: '数字人口播视频',
+    category: '视频创作',
+    description: '上传真人视频与口播文案，一键生成口型精准对齐的数字人视频。',
+    icon: <Mic size={22} strokeWidth={1.8} />,
+    iconColor: '#2563eb',
+    ssoProduct: 'shuziren',
     requiresAuth: true,
   },
   {

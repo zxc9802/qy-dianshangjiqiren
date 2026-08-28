@@ -28,6 +28,10 @@ const EXTERNAL_SSO_PRODUCTS = {
         callbackUrl: 'https://chanpinsheji.qycm.top/api/sso/callback',
         clientSecretEnv: 'SSO_CHANPINSHEJI_CLIENT_SECRET',
     },
+    shuziren: {
+        callbackUrl: 'https://shuziren.qycm.top/api/sso/callback',
+        clientSecretEnv: 'SSO_SHUZIREN_CLIENT_SECRET',
+    },
 } as const;
 
 export type ExternalSsoProduct = keyof typeof EXTERNAL_SSO_PRODUCTS;
