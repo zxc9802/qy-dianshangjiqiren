@@ -5,6 +5,7 @@ import { buildPromptWithBuiltinKnowledge } from '../../lib/builtin-knowledge';
 import {
     DEFAULT_RESPONSE_MODEL,
     DEFAULT_WEB_SEARCH_MODE,
+    getOpenAIUpstreamModel,
     isResponseModel,
     isWebSearchMode,
     type ResponseModel,
@@ -100,7 +101,8 @@ async function streamByResponseModel(
     messages: ChatRequestMessage[],
     onText: (text: string) => void,
 ): Promise<void> {
-    if (responseModel === 'gpt-5.4') {
+    const openAIUpstreamModel = getOpenAIUpstreamModel(responseModel);
+    if (openAIUpstreamModel) {
         const openAIMessages: OpenAIChatMessage[] = messages.map((item) => ({
             role: item.role === 'assistant' ? 'assistant' : 'user',
             content: item.content,
@@ -110,6 +112,7 @@ async function streamByResponseModel(
             systemPrompt,
             messages: openAIMessages,
             temperature: 1,
+            model: openAIUpstreamModel,
             onText,
         });
         return;

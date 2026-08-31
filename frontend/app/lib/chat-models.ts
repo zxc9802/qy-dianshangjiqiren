@@ -1,13 +1,27 @@
-export const RESPONSE_MODEL_VALUES = ['gemini', 'gemini-deep-thinking', 'gpt-5.4', 'claude-opus-4.6'] as const;
+export const RESPONSE_MODEL_VALUES = [
+    'gemini',
+    'gemini-deep-thinking',
+    'gpt-5.4',
+    'gpt-5.6-luna',
+    'claude-opus-4.6',
+] as const;
 
 export type ResponseModel = typeof RESPONSE_MODEL_VALUES[number];
 
 export const RESPONSE_MODEL_OPTIONS = [
     { value: 'gemini', label: 'Gemini' },
     { value: 'gemini-deep-thinking', label: 'gemini深度思考' },
-    { value: 'gpt-5.4', label: 'GPT-5.4' },
+    { value: 'gpt-5.4', label: 'GPT-5.5' },
+    { value: 'gpt-5.6-luna', label: 'GPT-5.6' },
     { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
 ] as const satisfies ReadonlyArray<{ value: ResponseModel; label: string }>;
+
+const OPENAI_UPSTREAM_MODEL_BY_RESPONSE_MODEL = {
+    'gpt-5.4': 'gpt-5.5',
+    'gpt-5.6-luna': 'gpt-5.6-luna',
+} as const;
+
+export type OpenAIResponseModel = keyof typeof OPENAI_UPSTREAM_MODEL_BY_RESPONSE_MODEL;
 
 export const DEFAULT_RESPONSE_MODEL: ResponseModel = 'gemini';
 
@@ -29,6 +43,15 @@ export const WEB_SEARCH_MODE_STORAGE_PREFIX = 'chat-web-search-mode:';
 
 export function isResponseModel(value: unknown): value is ResponseModel {
     return typeof value === 'string' && RESPONSE_MODEL_VALUES.includes(value as ResponseModel);
+}
+
+export function isOpenAIResponseModel(value: unknown): value is OpenAIResponseModel {
+    return typeof value === 'string'
+        && Object.prototype.hasOwnProperty.call(OPENAI_UPSTREAM_MODEL_BY_RESPONSE_MODEL, value);
+}
+
+export function getOpenAIUpstreamModel(value: unknown): string | null {
+    return isOpenAIResponseModel(value) ? OPENAI_UPSTREAM_MODEL_BY_RESPONSE_MODEL[value] : null;
 }
 
 export function isWebSearchMode(value: unknown): value is WebSearchMode {
