@@ -73,6 +73,7 @@ type DemoBot = {
 const MAX_ATTACHMENTS = 10;
 const ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.pptx,.jpg,.jpeg,.png,.gif,.webp,.mp4,.mov,.webm,.m4v';
 const EXTERNAL_SSO_PRODUCTS: ExternalSsoProduct[] = ['xhstw', 'xiaoshou', 'sabc', 'baokuangaixie', 'chanpinsheji', 'shuziren'];
+const SHUZIREN_APP_URL = 'https://shuziren.qycm.top/';
 
 const builtin = (routeId: string) => BUILTIN_BOTS.find((bot) => bot.routeId === routeId);
 
@@ -254,18 +255,28 @@ export default function Home2Page() {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);
     const pendingProduct = searchParams.get('externalSso');
+    const pendingState = searchParams.get('state')?.trim() || '';
     if (!pendingProduct || !EXTERNAL_SSO_PRODUCTS.includes(pendingProduct as ExternalSsoProduct) || isLoading) return;
     const product = pendingProduct as ExternalSsoProduct;
+    const hasValidState = /^[A-Za-z0-9_-]{32,128}$/.test(pendingState);
+    if (product === 'shuziren' && !hasValidState) {
+      window.location.assign(SHUZIREN_APP_URL);
+      return;
+    }
     if (!isAuthenticated) {
-      router.replace(`/login?redirect=${encodeURIComponent(`/home2?externalSso=${product}`)}`);
+      const pendingPath = `/home2?externalSso=${product}${hasValidState ? `&state=${encodeURIComponent(pendingState)}` : ''}`;
+      router.replace(`/login?redirect=${encodeURIComponent(pendingPath)}`);
       return;
     }
 
     const currentUrl = new URL(window.location.href);
     currentUrl.searchParams.delete('externalSso');
+    currentUrl.searchParams.delete('state');
     window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
     let cancelled = false;
-    void api.startExternalSso(product)
+    void (product === 'shuziren'
+      ? api.startExternalSso(product, { state: pendingState })
+      : api.startExternalSso(product))
       .then((result) => {
         if (!cancelled) window.location.assign(result.url);
       })
@@ -403,6 +414,10 @@ export default function Home2Page() {
     if (bot.ssoProduct) {
       if (!isAuthenticated) {
         router.push(`/login?redirect=${encodeURIComponent('/home2')}`);
+        return;
+      }
+      if (bot.ssoProduct === 'shuziren') {
+        window.open(SHUZIREN_APP_URL, '_blank', 'noopener,noreferrer');
         return;
       }
       try {

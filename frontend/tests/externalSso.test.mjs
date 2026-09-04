@@ -11,7 +11,7 @@ async function readAppFile(...segments) {
   return readFile(path.join(appRoot, ...segments), 'utf8')
 }
 
-test('external SSO registers only the five fixed HTTPS products', async () => {
+test('external SSO registers the six fixed HTTPS products', async () => {
   const source = await readAppFile('lib', 'external-sso.ts')
 
   for (const [product, callbackUrl, secretEnv] of [
@@ -20,6 +20,7 @@ test('external SSO registers only the five fixed HTTPS products', async () => {
     ['sabc', 'https://sabc.qycm.top/api/sso/callback', 'SSO_SABC_CLIENT_SECRET'],
     ['baokuangaixie', 'https://baokuangaixie.qycm.top/api/sso/callback', 'SSO_BAOKUANGAIXIE_CLIENT_SECRET'],
     ['chanpinsheji', 'https://chanpinsheji.qycm.top/api/sso/callback', 'SSO_CHANPINSHEJI_CLIENT_SECRET'],
+    ['shuziren', 'https://shuziren.qycm.top/api/sso/callback', 'SSO_SHUZIREN_CLIENT_SECRET'],
   ]) {
     assert.match(source, new RegExp(`${product}[\\s\\S]*${callbackUrl.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}[\\s\\S]*${secretEnv}`))
   }
@@ -27,6 +28,8 @@ test('external SSO registers only the five fixed HTTPS products', async () => {
   assert.match(source, /EXTERNAL_SSO_TICKET_TTL_MS\s*=\s*60_000/)
   assert.match(source, /crypto\.timingSafeEqual/)
   assert.match(source, /redirectPath\.startsWith\('\/\/'\)/)
+  assert.match(source, /export function parseExternalSsoState/)
+  assert.match(source, /url\.searchParams\.set\('state', state\)/)
 })
 
 test('external SSO start authenticates users and exchange validates a product secret', async () => {
@@ -40,6 +43,8 @@ test('external SSO start authenticates users and exchange validates a product se
   assert.match(startRoute, /getAuthUser/)
   assert.match(startRoute, /createExternalSsoTicket/)
   assert.match(startRoute, /buildExternalSsoCallbackUrl/)
+  assert.match(startRoute, /parseExternalSsoState/)
+  assert.match(startRoute, /body\.state/)
   assert.match(exchangeRoute, /isValidExternalSsoClientSecret/)
   assert.match(exchangeRoute, /consumeExternalSsoTicket/)
   assert.match(exchangeRoute, /const token = signToken\(result\.user\.id, result\.user\.authTokenVersion\)/)

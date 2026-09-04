@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const homePagePath = path.join(__dirname, '..', 'app', 'home2', 'page.tsx')
 
-test('homepage lists the five protected SSO agent entries', async () => {
+test('homepage lists the six protected SSO agent entries', async () => {
   const source = await readFile(homePagePath, 'utf8')
 
   assert.match(source, /ssoProduct\?:\s*ExternalSsoProduct/)
@@ -17,6 +17,7 @@ test('homepage lists the five protected SSO agent entries', async () => {
     { id: 'sales-conversion-agent', name: '销转智能体', category: '电商工具', product: 'xiaoshou' },
     { id: 'viral-copy-rewrite-agent', name: '爆款改写智能体', category: '电商工具', product: 'baokuangaixie' },
     { id: 'sabc-project-rating-agent', name: 'SABC项目评级智能体', category: '电商工具', product: 'sabc' },
+    { id: 'digital-human-agent', name: '数字人智能体', category: '视频工作台', product: 'shuziren' },
   ]) {
     assert.match(
       source,
@@ -24,8 +25,8 @@ test('homepage lists the five protected SSO agent entries', async () => {
     )
   }
   assert.match(source, /categoryOrder = \['管理工具', '电商工具', '小红书', '绘图机器人', '视频工作台'\]/)
-  assert.match(source, /精选工作台 · 12/)
-  assert.match(source, /当前只展示最常用的 12 个电商工作入口/)
+  assert.match(source, /精选工作台 · 13/)
+  assert.match(source, /当前只展示最常用的 13 个电商工作入口/)
 })
 
 test('homepage routes the product design agent through SSO', async () => {
@@ -47,12 +48,17 @@ test('homepage starts SSO before opening a target in a new tab', async () => {
     source,
     /if \(bot\.ssoProduct\) \{[\s\S]*api\.startExternalSso\(bot\.ssoProduct\)[\s\S]*window\.open\(result\.url, '_blank', 'noopener,noreferrer'\)/,
   )
+  assert.match(
+    source,
+    /bot\.ssoProduct === 'shuziren'[\s\S]*window\.open\(SHUZIREN_APP_URL, '_blank', 'noopener,noreferrer'\)/,
+  )
 })
 
 test('homepage can resume a target SSO launch after a direct target visit', async () => {
   const source = await readFile(homePagePath, 'utf8')
 
   assert.match(source, /searchParams\.get\('externalSso'\)/)
-  assert.match(source, /router\.replace\(`\/login\?redirect=\$\{encodeURIComponent\(`\/home2\?externalSso=\$\{product\}`\)\}`\)/)
-  assert.match(source, /api\.startExternalSso\(product\)[\s\S]*window\.location\.assign\(result\.url\)/)
+  assert.match(source, /searchParams\.get\('state'\)/)
+  assert.match(source, /currentUrl\.searchParams\.delete\('state'\)/)
+  assert.match(source, /api\.startExternalSso\(product, \{ state: pendingState \}\)[\s\S]*window\.location\.assign\(result\.url\)/)
 })

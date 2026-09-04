@@ -1,10 +1,11 @@
 import { NextRequest } from 'next/server';
-import { errorResponse, getAuthUser } from '@/app/lib/auth';
+import { AppError, errorResponse, getAuthUser } from '@/app/lib/auth';
 import {
     buildExternalSsoCallbackUrl,
     createExternalSsoTicket,
     parseExternalSsoProduct,
     parseExternalSsoRedirectPath,
+    parseExternalSsoState,
 } from '@/app/lib/external-sso';
 
 async function readRequestBody(req: NextRequest): Promise<unknown> {
@@ -22,7 +23,11 @@ export async function POST(
     try {
         const product = parseExternalSsoProduct((await params).product);
         const user = await getAuthUser(req);
-        const body = await readRequestBody(req) as { redirectPath?: unknown };
+        const body = await readRequestBody(req) as { redirectPath?: unknown; state?: unknown };
+        const state = parseExternalSsoState(body.state);
+        if (product === 'shuziren' && !state) {
+            throw new AppError('SSO state is required.', 400, 'EXTERNAL_SSO_STATE_REQUIRED');
+        }
         const ticket = await createExternalSsoTicket(
             product,
             user.id,
@@ -30,7 +35,7 @@ export async function POST(
         );
 
         return Response.json({
-            url: buildExternalSsoCallbackUrl(product, ticket.id),
+            url: buildExternalSsoCallbackUrl(product, ticket.id, state),
             expiresAt: ticket.expiresAt,
         });
     } catch (error) {

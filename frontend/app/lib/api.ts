@@ -354,7 +354,7 @@ export const api = {
             redirectOnUnauthorized: false,
         }),
 
-    startExternalSso: (product: ExternalSsoProduct, body?: { redirectPath?: string }) =>
+    startExternalSso: (product: ExternalSsoProduct, body?: { redirectPath?: string; state?: string }) =>
         request<{ url: string; expiresAt: string }>(`/external-sso/${product}/start`, {
             method: 'POST',
             body: JSON.stringify(body || {}),

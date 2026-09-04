@@ -77,13 +77,28 @@ export function parseExternalSsoRedirectPath(value: unknown): string | null {
     return redirectPath;
 }
 
+export function parseExternalSsoState(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const state = value.trim();
+    return /^[A-Za-z0-9_-]{32,128}$/.test(state) ? state : null;
+}
+
 export function getExternalSsoClientSecretHeaderName(): string {
     return EXTERNAL_SSO_CLIENT_SECRET_HEADER;
 }
 
-export function buildExternalSsoCallbackUrl(product: ExternalSsoProduct, ticketId: string): string {
+export function buildExternalSsoCallbackUrl(
+    product: ExternalSsoProduct,
+    ticketId: string,
+    state?: string | null,
+): string {
     const url = new URL(EXTERNAL_SSO_PRODUCTS[product].callbackUrl);
     url.searchParams.set('ticket', ticketId);
+    if (state) {
+        url.searchParams.set('state', state);
+    }
     return url.toString();
 }
 
